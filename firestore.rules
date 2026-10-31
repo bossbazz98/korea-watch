@@ -1,0 +1,25 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ทุกคนอ่านข่าวและสถานะได้ เขียนได้เฉพาะตัวค้นข่าว (ใช้สิทธิ์ผู้ดูแลจึงข้ามกฎนี้)
+    match /meta/feed   { allow read: if true; allow write: if false; }
+    match /meta/status { allow read: if true; allow write: if false; }
+
+    // แต่ละเครื่องบันทึกการตั้งค่าแจ้งเตือนของตัวเองได้ อ่านหรือลบของคนอื่นไม่ได้
+    match /subscribers/{id} {
+      allow read, delete: if false;
+      allow create, update: if
+        request.resource.data.keys().hasOnly(['token', 'cats', 'level', 'enabled', 'testRequested', 'updatedAt', 'lang'])
+        && request.resource.data.token is string
+        && request.resource.data.token.size() > 20
+        && request.resource.data.token.size() < 4096
+        && request.resource.data.cats is list
+        && request.resource.data.cats.size() <= 20
+        && request.resource.data.level in ['critical', 'high']
+        && request.resource.data.enabled is bool
+        && request.resource.data.testRequested is bool;
+    }
+
+    match /{document=**} { allow read, write: if false; }
+  }
+}

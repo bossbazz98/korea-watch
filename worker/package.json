@@ -1,0 +1,15 @@
+{
+  "name": "korea-watch-worker",
+  "private": true,
+  "main": "run.js",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "node run.js",
+    "dry-run": "node tools/dry-run.js",
+    "test": "node tools/selftest.js"
+  },
+  "dependencies": {
+    "fast-xml-parser": "5.11.2",
+    "firebase-admin": "14.5.0"
+  }
+}
