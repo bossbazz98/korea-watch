@@ -1,0 +1,47 @@
+name: Fetch news
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"   # ทุก 5 นาที (GitHub อาจเลื่อนช้าไปบ้างช่วงคนใช้เยอะ)
+  workflow_dispatch:         # กดรันเองได้ที่แท็บ Actions
+
+concurrency:
+  group: fetch-news
+  cancel-in-progress: false
+
+permissions:
+  contents: write            # ใช้แค่ตอนกันรอบอัตโนมัติถูกปิด (ดูขั้นสุดท้าย)
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: worker/package-lock.json
+      - name: Install
+        working-directory: worker
+        run: npm ci --omit=dev --no-audit --no-fund
+      - name: Fetch, translate, notify
+        working-directory: worker
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
+          APP_URL: ${{ vars.APP_URL }}
+        run: node run.js
+      # GitHub ปิดรอบอัตโนมัติถ้าโปรเจกต์ไม่มีการเปลี่ยนแปลง 60 วัน ขั้นนี้สร้างการเปลี่ยนแปลงว่างทุก 50 วันเพื่อกันไว้
+      - name: Keep schedule alive
+        if: github.event_name == 'schedule'
+        run: |
+          last=$(git log -1 --format=%ct)
+          if [ $(( $(date +%s) - last )) -gt $(( 50 * 86400 )) ]; then
+            git config user.name "korea-watch-bot"
+            git config user.email "korea-watch-bot@users.noreply.github.com"
+            git commit --allow-empty -m "keepalive"
+            git push
+          fi
