@@ -2,7 +2,7 @@ name: Fetch news
 
 on:
   schedule:
-    - cron: "*/5 * * * *"   # ทุก 5 นาที (GitHub อาจเลื่อนช้าไปบ้างช่วงคนใช้เยอะ)
+    - cron: "2-59/5 * * * *"   # ทุก 5 นาที ที่นาที 2, 7, 12, ... (เลี่ยงต้นชั่วโมงที่ GitHub คิวแน่น)
   workflow_dispatch:         # กดรันเองได้ที่แท็บ Actions
 
 concurrency:
@@ -15,7 +15,7 @@ permissions:
 jobs:
   fetch:
     runs-on: ubuntu-latest
-    timeout-minutes: 4
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -30,7 +30,9 @@ jobs:
         working-directory: worker
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GROQ_MODEL: ${{ vars.GROQ_MODEL }}
           GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
           APP_URL: ${{ vars.APP_URL }}
         run: node run.js
