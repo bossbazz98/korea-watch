@@ -14,6 +14,18 @@ function newsId(title) {
   return crypto.createHash("sha1").update(norm(title).slice(0, 48)).digest("hex").slice(0, 20);
 }
 
+// ภาพที่แนบมากับ RSS (ถ้ามี): media:content / media:thumbnail / enclosure / <img> ในคำโปรย
+function rssImage(it, rawDesc) {
+  const pick = v => (Array.isArray(v) ? v[0] : v);
+  const cands = [pick(it["media:content"])?.["@url"], pick(it["media:thumbnail"])?.["@url"],
+    /^image\//.test(pick(it.enclosure)?.["@type"] || "") ? pick(it.enclosure)?.["@url"] : null,
+    (String(rawDesc).match(/<img[^>]+src=["']([^"']+)["']/i) || [])[1]];
+  for (const c of cands) {
+    if (typeof c === "string" && /^https?:\/\//.test(c) && !/news\.google\.com|gstatic\.com\/.*favicon/.test(c)) return c.replace(/^http:/, "https:");
+  }
+  return null;
+}
+
 function matchCats(s) {
   const out = [];
   for (const k of CAT_KEYS) if (CATS[k].kw.some(w => s.includes(w))) out.push(k);
@@ -44,7 +56,8 @@ function parseFeed(xml, feed, now) {
     let link = text(it.link) || it.link?.["@href"] || "";
     link = String(link).trim();
     if (!/^https?:\/\//.test(link)) continue;
-    let snippet = stripTags(text(it.description || it.summary));
+    const rawDesc = text(it.description || it.summary);
+    let snippet = stripTags(rawDesc);
     if (norm(snippet).startsWith(norm(title).slice(0, 20))) snippet = ""; // Google News ซ้ำหัวข้อ
     const t = Date.parse(text(it.pubDate || it.published || it.updated));
     const publishedAt = Number.isFinite(t) ? Math.min(t, now) : now;
@@ -54,7 +67,7 @@ function parseFeed(xml, feed, now) {
     if (feed.hint && !cats.includes(feed.hint)) cats.push(feed.hint);
     if (!cats.length) continue;
     out.push({
-      id: newsId(title), titleKo: title, snippet: snippet.slice(0, 600), link,
+      id: newsId(title), titleKo: title, snippet: snippet.slice(0, 600), link, image: rssImage(it, rawDesc),
       source: sourceName || (feed.id === "yonhaptv" ? "연합뉴스TV" : ""),
       publishedAt: new Date(publishedAt).toISOString(), cats
     });
