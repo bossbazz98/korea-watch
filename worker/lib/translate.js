@@ -67,24 +67,28 @@ async function callGemini(model, body, apiKey, fetchImpl, timeoutMs) {
   } finally { clearTimeout(timer); }
 }
 
-async function translate(items, { apiKey, models = DEFAULT_MODELS, fetchImpl = fetch, log = console, waitMs = 2000, timeoutMs = 60000 }) {
+async function translate(items, { apiKey, models = DEFAULT_MODELS, fetchImpl = fetch, log = console, waitMs = 2000, timeoutMs = 60000, deadline = Infinity }) {
   if (!items.length) return { results: [], model: null, partial: false };
   const input = items.map((n, i) => ({ i, headline: n.titleKo, snippet: n.snippet, source: n.source, guessedCategories: n.cats }));
   let last = "", busy = [], quotaOnly = true;
   for (const model of models) {
     for (let attempt = 0; attempt < 2; attempt++) {
+      // ห้ามเกินเวลาที่เหลือของรอบ เพื่อให้บันทึกผลทันก่อน GitHub ตัดงาน
+      const left = deadline - Date.now();
+      if (left < 5000) { busy.push("time budget"); quotaOnly = false; last = last || "time budget reached"; break; }
       const generationConfig = { responseMimeType: "application/json", temperature: 0.2, maxOutputTokens: 8192 };
       const th = thinkingFor(model); if (th) generationConfig.thinkingConfig = th;
       const body = { systemInstruction: { parts: [{ text: SYSTEM }] }, contents: [{ role: "user", parts: [{ text: JSON.stringify(input) }] }], generationConfig };
-      const { status, ok, data } = await callGemini(model, body, apiKey, fetchImpl, timeoutMs);
+      const { status, ok, data } = await callGemini(model, body, apiKey, fetchImpl, Math.min(timeoutMs, left - 2000));
       const msg = data?.error?.message || "";
       // รุ่นนี้ไม่รับการตั้งค่า thinking: ลองรุ่นเดิมอีกครั้งแบบไม่ตั้งค่า
-      if (status === 400 && th && /thinking/i.test(msg)) { noThinkingCfg.add(model); continue; }
+      // รุ่นนี้ปฏิเสธคำขอที่มีการตั้งค่า thinking (ข้อความอาจเขียนต่างกัน): ลองใหม่แบบไม่ตั้งค่า
+      if (status === 400 && th) { noThinkingCfg.add(model); log.warn(`model ${model} rejected thinking config, retrying without`); continue; }
       if (RETRYABLE.has(status) || /overloaded|high demand|unavailable/i.test(msg)) {
         if (status !== 429) quotaOnly = false;
         busy.push(`${model} ${status}${/timeout/.test(msg) ? " timeout" : ""}`); last = msg;
         log.warn(`model ${model} busy (${status}), trying next`);
-        if (waitMs) await sleep(waitMs);
+        if (waitMs && deadline - Date.now() > waitMs + 5000) await sleep(waitMs);
         break;
       }
       if (status === 404 || (status === 400 && /not found|not supported/i.test(msg))) { log.warn(`model ${model} unavailable, trying next`); last = msg; break; }
