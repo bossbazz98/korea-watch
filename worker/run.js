@@ -5,7 +5,9 @@ const { translate, DEFAULT_MODELS } = require("./lib/translate");
 const { CAT_KEYS } = require("./feeds");
 
 const CFG = {
-  MAX_TRANSLATE: 15,   // ข่าวที่ส่งให้ AI แปลต่อรอบ (1 คำขอ)
+  MAX_TRANSLATE: 15,   // ข่าวที่แปลต่อรอบ
+  BATCH: 5,            // ข่าวต่อ 1 คำขอ (ชุดเล็กเร็วกว่าและไม่ถูกตัดกลางทาง)
+  TIME_BUDGET_MS: 150000, // หยุดเริ่มชุดใหม่หลัง 2.5 นาที (งานถูกตัดที่ 4 นาที)
   KEEP_DAYS: 30,       // เก็บข่าวกี่วัน
   FEED_MAX: 250,       // จำนวนข่าวสูงสุดในแอป
   FEED_MAX_BYTES: 900000, // เอกสาร Firestore ต้องไม่เกิน 1 MB
@@ -25,7 +27,7 @@ async function runOnce({ db, messaging, appUrl, geminiKey, models = DEFAULT_MODE
   const stat = { lastRun: iso(now), added: 0, translated: 0, dropped: 0, pushed: 0, feedErrors: [], lastError: null };
   let feedChanged = false, seenChanged = false;
   // ครั้งเดียว: ล้างตัวนับของข่าวที่เคยถูกนับผิดตอน Gemini ยุ่ง (เวอร์ชันก่อน)
-  const FEED_V = 2;
+  const FEED_V = 3;
   if (feedSnap.exists && (feedSnap.data().v || 1) < FEED_V) {
     items.forEach(i => { if (!i.translated && i.attempts) i.attempts = 0 });
     feedChanged = true;
@@ -53,26 +55,37 @@ async function runOnce({ db, messaging, appUrl, geminiKey, models = DEFAULT_MODE
   const queue = items.filter(i => !i.translated && (i.attempts || 0) < CFG.MAX_ATTEMPTS)
     .sort((a, b) => rank(a) - rank(b) || b.publishedAt.localeCompare(a.publishedAt)).slice(0, CFG.MAX_TRANSLATE);
   if (queue.length && geminiKey) {
-    try {
-      const { results, model } = await translate(queue.map(i => ({ titleKo: i.titleKo, snippet: i.snippetKo || "", source: i.source, cats: i.categories })), { apiKey: geminiKey, models, fetchImpl, log, waitMs });
-      stat.model = model;
-      const drop = new Set();
-      queue.forEach((it, k) => {
-        const r = results[k];
-        if (!r) { it.attempts = (it.attempts || 0) + 1; return; }
-        if (!r.relevant) { drop.add(it.id); return; }
-        Object.assign(it, { title: r.title, summary: r.summary, body: r.body, categories: r.categories, level: r.level, translated: true });
-        delete it.snippetKo; delete it.attempts;
-        stat.translated++;
-        if ((r.level === "critical" || r.level === "high") && now - Date.parse(it.publishedAt) < CFG.PUSH_WINDOW_H * 3600e3) toPush.push(it);
-      });
-      if (drop.size) { items = items.filter(i => !drop.has(i.id)); stat.dropped = drop.size; }
-      feedChanged = true;
-    } catch (e) {
-      stat.lastError = String(e.message || e).slice(0, 300);
-      if (!e.transient) { queue.forEach(it => { it.attempts = (it.attempts || 0) + 1 }); feedChanged = true; }
-      log.warn("translate failed", stat.lastError);
+    const t0 = Date.now(), used = new Set(), errs = [];
+    let ok = 0, total = 0;
+    const drop = new Set();
+    for (let b = 0; b < queue.length; b += CFG.BATCH) {
+      if (Date.now() - t0 > CFG.TIME_BUDGET_MS) { errs.push("time budget reached"); break; }
+      const batch = queue.slice(b, b + CFG.BATCH);
+      total++;
+      try {
+        const { results, model, partial } = await translate(batch.map(i => ({ titleKo: i.titleKo, snippet: i.snippetKo || "", source: i.source, cats: i.categories })), { apiKey: geminiKey, models, fetchImpl, log, waitMs });
+        used.add(model + (partial ? " (partial)" : "")); ok++;
+        batch.forEach((it, k) => {
+          const r = results[k];
+          if (!r) { it.attempts = (it.attempts || 0) + 1; return; }
+          if (!r.relevant) { drop.add(it.id); return; }
+          Object.assign(it, { title: r.title, summary: r.summary, body: r.body, categories: r.categories, level: r.level, translated: true });
+          delete it.snippetKo; delete it.attempts;
+          stat.translated++;
+          if ((r.level === "critical" || r.level === "high") && now - Date.parse(it.publishedAt) < CFG.PUSH_WINDOW_H * 3600e3) toPush.push(it);
+        });
+        feedChanged = true;
+      } catch (e) {
+        errs.push(String(e.message || e).slice(0, 200));
+        log.warn("translate batch failed", e.message);
+        if (e.transient) break; // ทุกรุ่นยุ่ง/โควตาเต็ม: ไม่นับ รอรอบหน้า
+        batch.forEach(it => { it.attempts = (it.attempts || 0) + 1 }); feedChanged = true;
+      }
     }
+    if (drop.size) { items = items.filter(i => !drop.has(i.id)); stat.dropped = drop.size; }
+    stat.model = [...used].join(", ") || null;
+    stat.batches = `${ok}/${total}`;
+    if (errs.length) stat.lastError = errs.join(" | ").slice(0, 400);
   } else if (queue.length && !geminiKey) stat.lastError = "GEMINI_API_KEY is missing";
 
   // 3) ตัดข่าวเก่าและคุมขนาดเอกสาร
@@ -93,7 +106,8 @@ async function runOnce({ db, messaging, appUrl, geminiKey, models = DEFAULT_MODE
   stat.pending = items.filter(i => !i.translated && (i.attempts || 0) < CFG.MAX_ATTEMPTS).length;
   stat.total = items.length;
   await statusRef.set(stat);
-  log.log(`added ${stat.added}, translated ${stat.translated}, dropped ${stat.dropped}, pushed ${stat.pushed}, pending ${stat.pending}` + (stat.lastError ? `, error: ${stat.lastError}` : ""));
+  log.log(`added ${stat.added}, translated ${stat.translated}, dropped ${stat.dropped}, pushed ${stat.pushed}, pending ${stat.pending}` +
+    (stat.batches ? `, batches ${stat.batches}` : "") + (stat.model ? `, model ${stat.model}` : "") + (stat.lastError ? `, error: ${stat.lastError}` : ""));
   return stat;
 }
 
