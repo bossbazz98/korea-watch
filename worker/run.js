@@ -3,23 +3,30 @@
 const { collect } = require("./lib/collect");
 const { translate, DEFAULT_MODELS } = require("./lib/translate");
 const { CAT_KEYS } = require("./feeds");
+const { resolveArticle } = require("./lib/images");
 
 const CFG = {
-  MAX_TRANSLATE: 15,   // ข่าวที่แปลต่อรอบ
+  MAX_TRANSLATE: 30,   // ข่าวที่แปลต่อรอบ (ถ้า AI ตอบเร็ว)
   BATCH: 5,            // ข่าวต่อ 1 คำขอ (ชุดเล็กเร็วกว่าและไม่ถูกตัดกลางทาง)
-  TIME_BUDGET_MS: 150000, // หยุดเริ่มชุดใหม่หลัง 2.5 นาที (งานถูกตัดที่ 4 นาที)
+  TIME_BUDGET_MS: 170000, // เวลาแปลสูงสุดต่อรอบ ~3 นาที แล้วบันทึกผลเสมอ (GitHub ตัดงานที่ 8 นาที)
   KEEP_DAYS: 30,       // เก็บข่าวกี่วัน
   FEED_MAX: 250,       // จำนวนข่าวสูงสุดในแอป
   FEED_MAX_BYTES: 900000, // เอกสาร Firestore ต้องไม่เกิน 1 MB
   SEEN_DAYS: 4,        // จำข่าวที่เคยเห็นกี่วัน (กันซ้ำ)
-  MAX_ATTEMPTS: 4,     // แปลไม่สำเร็จกี่ครั้งแล้วเลิกลอง
-  PUSH_WINDOW_H: 6     // แจ้งเตือนเฉพาะข่าวที่ไม่เก่ากว่ากี่ชั่วโมง
+  MAX_ATTEMPTS: 4,     // แปลไม่สำเร็จกี่ครั้งแล้วพักไว้
+  RETRY_AFTER_MS: 3 * 3600e3, // ข่าวที่พักไว้ ลองใหม่ทุก 3 ชั่วโมง (ไม่ทิ้งถาวร)
+  PUSH_WINDOW_H: 6,    // แจ้งเตือนเฉพาะข่าวที่ไม่เก่ากว่ากี่ชั่วโมง
+  IMG_PER_RUN: 10,     // หาภาพข่าวสูงสุดกี่ข่าวต่อรอบ
+  IMG_PARALLEL: 4,     // หาภาพพร้อมกันกี่ข่าว
+  IMG_TIMEOUT_MS: 8000,// รอแต่ละหน้าเว็บไม่เกิน
+  IMG_MAX_TRIES: 3     // หาภาพไม่เจอกี่ครั้งแล้วเลิก
 };
 const DAY = 864e5;
 const iso = ms => new Date(ms).toISOString();
 const rank = n => Math.min(...(n.categories || []).map(c => { const i = CAT_KEYS.indexOf(c); return i < 0 ? 99 : i }), 99);
 
-async function runOnce({ db, messaging, appUrl, geminiKey, models = DEFAULT_MODELS, fetchImpl = fetch, now = Date.now(), log = console, waitMs = 2000 }) {
+async function runOnce({ db, messaging, appUrl, geminiKey, models = DEFAULT_MODELS, fetchImpl = fetch, now = Date.now(), log = console, waitMs = 2000, budgetMs = CFG.TIME_BUDGET_MS, imgBudgetMs = 45000 }) {
+  const runStart = Date.now(), runDeadline = runStart + budgetMs;
   const feedRef = db.doc("meta/feed"), seenRef = db.doc("meta/seen"), statusRef = db.doc("meta/status");
   const [feedSnap, seenSnap] = await Promise.all([feedRef.get(), seenRef.get()]);
   let items = feedSnap.exists ? (feedSnap.data().items || []) : [];
@@ -27,7 +34,7 @@ async function runOnce({ db, messaging, appUrl, geminiKey, models = DEFAULT_MODE
   const stat = { lastRun: iso(now), added: 0, translated: 0, dropped: 0, pushed: 0, feedErrors: [], lastError: null };
   let feedChanged = false, seenChanged = false;
   // ครั้งเดียว: ล้างตัวนับของข่าวที่เคยถูกนับผิดตอน Gemini ยุ่ง (เวอร์ชันก่อน)
-  const FEED_V = 3;
+  const FEED_V = 5;
   if (feedSnap.exists && (feedSnap.data().v || 1) < FEED_V) {
     items.forEach(i => { if (!i.translated && i.attempts) i.attempts = 0 });
     feedChanged = true;
@@ -43,7 +50,7 @@ async function runOnce({ db, messaging, appUrl, geminiKey, models = DEFAULT_MODE
     items.push({
       id: n.id, titleKo: n.titleKo, snippetKo: n.snippet,
       title: { ko: n.titleKo }, summary: { ko: n.snippet }, body: {},
-      categories: n.cats, level: "normal", translated: false, attempts: 0,
+      categories: n.cats, level: "normal", translated: false, attempts: 0, image: n.image || null,
       publishedAt: n.publishedAt, addedAt: iso(now),
       source: n.source, sourceUrl: n.link, links: [{ label: n.source || "ข่าวต้นฉบับ", url: n.link }]
     });
@@ -52,25 +59,26 @@ async function runOnce({ db, messaging, appUrl, geminiKey, models = DEFAULT_MODE
 
   // 2) แปลข่าวที่ค้างอยู่ (ข่าวใหม่และข่าวที่รอบก่อนแปลไม่ทัน)
   const toPush = [];
-  const queue = items.filter(i => !i.translated && (i.attempts || 0) < CFG.MAX_ATTEMPTS)
+  const due = i => !i.translated && ((i.attempts || 0) < CFG.MAX_ATTEMPTS || now - (i.lastTry || 0) > CFG.RETRY_AFTER_MS);
+  const queue = items.filter(due)
     .sort((a, b) => rank(a) - rank(b) || b.publishedAt.localeCompare(a.publishedAt)).slice(0, CFG.MAX_TRANSLATE);
   if (queue.length && geminiKey) {
-    const t0 = Date.now(), used = new Set(), errs = [];
+    const deadline = runDeadline - imgBudgetMs, used = new Set(), errs = [];
     let ok = 0, total = 0;
     const drop = new Set();
     for (let b = 0; b < queue.length; b += CFG.BATCH) {
-      if (Date.now() - t0 > CFG.TIME_BUDGET_MS) { errs.push("time budget reached"); break; }
+      if (deadline - Date.now() < 20000) { errs.push("time budget reached"); break; }
       const batch = queue.slice(b, b + CFG.BATCH);
       total++;
       try {
-        const { results, model, partial } = await translate(batch.map(i => ({ titleKo: i.titleKo, snippet: i.snippetKo || "", source: i.source, cats: i.categories })), { apiKey: geminiKey, models, fetchImpl, log, waitMs });
+        const { results, model, partial } = await translate(batch.map(i => ({ titleKo: i.titleKo, snippet: i.snippetKo || "", source: i.source, cats: i.categories })), { apiKey: geminiKey, models, fetchImpl, log, waitMs, deadline });
         used.add(model + (partial ? " (partial)" : "")); ok++;
         batch.forEach((it, k) => {
           const r = results[k];
-          if (!r) { it.attempts = (it.attempts || 0) + 1; return; }
+          if (!r) { it.attempts = (it.attempts || 0) + 1; it.lastTry = now; return; }
           if (!r.relevant) { drop.add(it.id); return; }
           Object.assign(it, { title: r.title, summary: r.summary, body: r.body, categories: r.categories, level: r.level, translated: true });
-          delete it.snippetKo; delete it.attempts;
+          delete it.snippetKo; delete it.attempts; delete it.lastTry;
           stat.translated++;
           if ((r.level === "critical" || r.level === "high") && now - Date.parse(it.publishedAt) < CFG.PUSH_WINDOW_H * 3600e3) toPush.push(it);
         });
@@ -79,7 +87,7 @@ async function runOnce({ db, messaging, appUrl, geminiKey, models = DEFAULT_MODE
         errs.push(String(e.message || e).slice(0, 200));
         log.warn("translate batch failed", e.message);
         if (e.transient) break; // ทุกรุ่นยุ่ง/โควตาเต็ม: ไม่นับ รอรอบหน้า
-        batch.forEach(it => { it.attempts = (it.attempts || 0) + 1 }); feedChanged = true;
+        batch.forEach(it => { it.attempts = (it.attempts || 0) + 1; it.lastTry = now }); feedChanged = true;
       }
     }
     if (drop.size) { items = items.filter(i => !drop.has(i.id)); stat.dropped = drop.size; }
@@ -87,6 +95,31 @@ async function runOnce({ db, messaging, appUrl, geminiKey, models = DEFAULT_MODE
     stat.batches = `${ok}/${total}`;
     if (errs.length) stat.lastError = errs.join(" | ").slice(0, 400);
   } else if (queue.length && !geminiKey) stat.lastError = "GEMINI_API_KEY is missing";
+
+  // 2.5) หาภาพหลักของข่าวที่แปลแล้ว (ข่าวใหม่ก่อน) และเก็บลิงก์จริงของสำนักข่าว
+  const imgQueue = items.filter(i => i.translated && !i.image && (i.imgTries || 0) < CFG.IMG_MAX_TRIES)
+    .sort((a, b) => b.publishedAt.localeCompare(a.publishedAt)).slice(0, CFG.IMG_PER_RUN);
+  stat.images = 0;
+  if (imgQueue.length) {
+    let next = 0;
+    const worker = async () => {
+      while (next < imgQueue.length) {
+        const it = imgQueue[next++];
+        const left = runDeadline - Date.now();
+        if (left < 6000) return;
+        try {
+          const { url, image } = await resolveArticle(it.sourceUrl, { fetchImpl, timeoutMs: Math.min(CFG.IMG_TIMEOUT_MS, left - 3000) });
+          if (url && url !== it.sourceUrl) { it.sourceUrl = url; if (it.links && it.links[0]) it.links[0].url = url; }
+          if (image) { it.image = image; delete it.imgTries; stat.images++; } else it.imgTries = (it.imgTries || 0) + 1;
+        } catch (e) {
+          it.imgTries = (it.imgTries || 0) + 1;
+          log.warn("image failed", it.id, String(e.message || e).slice(0, 120));
+        }
+        feedChanged = true;
+      }
+    };
+    await Promise.all(Array.from({ length: CFG.IMG_PARALLEL }, worker));
+  }
 
   // 3) ตัดข่าวเก่าและคุมขนาดเอกสาร
   const cut = now - CFG.KEEP_DAYS * DAY;
@@ -103,11 +136,11 @@ async function runOnce({ db, messaging, appUrl, geminiKey, models = DEFAULT_MODE
   if (toPush.length) stat.pushed = await sendNews(db, messaging, toPush, appUrl, log);
   await sendTests(db, messaging, appUrl, log);
 
-  stat.pending = items.filter(i => !i.translated && (i.attempts || 0) < CFG.MAX_ATTEMPTS).length;
+  stat.pending = items.filter(i => !i.translated).length;
   stat.total = items.length;
   await statusRef.set(stat);
   log.log(`added ${stat.added}, translated ${stat.translated}, dropped ${stat.dropped}, pushed ${stat.pushed}, pending ${stat.pending}` +
-    (stat.batches ? `, batches ${stat.batches}` : "") + (stat.model ? `, model ${stat.model}` : "") + (stat.lastError ? `, error: ${stat.lastError}` : ""));
+    (stat.batches ? `, batches ${stat.batches}` : "") + `, images ${stat.images}` + (stat.model ? `, model ${stat.model}` : "") + (stat.lastError ? `, error: ${stat.lastError}` : ""));
   return stat;
 }
 
