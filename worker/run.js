@@ -17,13 +17,19 @@ const DAY = 864e5;
 const iso = ms => new Date(ms).toISOString();
 const rank = n => Math.min(...(n.categories || []).map(c => { const i = CAT_KEYS.indexOf(c); return i < 0 ? 99 : i }), 99);
 
-async function runOnce({ db, messaging, appUrl, geminiKey, models = DEFAULT_MODELS, fetchImpl = fetch, now = Date.now(), log = console }) {
+async function runOnce({ db, messaging, appUrl, geminiKey, models = DEFAULT_MODELS, fetchImpl = fetch, now = Date.now(), log = console, waitMs = 2000 }) {
   const feedRef = db.doc("meta/feed"), seenRef = db.doc("meta/seen"), statusRef = db.doc("meta/status");
   const [feedSnap, seenSnap] = await Promise.all([feedRef.get(), seenRef.get()]);
   let items = feedSnap.exists ? (feedSnap.data().items || []) : [];
   const seen = seenSnap.exists ? { ...(seenSnap.data().ids || {}) } : {};
   const stat = { lastRun: iso(now), added: 0, translated: 0, dropped: 0, pushed: 0, feedErrors: [], lastError: null };
   let feedChanged = false, seenChanged = false;
+  // ครั้งเดียว: ล้างตัวนับของข่าวที่เคยถูกนับผิดตอน Gemini ยุ่ง (เวอร์ชันก่อน)
+  const FEED_V = 2;
+  if (feedSnap.exists && (feedSnap.data().v || 1) < FEED_V) {
+    items.forEach(i => { if (!i.translated && i.attempts) i.attempts = 0 });
+    feedChanged = true;
+  }
 
   // 1) ดึงข่าวใหม่ แล้วใส่ในแอปทันที (ยังไม่แปล) ข่าวจึงขึ้นแม้ AI ติดโควตา
   const { list, errors } = await collect({ fetchImpl, now, log });
@@ -48,7 +54,7 @@ async function runOnce({ db, messaging, appUrl, geminiKey, models = DEFAULT_MODE
     .sort((a, b) => rank(a) - rank(b) || b.publishedAt.localeCompare(a.publishedAt)).slice(0, CFG.MAX_TRANSLATE);
   if (queue.length && geminiKey) {
     try {
-      const { results, model } = await translate(queue.map(i => ({ titleKo: i.titleKo, snippet: i.snippetKo || "", source: i.source, cats: i.categories })), { apiKey: geminiKey, models, fetchImpl, log });
+      const { results, model } = await translate(queue.map(i => ({ titleKo: i.titleKo, snippet: i.snippetKo || "", source: i.source, cats: i.categories })), { apiKey: geminiKey, models, fetchImpl, log, waitMs });
       stat.model = model;
       const drop = new Set();
       queue.forEach((it, k) => {
@@ -64,7 +70,7 @@ async function runOnce({ db, messaging, appUrl, geminiKey, models = DEFAULT_MODE
       feedChanged = true;
     } catch (e) {
       stat.lastError = String(e.message || e).slice(0, 300);
-      if (e.code !== 429) { queue.forEach(it => { it.attempts = (it.attempts || 0) + 1 }); feedChanged = true; }
+      if (!e.transient) { queue.forEach(it => { it.attempts = (it.attempts || 0) + 1 }); feedChanged = true; }
       log.warn("translate failed", stat.lastError);
     }
   } else if (queue.length && !geminiKey) stat.lastError = "GEMINI_API_KEY is missing";
@@ -77,7 +83,7 @@ async function runOnce({ db, messaging, appUrl, geminiKey, models = DEFAULT_MODE
   if (items.length !== before) feedChanged = true;
   for (const [id, t] of Object.entries(seen)) if (now - t > CFG.SEEN_DAYS * DAY) { delete seen[id]; seenChanged = true; }
 
-  if (feedChanged) await feedRef.set({ items, updatedAt: iso(now) });
+  if (feedChanged) await feedRef.set({ items, updatedAt: iso(now), v: FEED_V });
   if (seenChanged) await seenRef.set({ ids: seen });
 
   // 4) ส่งแจ้งเตือน
