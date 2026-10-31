@@ -16,7 +16,10 @@ Reply with ONLY a JSON array:
 // gemini-flash-latest ชี้ไปที่ Flash รุ่นล่าสุดเสมอ (ตอนนี้คือ Gemini 3.8 Flash)
 const DEFAULT_MODELS = ["gemini-flash-latest", "gemini-flash-lite-latest", "gemini-2.5-flash", "gemini-2.5-flash-lite"];
 
-class QuotaError extends Error { constructor(m) { super(m); this.code = 429 } }
+// ข้อผิดพลาดชั่วคราว (โควตาเต็ม / ระบบยุ่ง): ไม่นับเป็นการแปลล้มเหลว รอแปลรอบหน้า
+class QuotaError extends Error { constructor(m, code = 429) { super(m); this.code = code; this.transient = true } }
+const RETRYABLE = new Set([429, 500, 502, 503, 504]);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 function parseJsonArray(s) {
   const clean = String(s).replace(/```json|```/g, "");
@@ -36,7 +39,7 @@ async function callGemini(model, body, apiKey, fetchImpl) {
   return { status: r.status, ok: r.ok, data };
 }
 
-async function translate(items, { apiKey, models = DEFAULT_MODELS, fetchImpl = fetch, log = console }) {
+async function translate(items, { apiKey, models = DEFAULT_MODELS, fetchImpl = fetch, log = console, waitMs = 2000 }) {
   if (!items.length) return { results: [], model: null };
   const input = items.map((n, i) => ({ i, headline: n.titleKo, snippet: n.snippet, source: n.source, guessedCategories: n.cats }));
   const body = {
@@ -44,11 +47,21 @@ async function translate(items, { apiKey, models = DEFAULT_MODELS, fetchImpl = f
     contents: [{ role: "user", parts: [{ text: JSON.stringify(input) }] }],
     generationConfig: { responseMimeType: "application/json", temperature: 0.2, maxOutputTokens: 16384 }
   };
-  let last = "";
+  let last = "", busy = [], quotaOnly = true;
   for (const model of models) {
-    const { status, ok, data } = await callGemini(model, body, apiKey, fetchImpl);
+    let res;
+    try { res = await callGemini(model, body, apiKey, fetchImpl) }
+    catch (e) { res = { status: 503, ok: false, data: { error: { message: "network: " + (e.message || e) } } } }
+    const { status, ok, data } = res;
     const msg = data?.error?.message || "";
-    if (status === 429) throw new QuotaError(`Gemini quota (${model}): ${msg}`.slice(0, 280));
+    // โควตาเต็มหรือระบบยุ่ง: รอสั้นๆ แล้วลองรุ่นถัดไป (โควตาแยกกันตามรุ่น)
+    if (RETRYABLE.has(status) || /overloaded|high demand|unavailable/i.test(msg)) {
+      if (status !== 429) quotaOnly = false;
+      busy.push(`${model} ${status}`); last = msg;
+      log.warn(`model ${model} busy (${status}), trying next`);
+      if (waitMs) await sleep(waitMs);
+      continue;
+    }
     if (status === 404 || (status === 400 && /not found|not supported/i.test(msg))) { log.warn(`model ${model} unavailable, trying next`); last = msg; continue; }
     if (!ok) throw new Error(`Gemini ${status}: ${msg || "request failed"}`.slice(0, 280));
     const cand = data?.candidates?.[0];
@@ -68,6 +81,10 @@ async function translate(items, { apiKey, models = DEFAULT_MODELS, fetchImpl = f
       };
     }
     return { results, model };
+  }
+  if (busy.length) {
+    const what = quotaOnly ? "quota" : "busy";
+    throw new QuotaError(`Gemini ${what} (${busy.join(", ")}): ${last}`.slice(0, 280), quotaOnly ? 429 : 503);
   }
   throw new Error("No Gemini model available: " + last.slice(0, 200));
 }
