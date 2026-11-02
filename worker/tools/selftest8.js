@@ -5,7 +5,9 @@ const http = require("http"), fs = require("fs"), path = require("path");
 const { auditData, pickReportable, syncIssue, runAgent } = require("../agent");
 const log = { log() {}, warn() {} };
 const now = Date.now(), iso = h => new Date(now - h * 3600e3).toISOString();
-const item = (id, x = {}) => ({ id, titleKo: "기사", title: { th: "ข่าวทดสอบ " + id, en: "t" }, summary: { th: "สรุป", en: "s" }, body: { th: ["ก".repeat(500)] }, rich: true, categories: ["war"], level: "normal", translated: true, publishedAt: iso(1), addedAt: iso(1), source: "KBS", sourceUrl: "https://x/" + id, links: [], ...x });
+const TH = { ok1: "ราคาน้ำมันในเกาหลีปรับขึ้นต่อเนื่องสัปดาห์ที่สาม", en: "x", short: "รัฐบาลประกาศขยายเวลาวีซ่าแรงงานทักษะ", broken: "อุณหภูมิกรุงโซลต่ำสุดในรอบสิบปี", noimg: "ธนาคารกลางเกาหลีคงอัตราดอกเบี้ยนโยบาย", mid: "ตำรวจเตือนมิจฉาชีพหลอกลวงทางโทรศัพท์" };
+const KO = { ok1: "유가 3주 연속 상승", short: "숙련 노동자 비자 연장", broken: "서울 10년 만의 최저기온", noimg: "한국은행 기준금리 동결", mid: "경찰 보이스피싱 주의 당부" };
+const item = (id, x = {}) => ({ id, titleKo: KO[id] || "기사 " + id, title: { th: TH[id] || "ข่าวทดสอบหมายเลข " + id + " เรื่องที่แตกต่างกันโดยสิ้นเชิง", en: "t" }, summary: { th: "สรุป", en: "s" }, body: { th: ["ก".repeat(500)] }, rich: true, categories: ["war"], level: "normal", translated: true, publishedAt: iso(1), addedAt: iso(1), source: "KBS", sourceUrl: "https://x/" + id, links: [], ...x });
 
 (async () => {
   // 1) ตรวจข้อมูล + สั่งแก้

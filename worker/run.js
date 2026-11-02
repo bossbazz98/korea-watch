@@ -1,23 +1,36 @@
 // Korea Watch: ตัวค้นข่าว รันบน GitHub Actions ทุก 5 นาที
 // ข่าวทั้งหมดเก็บในเอกสารเดียว (meta/feed) เพื่อให้เปิดแอปแต่ละครั้งใช้การอ่านฐานข้อมูลแค่ 1 ครั้ง (ประหยัดโควตาฟรี)
+// ลำดับงานในแต่ละรอบ:
+//   0) รับงานแก้จาก AI Agent
+//   1) ดึงข่าวใหม่ รวมข่าวซ้ำ (ข่าวเรื่องเดียวกันจากหลายสำนัก = ข่าวเดียว หลายแหล่งข่าว)
+//   2) ข่าวสงครามเกาหลี: ทางด่วน ใช้ AI ทุกตัวแข่งกันแปล บันทึกขึ้นแอปทันที (+ ตรวจฟีดซ้ำทุก ~2 นาทีตลอดรอบ)
+//   3) ข่าวอื่น: แปลเต็มพร้อมกันหลายช่องทาง (ข่าวทั่วไปจะขึ้นแอปเมื่อแปลเสร็จเท่านั้น)
+//   4) เขียนข่าวเก่าที่สั้นใหม่ / หาภาพ / รวมข่าวซ้ำหลังแปล / ตัดข่าวเก่า / ส่งแจ้งเตือน
+// โควตา AI นับรายวัน และกันโควตาฉุกเฉินไว้ 3 ข่าวต่อวัน สำหรับข่าวสงครามเกาหลีและข่าวที่มีคำบ่งชี้เหตุด่วน
 const { collect } = require("./lib/collect");
-const { translate, translateTitles, DEFAULT_MODELS, GROQ_MODELS, hasThai } = require("./lib/translate");
-const { CAT_KEYS } = require("./feeds");
+const { translate, translateTitles, raceTranslate, raceTitles, DEFAULT_MODELS, GROQ_MODELS, GITHUB_MODELS, hasThai } = require("./lib/translate");
+const { CAT_KEYS, FEEDS } = require("./feeds");
 const { resolveArticle } = require("./lib/images");
+const { grams, similarity, SAME_KO, SAME_TH } = require("./lib/similar");
+const { Quota } = require("./lib/quota");
 
 const CFG = {
-  MAX_TRANSLATE: 12,   // ข่าวที่แปลเต็ม (สรุปละเอียด) ต่อรอบ
+  MAX_TRANSLATE: 16,   // ข่าวที่แปลเต็ม (สรุปละเอียด) ต่อรอบ
+  LANES: 3,            // แปลพร้อมกันกี่ช่องทาง (แต่ละช่องทางเริ่มจาก AI คนละตัว)
   TITLE_BATCH: 40,     // หัวข้อต่อ 1 คำขอ (โหมดแปลเฉพาะหัวข้อ)
   TITLES_MAX: 80,      // หัวข้อสูงสุดต่อรอบ
   PRIORITY_MAX: 20,    // อ่านคิวแปลด่วนสูงสุดต่อรอบ
   BATCH: 2,            // ข่าวต่อ 1 คำขอ (ส่งเนื้อข่าวยาวไปด้วย ชุดเล็กไม่ชนเพดานต่อนาที)
   ENRICH_PER_RUN: 4,   // ข่าวเก่าที่เนื้อหาสั้น เขียนใหม่ให้ละเอียดสูงสุดกี่ข่าวต่อรอบ
   SHORT_BODY: 400,     // เนื้อหาไทยสั้นกว่านี้ (ตัวอักษร) ถือว่าสั้นเกินไป
-  TIME_BUDGET_MS: 170000, // เวลาแปลสูงสุดต่อรอบ ~3 นาที แล้วบันทึกผลเสมอ (GitHub ตัดงานที่ 8 นาที)
+  TIME_BUDGET_MS: 280000, // ทำงานได้ ~4.7 นาทีต่อรอบ แล้วบันทึกผลเสมอ (GitHub ตัดงานที่ 9 นาที)
+  WATCH_EVERY_MS: 120000, // ระหว่างรอบ ตรวจฟีดข่าวสงครามเกาหลีซ้ำทุก 2 นาที
+  KORWAR_PER_RUN: 6,   // ข่าวสงครามเกาหลีที่ทำทางด่วนได้ต่อรอบ
   KEEP_DAYS: 30,       // เก็บข่าวกี่วัน
   FEED_MAX: 250,       // จำนวนข่าวสูงสุดในแอป
   FEED_MAX_BYTES: 900000, // เอกสาร Firestore ต้องไม่เกิน 1 MB
   SEEN_DAYS: 4,        // จำข่าวที่เคยเห็นกี่วัน (กันซ้ำ)
+  DEDUPE_H: 48,        // เทียบข่าวซ้ำย้อนหลังกี่ชั่วโมง
   MAX_ATTEMPTS: 4,     // แปลไม่สำเร็จกี่ครั้งแล้วพักไว้
   RETRY_AFTER_MS: 3 * 3600e3, // ข่าวที่พักไว้ ลองใหม่ทุก 3 ชั่วโมง (ไม่ทิ้งถาวร)
   PUSH_WINDOW_H: 6,    // แจ้งเตือนเฉพาะข่าวที่ไม่เก่ากว่ากี่ชั่วโมง
@@ -29,16 +42,40 @@ const CFG = {
 };
 const DAY = 864e5;
 const iso = ms => new Date(ms).toISOString();
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 const rank = n => Math.min(...(n.categories || []).map(c => { const i = CAT_KEYS.indexOf(c); return i < 0 ? 99 : i }), 99);
+const isKorwar = i => (i.categories || []).includes("korwar");
+const bodyLen = i => ((i.body && i.body.th) || []).join("").length;
+// ข่าวที่แสดงในแอป: แปลเสร็จแล้ว หรือเป็นข่าวสงครามเกาหลี (ขึ้นก่อนแล้วค่อยแปล)
+const shown = i => i.translated || isKorwar(i);
 
-async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, models = DEFAULT_MODELS, groqModels = GROQ_MODELS, fetchImpl = fetch, now = Date.now(), log = console, waitMs = 2000, budgetMs = CFG.TIME_BUDGET_MS, imgBudgetMs = 45000 }) {
+async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken, models = DEFAULT_MODELS, groqModels = GROQ_MODELS, githubModels = GITHUB_MODELS, fetchImpl = fetch, now = Date.now(), log = console, waitMs = 2000, budgetMs = CFG.TIME_BUDGET_MS, imgBudgetMs = 45000, watchEveryMs = CFG.WATCH_EVERY_MS }) {
   const runStart = Date.now(), runDeadline = runStart + budgetMs;
-  const feedRef = db.doc("meta/feed"), seenRef = db.doc("meta/seen"), statusRef = db.doc("meta/status");
-  const [feedSnap, seenSnap] = await Promise.all([feedRef.get(), seenRef.get()]);
+  const feedRef = db.doc("meta/feed"), seenRef = db.doc("meta/seen"), statusRef = db.doc("meta/status"), quotaRef = db.doc("meta/quota");
+  const [feedSnap, seenSnap, quotaSnap] = await Promise.all([feedRef.get(), seenRef.get(), quotaRef.get()]);
   let items = feedSnap.exists ? (feedSnap.data().items || []) : [];
   const seen = seenSnap.exists ? { ...(seenSnap.data().ids || {}) } : {};
-  const stat = { lastRun: iso(now), added: 0, translated: 0, dropped: 0, pushed: 0, feedErrors: [], lastError: null };
+  const quota = new Quota(quotaSnap.exists ? quotaSnap.data() : {}, now);
+  const stat = { lastRun: iso(now), added: 0, merged: 0, translated: 0, dropped: 0, pushed: 0, feedErrors: [], lastError: null, korwar: 0, emergency: 0 };
   let feedChanged = false, seenChanged = false;
+
+  const FEED_V = 8;
+  const oldV = feedSnap.exists ? (feedSnap.data().v || 1) : FEED_V;
+  if (oldV < FEED_V) {
+    items.forEach(i => { if (!i.translated && i.attempts) i.attempts = 0 });
+    // ครั้งเดียว (v6): ข่าวที่แปลแล้วแต่หัวข้อภาษาไทยไม่ใช่ภาษาไทย ส่งกลับไปแปลใหม่
+    if (oldV < 6) items.forEach(i => {
+      if (i.translated && !hasThai(i.title && i.title.th)) {
+        Object.assign(i, { translated: false, attempts: 0, snippetKo: i.snippetKo || "" });
+        i.title = { ko: i.titleKo }; // ไม่เก็บหัวข้ออังกฤษเดิม ไม่อย่างนั้นโหมดไทยจะยังแสดงภาษาอังกฤษ
+      }
+    });
+    feedChanged = true;
+  }
+
+  // บันทึกขึ้นแอป (ทีละครั้ง ไม่ซ้อนกัน) ใช้ทั้งตอนจบรอบ และทันทีที่ข่าวสงครามเกาหลีแปลเสร็จ
+  let saving = Promise.resolve();
+  const saveFeed = () => (saving = saving.then(() => feedRef.set({ items, updatedAt: iso(Date.now()), v: FEED_V })).catch(e => log.warn("save failed", e.message)));
 
   // 0) งานที่ AI Agent ตรวจเจอแล้วสั่งแก้ (Agent ไม่เขียนข้อมูลข่าวเอง เพื่อไม่ให้ชนกับรอบนี้)
   stat.fixes = 0;
@@ -54,37 +91,46 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, models = DEF
       await db.doc("meta/fixes").delete();
     }
   } catch (e) { log.warn("fixes read failed", e.message) }
-  // ครั้งเดียว: ล้างตัวนับของข่าวที่เคยถูกนับผิดตอน Gemini ยุ่ง (เวอร์ชันก่อน)
-  const FEED_V = 7;
-  const oldV = feedSnap.exists ? (feedSnap.data().v || 1) : FEED_V;
-  if (oldV < FEED_V) {
-    items.forEach(i => { if (!i.translated && i.attempts) i.attempts = 0 });
-    // ครั้งเดียว (v6): ข่าวที่แปลแล้วแต่หัวข้อภาษาไทยไม่ใช่ภาษาไทย ส่งกลับไปแปลใหม่
-    if (oldV < 6) items.forEach(i => {
-      if (i.translated && !hasThai(i.title && i.title.th)) {
-        Object.assign(i, { translated: false, attempts: 0, snippetKo: i.snippetKo || "" });
-        i.title = { ko: i.titleKo }; // ไม่เก็บหัวข้ออังกฤษเดิม ไม่อย่างนั้นโหมดไทยจะยังแสดงภาษาอังกฤษ
-      }
-    });
-    feedChanged = true;
-  }
 
-  // 1) ดึงข่าวใหม่ แล้วใส่ในแอปทันที (ยังไม่แปล) ข่าวจึงขึ้นแม้ AI ติดโควตา
+  // 1) รับข่าวใหม่เข้าระบบ: ข่าวที่ซ้ำกับข่าวที่มีอยู่ (หัวข้อคล้ายกัน) จะถูกรวมเป็นแหล่งข่าวเพิ่ม ไม่สร้างการ์ดใหม่
+  const addSource = (it, source, link) => {
+    if (!source || !link) return;
+    it.links = it.links || [];
+    if (it.source === source || it.links.some(l => l.label === source || l.url === link)) return;
+    it.links.push({ label: source, url: link });
+  };
+  const ingest = list => {
+    const fresh = [];
+    const have = new Set(items.map(i => i.id));
+    const recentCut = now - CFG.DEDUPE_H * 3600e3;
+    const pool = items.filter(i => (Date.parse(i.publishedAt) || 0) >= recentCut).map(i => ({ i, g: grams(i.titleKo) }));
+    for (const n of list) {
+      if (seen[n.id] || have.has(n.id)) continue;
+      seen[n.id] = now; seenChanged = true;
+      const g = grams(n.titleKo);
+      const win = (n.cats.includes("korwar") ? 6 : 24) * 3600e3;
+      const twin = pool.find(p => Math.abs(Date.parse(p.i.publishedAt) - Date.parse(n.publishedAt)) <= win && similarity(p.g, g) >= SAME_KO);
+      if (twin) { // ข่าวเดิมเรื่องเดียวกัน: เพิ่มเป็นแหล่งข่าว
+        addSource(twin.i, n.source, n.link); (n.alts || []).forEach(a => addSource(twin.i, a.source, a.link));
+        if (!twin.i.image && n.image) twin.i.image = n.image;
+        stat.merged++; feedChanged = true; continue;
+      }
+      const it = {
+        id: n.id, titleKo: n.titleKo, snippetKo: n.snippet,
+        title: { ko: n.titleKo }, summary: { ko: n.snippet }, body: {},
+        categories: n.cats, level: "normal", translated: false, attempts: 0, image: n.image || null, emergency: !!n.emergency,
+        publishedAt: n.publishedAt, addedAt: iso(now),
+        source: n.source, sourceUrl: n.link, links: [{ label: n.source || "ข่าวต้นฉบับ", url: n.link }]
+      };
+      (n.alts || []).forEach(a => addSource(it, a.source, a.link));
+      items.push(it); pool.push({ i: it, g }); fresh.push(it);
+      stat.added++; feedChanged = true;
+    }
+    return fresh;
+  };
   const { list, errors } = await collect({ fetchImpl, now, log });
   stat.feedErrors = errors;
-  const have = new Set(items.map(i => i.id));
-  for (const n of list) {
-    if (seen[n.id] || have.has(n.id)) continue;
-    seen[n.id] = now; seenChanged = true;
-    items.push({
-      id: n.id, titleKo: n.titleKo, snippetKo: n.snippet,
-      title: { ko: n.titleKo }, summary: { ko: n.snippet }, body: {},
-      categories: n.cats, level: "normal", translated: false, attempts: 0, image: n.image || null,
-      publishedAt: n.publishedAt, addedAt: iso(now),
-      source: n.source, sourceUrl: n.link, links: [{ label: n.source || "ข่าวต้นฉบับ", url: n.link }]
-    });
-    stat.added++; feedChanged = true;
-  }
+  ingest(list);
 
   // เปิดหน้าข่าวจริง: ได้ลิงก์จริง ภาพ และเนื้อข่าว (เนื้อข่าวใช้ส่งให้ AI สรุปในรอบนี้เท่านั้น ไม่เก็บลงฐานข้อมูล)
   const article = new Map(), opened = new Set();
@@ -116,16 +162,103 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, models = DEF
     await Promise.all(Array.from({ length: CFG.IMG_PARALLEL }, worker));
   };
 
-  // 2) แปลข่าว ตามลำดับ:
-  //    (ก) ข่าวที่มีคนกดอ่าน (คิวแปลด่วน) แปลเต็มก่อนเสมอ
-  //    (ข) แปลหัวข้อทุกข่าวที่ยังไม่มีหัวข้อภาษาไทย ทีละ 40 ข่าว ให้การ์ดทุกใบเป็นภาษาที่เลือกเร็วที่สุด
-  //    (ค) แปลเนื้อหาเต็ม (สรุปละเอียดจากเนื้อข่าวจริง) ของข่าวที่เหลือ แล้วเขียนข่าวเก่าที่สั้นเกินไปใหม่
   const toPush = [];
-  const hasAI = !!(geminiKey || groqKey);
-  const aiOpts = { apiKey: geminiKey, groqKey, models, groqModels, fetchImpl, log, waitMs, cool: new Map() };
+  const hasAI = !!(geminiKey || groqKey || githubToken);
+  const aiOpts = { apiKey: geminiKey, groqKey, githubToken, models, groqModels, githubModels, fetchImpl, log, waitMs, cool: new Map(), quota };
   const deadline = runDeadline - imgBudgetMs, used = new Set(), errs = [], drop = new Set(), tried = new Set();
   let ok = 0, total = 0, stopAI = false;
   stat.titled = 0; stat.priority = 0; stat.enriched = 0;
+  const timeLeft = () => { if (deadline - Date.now() < 20000) { errs.push("time budget reached"); return false } return true };
+  const inputOf = i => ({ titleKo: i.titleKo, snippet: i.snippetKo || "", article: article.get(i.id) || "", source: i.source, cats: i.categories });
+
+  // นำผลแปลเต็มไปใส่ข่าว (ใช้ทั้งทางด่วนและงานปกติ)
+  const apply = (batch, results, model, partial) => {
+    used.add(model + (partial ? " (partial)" : ""));
+    batch.forEach((it, k) => {
+      const r = results[k], wasNew = !it.translated, hadText = (article.get(it.id) || "").length > 300;
+      if (!r) { if (wasNew) { it.attempts = (it.attempts || 0) + 1; it.lastTry = now } else it.enrichTries = (it.enrichTries || 0) + 1; return; }
+      if (!r.relevant) { if (wasNew) drop.add(it.id); else it.enrichTries = 9; return; } // ข่าวเก่าไม่ลบทิ้งเพราะการเขียนใหม่
+      Object.assign(it, { title: r.title, summary: r.summary, body: r.body, tips: r.tips, categories: r.categories, level: r.level, translated: true });
+      if (hadText) { it.rich = true; delete it.needsEnrich } else if (!wasNew) it.enrichTries = (it.enrichTries || 0) + 1;
+      delete it.snippetKo; delete it.attempts; delete it.lastTry; delete it.titleTries;
+      if (wasNew) { stat.translated++; if ((r.level === "critical" || r.level === "high") && now - Date.parse(it.publishedAt) < CFG.PUSH_WINDOW_H * 3600e3) toPush.push(it) }
+      else stat.enriched++;
+    });
+    feedChanged = true;
+  };
+  // ข่าวฉุกเฉินที่โควตาปกติหมด: ใช้โควตาสำรองได้วันละ 3 ข่าว
+  const withEmergency = async (batch, call) => {
+    try { return await call(false) } catch (e) {
+      if (e.reserved && batch.some(i => i.emergency || isKorwar(i)) && quota.emergencyLeft() > 0) {
+        const res = await call(true);
+        quota.useEmergency(); stat.emergency++;
+        log.warn(`used emergency quota (${quota.emergencyUsed}/3 today)`);
+        return res;
+      }
+      throw e;
+    }
+  };
+  const fullBatch = async (batch, rotate = 0) => {
+    await openPages(batch); // เนื้อข่าวจริงก่อนแปล
+    total++; batch.forEach(i => tried.add(i.id));
+    try {
+      const { results, model, partial } = await withEmergency(batch, emergency => translate(batch.map(inputOf), { ...aiOpts, deadline, rotate, emergency }));
+      ok++; apply(batch, results, model, partial);
+    } catch (e) {
+      errs.push(String(e.message || e).slice(0, 200));
+      log.warn("translate batch failed", e.message);
+      if (e.transient) { if (!e.reserved) stopAI = true; return; } // ทุกรุ่นยุ่ง/โควตาเต็ม: ไม่นับ รอรอบหน้า
+      batch.forEach(it => { if (!it.translated) { it.attempts = (it.attempts || 0) + 1; it.lastTry = now } else it.enrichTries = (it.enrichTries || 0) + 1 }); feedChanged = true;
+    }
+  };
+  // แปลหลายชุดพร้อมกัน แต่ละช่องทางเริ่มจาก AI คนละตัว
+  const parallel = async (batches, fn) => {
+    let next = 0;
+    const lane = async k => { while (next < batches.length && !stopAI && timeLeft()) await fn(batches[next++], k) };
+    await Promise.all(Array.from({ length: Math.min(CFG.LANES, batches.length) }, (_, k) => lane(k)));
+  };
+
+  // 2) ทางด่วนข่าวสงครามเกาหลี: AI ทุกตัวแข่งกันแปล ใครเสร็จก่อนใช้ของคนนั้น แล้วบันทึกขึ้นแอปทันที
+  const korwarDone = new Set();
+  const fastKorwar = async () => {
+    const q = items.filter(i => isKorwar(i) && !i.translated && !korwarDone.has(i.id) && (i.attempts || 0) < CFG.MAX_ATTEMPTS)
+      .sort((a, b) => b.publishedAt.localeCompare(a.publishedAt)).slice(0, Math.max(0, CFG.KORWAR_PER_RUN - korwarDone.size));
+    for (const it of q) {
+      if (!hasAI || runDeadline - Date.now() < 15000) return;
+      korwarDone.add(it.id); tried.add(it.id);
+      try {
+        if (!hasThai(it.title && it.title.th)) { // หัวข้อก่อน (ไม่กี่วินาที) แล้วขึ้นแอปทันที
+          const t = await withEmergency([it], emergency => raceTitles([{ titleKo: it.titleKo }], { ...aiOpts, deadline: runDeadline, emergency }));
+          it.title = { ...it.title, th: t.results[0].th, en: t.results[0].en }; stat.titled++;
+          await saveFeed();
+        }
+        await openPages([it]);
+        const r = await withEmergency([it], emergency => raceTranslate([inputOf(it)], { ...aiOpts, deadline: runDeadline, emergency }));
+        apply([it], r.results, r.model + " (race)", r.partial); stat.korwar++;
+        await saveFeed();
+        if (toPush.includes(it)) { stat.pushed += await sendNews(db, messaging, [it], appUrl, log).catch(() => 0); toPush.splice(toPush.indexOf(it), 1) }
+      } catch (e) {
+        errs.push("korwar: " + String(e.message || e).slice(0, 160));
+        if (!e.transient) { it.attempts = (it.attempts || 0) + 1; it.lastTry = now }
+      }
+    }
+  };
+  await fastKorwar();
+
+  // ระหว่างรอบ: ตรวจฟีดสงครามเกาหลีซ้ำทุก ~2 นาที ถ้ามีข่าวใหม่ทำทางด่วนทันที
+  let watching = true, wake = null;
+  const nap = ms => new Promise(res => { const t = setTimeout(res, ms); wake = () => { clearTimeout(t); res() } }); // ปลุกได้ทันทีตอนจบรอบ
+  const watcher = (async () => {
+    while (watching && runDeadline - Date.now() > watchEveryMs + 30000) {
+      await nap(watchEveryMs);
+      if (!watching) break;
+      try {
+        const r = await collect({ fetchImpl, now: Date.now(), log, only: f => f.korwar });
+        const fresh = ingest(r.list.filter(n => n.cats.includes("korwar")));
+        if (fresh.length) { log.log(`watch: ${fresh.length} new Korean-war item(s)`); await fastKorwar(); await saveFeed(); }
+      } catch (e) { log.warn("watch failed", e.message) }
+    }
+  })();
 
   // อ่านคิวแปลด่วนที่แอปส่งมา (มีแค่ id ของข่าว)
   let prDocs = [];
@@ -135,66 +268,36 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, models = DEF
   } catch (e) { log.warn("priority read failed", e.message) }
   const prIds = new Set(prDocs.map(d => d.id));
 
-  const bodyLen = i => ((i.body && i.body.th) || []).join("").length;
   const due = i => !i.translated && ((i.attempts || 0) < CFG.MAX_ATTEMPTS || now - (i.lastTry || 0) > CFG.RETRY_AFTER_MS);
   const enrichDue = i => i.translated && !i.rich && (i.needsEnrich || bodyLen(i) < CFG.SHORT_BODY) && (i.enrichTries || 0) < 2;
-  const fullBatch = async batch => {
-    await openPages(batch); // เนื้อข่าวจริงก่อนแปล
-    total++; batch.forEach(i => tried.add(i.id));
-    try {
-      const { results, model, partial } = await translate(batch.map(i => ({ titleKo: i.titleKo, snippet: i.snippetKo || "", article: article.get(i.id) || "", source: i.source, cats: i.categories })), { ...aiOpts, deadline });
-      used.add(model + (partial ? " (partial)" : "")); ok++;
-      batch.forEach((it, k) => {
-        const r = results[k], wasNew = !it.translated, hadText = (article.get(it.id) || "").length > 300;
-        if (!r) { if (wasNew) { it.attempts = (it.attempts || 0) + 1; it.lastTry = now } else it.enrichTries = (it.enrichTries || 0) + 1; return; }
-        if (!r.relevant) { if (wasNew) drop.add(it.id); else it.enrichTries = 9; return; } // ข่าวเก่าไม่ลบทิ้งเพราะการเขียนใหม่
-        Object.assign(it, { title: r.title, summary: r.summary, body: r.body, tips: r.tips, categories: r.categories, level: r.level, translated: true });
-        if (hadText) { it.rich = true; delete it.needsEnrich } else if (!wasNew) it.enrichTries = (it.enrichTries || 0) + 1;
-        delete it.snippetKo; delete it.attempts; delete it.lastTry; delete it.titleTries;
-        if (wasNew) { stat.translated++; if ((r.level === "critical" || r.level === "high") && now - Date.parse(it.publishedAt) < CFG.PUSH_WINDOW_H * 3600e3) toPush.push(it) }
-        else stat.enriched++;
-      });
-      feedChanged = true;
-    } catch (e) {
-      errs.push(String(e.message || e).slice(0, 200));
-      log.warn("translate batch failed", e.message);
-      if (e.transient) { stopAI = true; return; } // ทุกรุ่นยุ่ง/โควตาเต็ม: ไม่นับ รอรอบหน้า
-      batch.forEach(it => { if (!it.translated) { it.attempts = (it.attempts || 0) + 1; it.lastTry = now } else it.enrichTries = (it.enrichTries || 0) + 1 }); feedChanged = true;
-    }
-  };
-  const timeLeft = () => { if (deadline - Date.now() < 20000) { errs.push("time budget reached"); return false } return true };
 
   if (hasAI) {
-    // (ก) คิวแปลด่วน
-    const prQueue = items.filter(i => prIds.has(i.id) && !i.translated).slice(0, CFG.BATCH);
+    // (ก) คิวแปลด่วน (ข่าวที่ผู้อ่านเปิดดู)
+    const prQueue = items.filter(i => prIds.has(i.id) && !i.translated && !tried.has(i.id)).slice(0, CFG.BATCH);
     stat.priority = prQueue.length;
     if (prQueue.length && timeLeft()) await fullBatch(prQueue);
 
-    // (ข) แปลหัวข้อก่อน
-    const tq = items.filter(i => !i.translated && !(i.title && hasThai(i.title.th)) && !tried.has(i.id) && (i.titleTries || 0) < CFG.MAX_ATTEMPTS)
-      .sort((a, b) => rank(a) - rank(b) || b.publishedAt.localeCompare(a.publishedAt)).slice(0, CFG.TITLES_MAX);
-    for (let b = 0; b < tq.length && !stopAI && timeLeft(); b += CFG.TITLE_BATCH) {
-      const batch = tq.slice(b, b + CFG.TITLE_BATCH);
+    // (ข) แปลหัวข้อก่อน: เฉพาะข่าวที่แสดงในแอปก่อนแปลเสร็จ (สงครามเกาหลี) ข่าวอื่นจะขึ้นแอปเมื่อแปลเต็มเสร็จแล้ว
+    const tq = items.filter(i => !i.translated && shown(i) && !(i.title && hasThai(i.title.th)) && !tried.has(i.id) && (i.titleTries || 0) < CFG.MAX_ATTEMPTS)
+      .sort((a, b) => b.publishedAt.localeCompare(a.publishedAt)).slice(0, CFG.TITLES_MAX);
+    const tBatches = [];
+    for (let b = 0; b < tq.length; b += CFG.TITLE_BATCH) tBatches.push(tq.slice(b, b + CFG.TITLE_BATCH));
+    await parallel(tBatches, async (batch, k) => {
       try {
-        const { results, model } = await translateTitles(batch.map(i => ({ titleKo: i.titleKo })), { ...aiOpts, deadline });
+        const { results, model } = await withEmergency(batch, emergency => translateTitles(batch.map(i => ({ titleKo: i.titleKo })), { ...aiOpts, deadline, rotate: k, emergency }));
         used.add(model + " (titles)");
-        batch.forEach((it, k) => {
-          const r = results[k];
-          if (!r) { it.titleTries = (it.titleTries || 0) + 1; return; }
-          it.title = { ...(it.title || {}), th: r.th, en: r.en }; stat.titled++;
-        });
+        batch.forEach((it, j) => { const r = results[j]; if (!r) { it.titleTries = (it.titleTries || 0) + 1; return } it.title = { ...(it.title || {}), th: r.th, en: r.en }; stat.titled++ });
         feedChanged = true;
       } catch (e) {
-        errs.push(String(e.message || e).slice(0, 200));
-        log.warn("titles batch failed", e.message);
-        if (e.transient) { stopAI = true; break; }
+        errs.push(String(e.message || e).slice(0, 200)); log.warn("titles batch failed", e.message);
+        if (e.transient) { if (!e.reserved) stopAI = true; return }
         batch.forEach(it => { it.titleTries = (it.titleTries || 0) + 1 }); feedChanged = true;
       }
-    }
+    });
 
-    // (ค) แปลเต็มข่าวที่เหลือ (คิวด่วนก่อน แล้วตามหมวดสำคัญ ข่าวใหม่ก่อน) ตามด้วยเขียนข่าวเก่าที่สั้นใหม่
+    // (ค) แปลเต็มข่าวที่เหลือ พร้อมกันหลายช่องทาง (คิวด่วนก่อน แล้วหมวดสำคัญ ข่าวใหม่ก่อน) ตามด้วยเขียนข่าวเก่าที่สั้นใหม่
     const queue = items.filter(i => due(i) && !tried.has(i.id))
-      .sort((a, b) => (prIds.has(b.id) - prIds.has(a.id)) || rank(a) - rank(b) || b.publishedAt.localeCompare(a.publishedAt))
+      .sort((a, b) => (prIds.has(b.id) - prIds.has(a.id)) || (!!b.emergency - !!a.emergency) || rank(a) - rank(b) || b.publishedAt.localeCompare(a.publishedAt))
       .slice(0, Math.max(0, CFG.MAX_TRANSLATE - tried.size));
     const enrichQ = items.filter(i => enrichDue(i) && !tried.has(i.id))
       .sort((a, b) => (!!b.needsEnrich - !!a.needsEnrich) || rank(a) - rank(b) || b.publishedAt.localeCompare(a.publishedAt))
@@ -203,13 +306,9 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, models = DEF
     if (enrichQ.length && timeLeft()) await openPages(enrichQ);
     const enrichOk = enrichQ.filter(i => (article.get(i.id) || "").length > 300);
     enrichQ.filter(i => !enrichOk.includes(i)).forEach(i => { i.enrichTries = (i.enrichTries || 0) + 1; feedChanged = true });
-    const work = [...queue, ...enrichOk];
-    for (let b = 0; b < work.length && !stopAI && timeLeft(); b += CFG.BATCH) await fullBatch(work.slice(b, b + CFG.BATCH));
-
-    if (drop.size) { items = items.filter(i => !drop.has(i.id)); stat.dropped = drop.size; }
-    stat.model = [...used].join(", ") || null;
-    stat.batches = `${ok}/${total}`;
-    if (errs.length) stat.lastError = errs.join(" | ").slice(0, 400);
+    const work = [...queue, ...enrichOk], batches = [];
+    for (let b = 0; b < work.length; b += CFG.BATCH) batches.push(work.slice(b, b + CFG.BATCH));
+    await parallel(batches, (batch, k) => fullBatch(batch, k));
   } else if (items.some(i => !i.translated)) stat.lastError = "GROQ_API_KEY / GEMINI_API_KEY is missing";
 
   // ล้างคิวแปลด่วน: ข่าวที่แปลแล้ว ข่าวที่ไม่มีในแอปแล้ว หรือค้างนานเกิน 1 วัน
@@ -221,12 +320,36 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, models = DEF
     return (!it || it.translated || stale) ? Promise.resolve(d.ref.delete()).catch(() => { }) : null;
   }));
 
-  // 2.5) หาภาพให้ข่าวที่ยังไม่มีภาพ (ข่าวใหม่ก่อน) ข่าวที่เคยหาไม่เจอ ลองใหม่ทุก 12 ชั่วโมง
+  // หาภาพให้ข่าวที่ยังไม่มีภาพ (ข่าวใหม่ก่อน) ข่าวที่เคยหาไม่เจอ ลองใหม่ทุก 12 ชั่วโมง
   const imgQueue = items.filter(i => !i.image && !opened.has(i.id) && ((i.imgTries || 0) < CFG.IMG_MAX_TRIES || now - (i.imgLastTry || 0) > CFG.IMG_RETRY_MS))
     .sort((a, b) => b.publishedAt.localeCompare(a.publishedAt)).slice(0, CFG.IMG_PER_RUN);
   if (imgQueue.length) await openPages(imgQueue);
 
-  // 3) ตัดข่าวเก่าและคุมขนาดเอกสาร
+  watching = false; if (wake) wake();
+  await watcher;
+
+  if (drop.size) { items = items.filter(i => !drop.has(i.id)); stat.dropped = drop.size; }
+  if (hasAI) {
+    stat.model = [...used].join(", ") || null;
+    stat.batches = `${ok}/${total}`;
+    if (errs.length) stat.lastError = errs.join(" | ").slice(0, 400);
+  }
+
+  // รวมข่าวซ้ำหลังแปล: หัวข้อภาษาไทยคล้ายกันมาก = เรื่องเดียวกัน เก็บข่าวที่มีภาพ/ละเอียดกว่า
+  const tr = items.filter(i => i.translated && now - Date.parse(i.publishedAt) < CFG.DEDUPE_H * 3600e3)
+    .sort((a, b) => (!!b.image - !!a.image) || (!!b.rich - !!a.rich) || bodyLen(b) - bodyLen(a) || a.publishedAt.localeCompare(b.publishedAt));
+  const keep = [], gone = new Set();
+  for (const it of tr) {
+    const g = grams(it.title.th), win = (isKorwar(it) ? 6 : 24) * 3600e3;
+    const twin = keep.find(k => Math.abs(Date.parse(k.it.publishedAt) - Date.parse(it.publishedAt)) <= win && similarity(k.g, g) >= SAME_TH);
+    if (!twin) { keep.push({ it, g }); continue }
+    (it.links || []).forEach(l => addSource(twin.it, l.label, l.url)); addSource(twin.it, it.source, it.sourceUrl);
+    twin.it.categories = [...new Set([...(twin.it.categories || []), ...(it.categories || [])])];
+    gone.add(it.id);
+  }
+  if (gone.size) { items = items.filter(i => !gone.has(i.id)); stat.merged += gone.size; feedChanged = true; }
+
+  // ตัดข่าวเก่าและคุมขนาดเอกสาร
   const cut = now - CFG.KEEP_DAYS * DAY;
   const before = items.length;
   items = items.filter(i => (Date.parse(i.publishedAt) || 0) >= cut).sort((a, b) => b.publishedAt.localeCompare(a.publishedAt)).slice(0, CFG.FEED_MAX);
@@ -234,19 +357,27 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, models = DEF
   if (items.length !== before) feedChanged = true;
   for (const [id, t] of Object.entries(seen)) if (now - t > CFG.SEEN_DAYS * DAY) { delete seen[id]; seenChanged = true; }
 
-  if (feedChanged) await feedRef.set({ items, updatedAt: iso(now), v: FEED_V });
+  if (feedChanged) await saveFeed();
+  await saving;
   if (seenChanged) await seenRef.set({ ids: seen });
+  await quotaRef.set(quota.toJSON());
 
-  // 4) ส่งแจ้งเตือน
-  if (toPush.length) stat.pushed = await sendNews(db, messaging, toPush, appUrl, log);
+  // ส่งแจ้งเตือน (ข่าวที่ยังอยู่ในแอปเท่านั้น)
+  const liveIds = new Set(items.map(i => i.id));
+  const pushList = toPush.filter(i => liveIds.has(i.id));
+  if (pushList.length) stat.pushed += await sendNews(db, messaging, pushList, appUrl, log);
   await sendTests(db, messaging, appUrl, log);
 
   stat.pending = items.filter(i => !i.translated).length;
+  stat.hidden = items.filter(i => !shown(i)).length;
   stat.total = items.length;
+  stat.emergencyLeft = quota.emergencyLeft();
   await statusRef.set(stat);
-  log.log(`added ${stat.added}, translated ${stat.translated}, dropped ${stat.dropped}, pushed ${stat.pushed}, pending ${stat.pending}` +
+  log.log(`added ${stat.added}, merged ${stat.merged}, translated ${stat.translated}, korwar fast ${stat.korwar}, dropped ${stat.dropped}, pushed ${stat.pushed}, pending ${stat.pending}` +
     `, titled ${stat.titled || 0}` + (stat.priority ? `, priority ${stat.priority}` : "") + (stat.enriched ? `, enriched ${stat.enriched}` : "") + (stat.fixes ? `, agent fixes ${stat.fixes}` : "") +
-    (stat.batches ? `, batches ${stat.batches}` : "") + `, images ${stat.images}` + (stat.model ? `, model ${stat.model}` : "") + (stat.lastError ? `, error: ${stat.lastError}` : ""));
+    (stat.emergency ? `, emergency used ${stat.emergency}` : "") + `, emergency left ${stat.emergencyLeft}/3` +
+    (stat.batches ? `, batches ${stat.batches}` : "") + `, images ${stat.images}` +
+    (stat.model ? `, model ${stat.model}` : "") + (stat.lastError ? `, error: ${stat.lastError}` : ""));
   return stat;
 }
 
@@ -311,11 +442,13 @@ async function main() {
   try { sa = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT || "") } catch (e) { throw new Error("FIREBASE_SERVICE_ACCOUNT secret is missing or not valid JSON") }
   initializeApp({ credential: cert(sa) });
   const appUrl = (process.env.APP_URL || `https://${sa.project_id}.web.app`).replace(/\/$/, "");
-  const models = process.env.GEMINI_MODEL ? [process.env.GEMINI_MODEL, ...DEFAULT_MODELS.filter(m => m !== process.env.GEMINI_MODEL)] : DEFAULT_MODELS;
-  const g = process.env.GROQ_MODEL;
-  const groqModels = g ? [g, ...GROQ_MODELS.filter(m => m !== g)] : GROQ_MODELS;
-  await runOnce({ db: getFirestore(), messaging: getMessaging(), appUrl, geminiKey: process.env.GEMINI_API_KEY, groqKey: process.env.GROQ_API_KEY, models, groqModels });
+  const pref = (v, list) => v ? [v, ...list.filter(m => m !== v)] : list;
+  await runOnce({
+    db: getFirestore(), messaging: getMessaging(), appUrl,
+    geminiKey: process.env.GEMINI_API_KEY, groqKey: process.env.GROQ_API_KEY, githubToken: process.env.GITHUB_TOKEN,
+    models: pref(process.env.GEMINI_MODEL, DEFAULT_MODELS), groqModels: pref(process.env.GROQ_MODEL, GROQ_MODELS), githubModels: pref(process.env.GITHUB_MODEL, GITHUB_MODELS)
+  });
 }
 
 if (require.main === module) main().catch(e => { console.error(e); process.exit(1) });
-module.exports = { runOnce, CFG };
+module.exports = { runOnce, CFG, shown };

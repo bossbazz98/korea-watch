@@ -41,7 +41,7 @@ let geminiMode = "ok", geminiCalls = 0, modelsTried = [], batchSizes = [];
 function geminiReply(input) {
   return input.map(x => x.headline.includes("탄도") ? { i: x.i, relevant: true, categories: ["war"], level: "critical", title: { th: "เกาหลีเหนือยิงขีปนาวุธ", en: "NK missile" }, summary: { th: "สรุปขีปนาวุธ", en: "s" }, body: { th: ["ย่อหน้า"], en: ["p"] } }
     : x.headline.includes("독감") ? { i: x.i, relevant: true, categories: ["disease"], level: "high", title: { th: "ประกาศเตือนไข้หวัดใหญ่ระบาด", en: "Flu advisory" }, summary: { th: "สรุปไข้หวัด", en: "s" }, body: { th: ["ย่อหน้า"], en: ["p"] } }
-    : x.headline.includes("배치") ? { i: x.i, relevant: true, categories: ["war"], level: "normal", title: { th: "ข่าวชุด", en: "b" }, summary: { th: "ส", en: "s" }, body_th: ["บ"] }
+    : x.headline.includes("우크라이나") ? { i: x.i, relevant: true, categories: ["war"], level: "normal", title: { th: "ข่าวชุด", en: "b" }, summary: { th: "ส", en: "s" }, body_th: ["บ"] }
     : { i: x.i, relevant: false, categories: [], level: "normal", title: { th: "", en: "" }, summary: {}, body: {} });
 }
 const fetchImpl = async (url, opt) => {
@@ -129,19 +129,20 @@ const log = { log() {}, warn() {} };
   const f = db.data.get("meta/feed"); f.items.push({ ...f.items[0], id: "old1", translated: false, attempts: 3 }); delete f.v;
   geminiMode = "busy"; await runOnce({ ...base, now: now + 950e3 });
   assert.strictEqual(db.data.get("meta/feed").items.find(i => i.id === "old1").attempts, 0, "old counters reset once");
-  assert.strictEqual(db.data.get("meta/feed").v, 7);
+  assert.strictEqual(db.data.get("meta/feed").v, 8);
   geminiMode = "ok";
 
   // แปลเป็นชุดละ 5: 12 ข่าว = 3 ชุด ชุดที่เสีย 1 ชุดไม่ทำให้ชุดอื่นเสีย
-  feeds = { gn_war: rss(Array.from({ length: 12 }, (_, k) => ({ t: (k === 6 ? "BAD " : "") + "북한 배치 뉴스 " + k, s: "KBS", d: d(0.01 * (k + 1)) }))) };
+  const distinct = ["키이우 정전 협상 재개", "가자지구 구호품 반입 확대", "이란 핵시설 사찰 논의", "대만해협 해상 순찰 강화", "흑해 곡물 수송로 위협", "시리아 국경 난민 증가", "홍해 상선 우회 항로", "레바논 남부 주민 대피", "나토 정상회의 공동성명", "러시아 국경 병력 이동", "예멘 항구 봉쇄 장기화", "수단 내전 사상자 집계"];
+  feeds = { gn_war: rss(distinct.map((t, k) => ({ t: (k === 6 ? "BAD " : "") + t + " 우크라이나 전쟁", s: "KBS", d: d(0.01 * (k + 1)) }))) };
   { const f2 = db.data.get("meta/feed"); f2.items = f2.items.filter(i => i.translated); }
   geminiMode = "batchBad"; batchSizes = [];
   s = await runOnce({ ...base, now: now + 960e3 });
-  assert.deepStrictEqual(batchSizes, [12, 2, 2, 2, 2, 2, 2], "titles first (12 in one request), then full batches of 2");
-  assert.strictEqual(s.titled, 12, "all 12 titles translated in one request");
+  assert.deepStrictEqual(batchSizes, [2, 2, 2, 2, 2, 2], "hidden stories: no title-only pass, straight to full batches of 2");
+  assert.strictEqual(s.titled, 0, "titles-first is only for stories shown before translation (Korean war)");
   assert.strictEqual(s.translated, 10, "five good batches translated, the bad batch of 2 skipped");
   assert.strictEqual(s.batches, "5/6");
-  const bad = db.data.get("meta/feed").items.filter(i => i.titleKo.includes("배치") && !i.translated);
+  const bad = db.data.get("meta/feed").items.filter(i => i.titleKo.includes("우크라이나") && !i.translated);
   assert.strictEqual(bad.length, 2); assert.ok(bad.every(i => i.attempts === 1), "only the bad batch counted");
   geminiMode = "ok";
 

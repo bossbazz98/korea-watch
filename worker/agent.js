@@ -7,6 +7,7 @@
 const fs = require("fs");
 const path = require("path");
 const { hasThai } = require("./lib/translate");
+const { grams, similarity, SAME_KO, SAME_TH } = require("./lib/similar");
 
 const OUT = path.join(__dirname, "agent-out");
 const ISSUE_TITLE = "[Korea Watch Agent] รายงานปัญหาระบบ";
@@ -29,7 +30,8 @@ async function auditData({ items, status, now = Date.now(), fetchImpl = fetch, s
   const tr = items.filter(i => i.translated);
   const m = {
     total: items.length, translated: tr.length, untranslated: items.length - tr.length,
-    noThaiTitle: items.filter(i => !hasThai(i.title && i.title.th)).length,
+    noThaiTitle: items.filter(i => i.translated && !hasThai(i.title && i.title.th)).length,
+    hidden: items.filter(i => !i.translated && !(i.categories || []).includes("korwar")).length,
     shortBody: tr.filter(i => !i.rich && bodyLen(i) < 400).length,
     rich: tr.filter(i => i.rich).length,
     recentWithImage: recent.filter(i => i.image).length, recent: recent.length,
@@ -62,12 +64,13 @@ async function auditData({ items, status, now = Date.now(), fetchImpl = fetch, s
   }));
   m.brokenImages = broken; m.imagesChecked = withImg.length;
   if (broken) add("broken-images", "low", `ภาพเสีย ${broken}/${withImg.length} ภาพที่สุ่มตรวจ ส่งหาภาพใหม่แล้ว`, true);
-  // ข่าวซ้ำ (หัวข้อภาษาไทยเหมือนกันใน 2 วัน) เก็บข่าวที่มีภาพ/เนื้อหาละเอียดกว่า
-  const seen = new Map();
-  for (const i of recent.filter(x => x.translated).sort((a, b) => (!!b.image - !!a.image) || (!!b.rich - !!a.rich) || b.publishedAt.localeCompare(a.publishedAt))) {
-    const k = norm(i.title.th).slice(0, 40);
-    if (k.length < 8) continue;
-    if (seen.has(k)) fixes.remove.push(i.id); else seen.set(k, i.id);
+  // ข่าวซ้ำ (หัวข้อคล้ายกันมาก ทั้งไทยและเกาหลี) เก็บข่าวที่มีภาพ/เนื้อหาละเอียดกว่า
+  const kept = [];
+  for (const i of recent.filter(x => x.translated).sort((a, b) => (!!b.image - !!a.image) || (!!b.rich - !!a.rich) || a.publishedAt.localeCompare(b.publishedAt))) {
+    const gt = grams(i.title.th), gk = grams(i.titleKo);
+    const win = ((i.categories || []).includes("korwar") ? 6 : 24) * H;
+    const twin = kept.find(k => Math.abs(Date.parse(k.i.publishedAt) - Date.parse(i.publishedAt)) <= win && (similarity(k.gt, gt) >= SAME_TH || similarity(k.gk, gk) >= SAME_KO));
+    if (twin) fixes.remove.push(i.id); else kept.push({ i, gt, gk });
   }
   if (fixes.remove.length) add("duplicates", "low", `พบข่าวซ้ำ ${fixes.remove.length} ข่าว รวมเป็นข่าวเดียวแล้ว`, true);
   return { metrics: m, issues, fixes };

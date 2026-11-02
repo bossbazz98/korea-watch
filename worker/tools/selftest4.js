@@ -51,7 +51,7 @@ const web = async (url, opt = {}) => {
   const db = { doc: ref, collection: () => ({ where() { return this }, limit() { return this }, async get() { return { empty: true, docs: [] } } }) };
   const now = Date.now();
   const base = { titleKo: "x", title: { th: "ก", en: "a" }, summary: {}, body: {}, categories: ["war"], level: "normal", translated: true, publishedAt: new Date(now - 6e5).toISOString(), source: "연합뉴스" };
-  data.set("meta/feed", { v: 7, items: [
+  data.set("meta/feed", { v: 8, items: [
     { ...base, id: "g", sourceUrl: GLINK, links: [{ label: "연합뉴스", url: GLINK }] },
     { ...base, id: "b", sourceUrl: "https://broken.example/news", links: [] },
     { ...base, id: "n", sourceUrl: "https://nometa.example/news", links: [], imgTries: 2 },

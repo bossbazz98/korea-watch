@@ -26,7 +26,7 @@ const okReply = async (url, opt) => {
 (async () => {
   // 1) Gemini ค้างไม่ตอบ: รอบต้องจบภายในเวลาที่กำหนดและบันทึกผลได้
   let db = fakeDb();
-  await db.doc("meta/feed").set({ v: 7, items: [item("a"), item("b")] });
+  await db.doc("meta/feed").set({ v: 8, items: [item("a"), item("b")] });
   const hang = async (url, opt) => {
     if (!url.startsWith("https://generativelanguage")) return { ok: true, text: async () => "<rss><channel></channel></rss>" };
     return new Promise((_, rej) => opt.signal.addEventListener("abort", () => { const e = new Error("aborted"); e.name = "AbortError"; rej(e) }));
@@ -41,18 +41,18 @@ const okReply = async (url, opt) => {
 
   // 2) ข่าวที่พักไว้ (ล้มเหลวครบ 4 ครั้ง) ลองใหม่หลัง 3 ชั่วโมง
   db = fakeDb();
-  await db.doc("meta/feed").set({ v: 7, items: [item("old", { attempts: 4, lastTry: now - 4 * 3600e3 }), item("recent", { attempts: 4, lastTry: now - 3600e3 })] });
+  await db.doc("meta/feed").set({ v: 8, items: [item("old", { attempts: 4, lastTry: now - 4 * 3600e3 }), item("recent", { attempts: 4, lastTry: now - 3600e3 })] });
   const s2 = await runOnce({ db, messaging: msg, appUrl: "https://x", geminiKey: "k", fetchImpl: okReply, now, log, waitMs: 0 });
   const f = db.data.get("meta/feed").items;
   assert.strictEqual(f.find(i => i.id === "old").translated, true, "paused 4h ago → retried and translated");
   assert.strictEqual(f.find(i => i.id === "recent").translated, false, "paused 1h ago → still waiting");
   assert.strictEqual(s2.pending, 1, "pending counts paused items too");
 
-  // 3) แปลเต็มได้ 12 ข่าวต่อรอบ (6 ชุด ชุดละ 2)
+  // 3) แปลเต็มได้ 16 ข่าวต่อรอบ (8 ชุด ชุดละ 2)
   db = fakeDb();
-  await db.doc("meta/feed").set({ v: 7, items: Array.from({ length: 35 }, (_, k) => item("n" + k)) });
+  await db.doc("meta/feed").set({ v: 8, items: Array.from({ length: 35 }, (_, k) => item("n" + k)) });
   const s3 = await runOnce({ db, messaging: msg, appUrl: "https://x", geminiKey: "k", fetchImpl: okReply, now, log, waitMs: 0 });
-  assert.strictEqual(s3.translated, 12); assert.strictEqual(s3.batches, "6/6"); assert.strictEqual(s3.pending, 23);
+  assert.strictEqual(s3.translated, 16); assert.strictEqual(s3.batches, "8/8"); assert.strictEqual(s3.pending, 19);
 
   // 4) รุ่นปฏิเสธการตั้งค่า thinking ด้วยข้อความอะไรก็ได้ → ลองใหม่แบบไม่ตั้งค่า
   const seen = [];

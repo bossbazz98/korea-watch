@@ -72,7 +72,7 @@ const one = [{ titleKo: "북한 미사일", snippet: "", source: "KBS", cats: ["
   const now = Date.now();
   const item = (id, cat, h) => ({ id, titleKo: "기사 " + id, snippetKo: "", title: { ko: "기사 " + id }, summary: {}, body: {}, categories: [cat], level: "normal", translated: false, attempts: 0, publishedAt: new Date(now - h * 3600e3).toISOString(), source: "KBS", sourceUrl: "https://x", links: [] });
   const its = [item("lawOld", "law", 20), ...Array.from({ length: 49 }, (_, k) => item("w" + k, "war", k * 0.1))];
-  data.set("meta/feed", { v: 7, items: its });
+  data.set("meta/feed", { v: 8, items: its });
   data.set("priority/lawOld", { at: null });
   data.set("priority/gone", { at: null });
   m = mockAI();
@@ -82,10 +82,9 @@ const one = [{ titleKo: "북한 미사일", snippet: "", source: "KBS", cats: ["
   const feed = data.get("meta/feed").items, by = id => feed.find(i => i.id === id);
   assert.strictEqual(by("lawOld").translated, true, "priority item translated even though it is old and low-rank");
   assert.strictEqual(st.priority, 1);
-  assert.strictEqual(ai.filter(c => c.sys.startsWith("Translate Korean")).length, 2, "49 titles → 2 title requests (40 + 9)");
-  assert.strictEqual(st.titled, 49);
-  assert.ok(feed.filter(i => !i.translated).every(i => i.title.th && i.title.th.startsWith("หัวข้อ")), "every remaining card already has a Thai title");
-  assert.strictEqual(st.translated, 12, "1 priority + 11 more full translations (max 12)");
+  assert.strictEqual(ai.filter(c => c.sys.startsWith("Translate Korean")).length, 0, "hidden (non-Korean-war) stories skip the title-only pass");
+  assert.strictEqual(st.translated, 16, "1 priority + 15 more full translations (max 16)");
+  assert.strictEqual(st.hidden, 49 - 15, "untranslated stories stay hidden from the app");
   assert.ok(!data.has("priority/lawOld") && !data.has("priority/gone"), "finished + unknown queue entries removed");
   console.log("ผ่านทุกข้อ (ชุดที่ 6: Groq + คิวแปลด่วน + แปลหัวข้อก่อน)");
 })().catch(e => { console.error("ไม่ผ่าน:", e.stack || e.message); process.exit(1); });
