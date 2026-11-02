@@ -1,0 +1,49 @@
+name: Agent check
+
+on:
+  schedule:
+    - cron: "37 * * * *"   # ทุกชั่วโมง นาทีที่ 37 (ไม่ชนกับรอบค้นข่าว)
+  workflow_dispatch:         # กดรันเองได้ที่แท็บ Actions
+
+concurrency:
+  group: agent
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  issues: write              # เปิด/อัปเดต/ปิดรายงานปัญหา
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: worker/package-lock.json
+      - name: Install
+        working-directory: worker
+        run: npm ci --no-audit --no-fund
+      - name: Install browser
+        working-directory: worker
+        run: npx playwright install --with-deps chromium
+      - name: Check data, app and report
+        working-directory: worker
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          APP_URL: ${{ vars.APP_URL }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: node agent.js
+      - name: Save screenshots
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: agent-screenshots
+          path: worker/agent-out/
+          retention-days: 7
+          if-no-files-found: ignore
