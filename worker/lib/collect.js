@@ -68,7 +68,7 @@ function parseFeed(xml, feed, now) {
     if (!cats.length) continue;
     out.push({
       id: newsId(title), titleKo: title, snippet: snippet.slice(0, 600), link, image: rssImage(it, rawDesc),
-      source: sourceName || (feed.id === "yonhaptv" ? "연합뉴스TV" : ""),
+      source: sourceName || feed.source || "",
       publishedAt: new Date(publishedAt).toISOString(), cats
     });
   }

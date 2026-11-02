@@ -37,19 +37,26 @@ let feeds = {
   gn_disease: rss([{ t: "질병관리청, 독감 유행주의보 발령", s: "YTN", d: d(2) }]),
   gn_thai: rss([{ t: "태국 여행 인기 여행지 순위", s: "MBC", d: d(3) }])
 };
-let geminiMode = "ok", geminiCalls = 0, modelsTried = [];
+let geminiMode = "ok", geminiCalls = 0, modelsTried = [], batchSizes = [];
 function geminiReply(input) {
   return input.map(x => x.headline.includes("탄도") ? { i: x.i, relevant: true, categories: ["war"], level: "critical", title: { th: "เกาหลีเหนือยิงขีปนาวุธ", en: "NK missile" }, summary: { th: "สรุปขีปนาวุธ", en: "s" }, body: { th: ["ย่อหน้า"], en: ["p"] } }
     : x.headline.includes("독감") ? { i: x.i, relevant: true, categories: ["disease"], level: "high", title: { th: "ประกาศเตือนไข้หวัดใหญ่ระบาด", en: "Flu advisory" }, summary: { th: "สรุปไข้หวัด", en: "s" }, body: { th: ["ย่อหน้า"], en: ["p"] } }
+    : x.headline.includes("배치") ? { i: x.i, relevant: true, categories: ["war"], level: "normal", title: { th: "ข่าวชุด", en: "b" }, summary: { th: "ส", en: "s" }, body_th: ["บ"] }
     : { i: x.i, relevant: false, categories: [], level: "normal", title: { th: "", en: "" }, summary: {}, body: {} });
 }
 const fetchImpl = async (url, opt) => {
   if (url.startsWith("https://generativelanguage")) {
     const model = decodeURIComponent(url.split("/models/")[1].split(":")[0]); modelsTried.push(model); geminiCalls++;
     if (geminiMode === "quota") return { ok: false, status: 429, json: async () => ({ error: { message: "Resource exhausted" } }) };
-    if (geminiMode === "fallback" && model === "gemini-flash-latest") return { ok: false, status: 404, json: async () => ({ error: { message: "model not found" } }) };
+    if (geminiMode === "busy") return { ok: false, status: 503, json: async () => ({ error: { message: "This model is currently experiencing high demand." } }) };
+    if (geminiMode === "busyFirst" && model === "gemini-flash-lite-latest") return { ok: false, status: 503, json: async () => ({ error: { message: "high demand" } }) };
+    if (geminiMode === "fallback" && model === "gemini-flash-lite-latest") return { ok: false, status: 404, json: async () => ({ error: { message: "model not found" } }) };
     const body = JSON.parse(opt.body); assert.ok(opt.headers["x-goog-api-key"]);
     const input = JSON.parse(body.contents[0].parts[0].text);
+    batchSizes.push(input.length);
+    if (body.systemInstruction.parts[0].text.startsWith("Translate Korean news headlines")) // โหมดแปลหัวข้อ
+      return { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: JSON.stringify({ items: input.map(x => ({ i: x.i, th: "หัวข้อ " + x.headline, en: "Title " + x.i })) }) }] } }] }) };
+    if (geminiMode === "batchBad" && input.some(x => x.headline.includes("BAD"))) return { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: "sorry" }] } }] }) };
     return { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: JSON.stringify(geminiReply(input)) }] } }] }) };
   }
   const f = FEEDS.find(x => x.url === url);
@@ -63,14 +70,14 @@ const log = { log() {}, warn() {} };
   await db.doc("subscribers/b").set({ token: "tokB", enabled: true, level: "high", cats: ["disease", "war"], testRequested: false });
   await db.doc("subscribers/c").set({ token: "dead", enabled: true, level: "high", cats: ["disease"], testRequested: false });
   await db.doc("subscribers/d").set({ token: "tokD", enabled: false, level: "high", cats: ["war"], testRequested: false });
-  const base = { db, messaging: msg, appUrl: "https://kw.web.app", geminiKey: "k", fetchImpl, log };
+  const base = { db, messaging: msg, appUrl: "https://kw.web.app", geminiKey: "k", fetchImpl, log, waitMs: 0 };
 
   // รอบ 1: แปลได้ ส่งแจ้งเตือนตามหมวดและระดับ
   let s = await runOnce({ ...base, now });
   let feed = db.data.get("meta/feed").items;
   assert.strictEqual(s.added, 3); assert.strictEqual(s.translated, 2); assert.strictEqual(s.dropped, 1);
   assert.strictEqual(feed.length, 2, "irrelevant Thai travel item dropped");
-  assert.ok(feed.every(i => i.translated && i.title.th && !i.snippetKo));
+  assert.ok(feed.every(i => i.translated && i.title.th && !i.snippetKo && i.body.th.length));
   const warMsg = msg.sent.find(m => m.data.id === feed.find(i => i.level === "critical").id);
   assert.deepStrictEqual(warMsg.tokens.sort(), ["tokA", "tokB"], "critical war → A (critical/war) + B (high/war), not disabled D");
   assert.ok(warMsg.webpush.fcmOptions.link.startsWith("https://kw.web.app/?id="));
@@ -94,11 +101,49 @@ const log = { log() {}, warn() {} };
   assert.ok(ramen && ramen.translated === false && ramen.title.ko, "shown untranslated");
   assert.strictEqual(ramen.attempts, 0, "quota does not count as a failed attempt");
   assert.match(db.data.get("meta/status").lastError, /quota/);
+  assert.strictEqual(modelsTried.length >= 4, true, "quota on one model → tries the others first");
+
+  // ระบบยุ่ง (503) ทุกรุ่น: ไม่นับเป็นความล้มเหลว
+  geminiMode = "busy";
+  for (let k = 0; k < 5; k++) await runOnce({ ...base, now: now + 620e3 + k });
+  const ramenBusy = db.data.get("meta/feed").items.find(i => i.id === ramen.id);
+  assert.strictEqual(ramenBusy.attempts, 0, "503 five times still not counted");
+  assert.match(db.data.get("meta/status").lastError, /busy/);
+
+  // รุ่นแรกยุ่ง รุ่นถัดไปแปลได้
+  geminiMode = "busyFirst"; modelsTried = [];
+  feeds.gn_thai = rss([{ t: "태국인 노동자 화재로 부상", s: "MBC", d: d(0.2) }]);
+  await runOnce({ ...base, now: now + 700e3 });
+  assert.deepStrictEqual(modelsTried.slice(0, 2), ["gemini-flash-lite-latest", "gemini-2.5-flash-lite"], "503 → next model");
+  assert.strictEqual(db.data.get("meta/status").lastError, null, "translated with second model");
+  assert.ok(!db.data.get("meta/feed").items.some(i => i.id === ramen.id), "ramen handled by fallback model");
+
+  feeds.gn_war = rss([{ t: "북한, 순항미사일 추가 발사", s: "KBS", d: d(0.1) }]);
   geminiMode = "fallback"; modelsTried = [];
   s = await runOnce({ ...base, now: now + 900e3 });
-  assert.deepStrictEqual(modelsTried.slice(0, 2), ["gemini-flash-latest", "gemini-flash-lite-latest"], "falls back to next model");
-  assert.strictEqual(db.data.get("meta/feed").items.find(i => i.id === ramen.id), undefined, "ramen judged irrelevant by fake AI and removed");
+  assert.deepStrictEqual(modelsTried.slice(0, 2), ["gemini-flash-lite-latest", "gemini-2.5-flash-lite"], "falls back to next model");
+
   assert.strictEqual(db.data.get("meta/status").lastError, null);
+
+  // ล้างตัวนับเก่าครั้งเดียว (feed เวอร์ชันก่อน)
+  const f = db.data.get("meta/feed"); f.items.push({ ...f.items[0], id: "old1", translated: false, attempts: 3 }); delete f.v;
+  geminiMode = "busy"; await runOnce({ ...base, now: now + 950e3 });
+  assert.strictEqual(db.data.get("meta/feed").items.find(i => i.id === "old1").attempts, 0, "old counters reset once");
+  assert.strictEqual(db.data.get("meta/feed").v, 7);
+  geminiMode = "ok";
+
+  // แปลเป็นชุดละ 5: 12 ข่าว = 3 ชุด ชุดที่เสีย 1 ชุดไม่ทำให้ชุดอื่นเสีย
+  feeds = { gn_war: rss(Array.from({ length: 12 }, (_, k) => ({ t: (k === 6 ? "BAD " : "") + "북한 배치 뉴스 " + k, s: "KBS", d: d(0.01 * (k + 1)) }))) };
+  { const f2 = db.data.get("meta/feed"); f2.items = f2.items.filter(i => i.translated); }
+  geminiMode = "batchBad"; batchSizes = [];
+  s = await runOnce({ ...base, now: now + 960e3 });
+  assert.deepStrictEqual(batchSizes, [12, 2, 2, 2, 2, 2, 2], "titles first (12 in one request), then full batches of 2");
+  assert.strictEqual(s.titled, 12, "all 12 titles translated in one request");
+  assert.strictEqual(s.translated, 10, "five good batches translated, the bad batch of 2 skipped");
+  assert.strictEqual(s.batches, "5/6");
+  const bad = db.data.get("meta/feed").items.filter(i => i.titleKo.includes("배치") && !i.translated);
+  assert.strictEqual(bad.length, 2); assert.ok(bad.every(i => i.attempts === 1), "only the bad batch counted");
+  geminiMode = "ok";
 
   // รอบ 4: 31 วันต่อมา ข่าวเก่าถูกลบ
   feeds = {};

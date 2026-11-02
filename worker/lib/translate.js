@@ -3,17 +3,18 @@
 const { CATS, CAT_KEYS } = require("../feeds");
 
 const SYSTEM = `You are the news editor of "Korea Watch", an app for Thai people living in South Korea.
-You receive Korean news items (headline plus a short RSS snippet). For each item return JSON.
+You receive Korean news items: headline, an RSS snippet, and often "article" = text taken from the publisher's page. For each item return JSON.
 Rules:
-- Use ONLY facts in the given headline and snippet. Never add names, numbers, dates, places or causes that are not in the input. If the input is thin, write less.
+- Use ONLY facts found in the headline, snippet and article. Never add names, numbers, dates, places, quotes or causes that are not in the input.
+- Write in your own words. Do not translate the article sentence by sentence; summarise it.
 - "relevant": false if the item does not really fit any listed category or is entertainment, sports, celebrity gossip, ads or opinion columns.
 - "categories": keep only keys from this list that truly apply: ${CAT_KEYS.map(k => `${k} (${CATS[k].th})`).join(", ")}.
 - "level": "critical" only for news that needs immediate attention from people in Korea: military attack, missile launch or air-raid alert affecting Korea, a declared outbreak or new dangerous virus spreading in Korea, panic buying or shortages of daily goods, disasters or emergency alerts, or serious incidents involving Thai nationals. "high" for important developments in those categories or major policy changes affecting foreign workers. Otherwise "normal".
-- "title" and "summary" in natural Thai ("th", written in Thai script) and English ("en"). summary: 1-2 short sentences.
-- "body_th": 1-2 short Thai paragraphs (array of strings) explaining the news for a Thai reader, using only the given facts.
-- Keep it brief. Answer immediately.
+- "title" and "summary" in natural Thai ("th", written in Thai script) and English ("en"). summary: 2-3 sentences with the key facts.
+- "body_th": a detailed Thai summary as an array of paragraphs. When "article" has enough text, write 4-6 paragraphs covering: what happened, where and when, who is involved, key numbers, causes and reactions, impact, and what happens next (only parts the article actually covers). When only a headline/snippet is available, write 1-2 short paragraphs.
+- "tips_th": 0-3 short practical points in Thai for Thai people living in Korea (e.g. what to watch out for, what to do), ONLY when the news clearly affects them (work, visas, health, prices, safety). Otherwise an empty array. Never invent advice that the facts do not support.
 Reply with ONLY this JSON object, one entry per input item, same "i":
-{"items":[{"i":0,"relevant":true,"categories":["war"],"level":"high","title":{"th":"","en":""},"summary":{"th":"","en":""},"body_th":[""]}]}`;
+{"items":[{"i":0,"relevant":true,"categories":["war"],"level":"high","title":{"th":"","en":""},"summary":{"th":"","en":""},"body_th":[""],"tips_th":[]}]}`;
 
 const SYSTEM_TITLES = `Translate Korean news headlines for a news app read by Thai people in South Korea.
 For each input item give a natural, concise Thai headline ("th", in Thai script) and English headline ("en").
@@ -22,7 +23,9 @@ Reply with ONLY this JSON object, one entry per input item, same "i":
 {"items":[{"i":0,"th":"","en":""}]}`;
 
 // ลำดับรุ่น: Groq ก่อน (เร็วมาก) แล้ว Gemini เป็นตัวสำรอง
-const GROQ_MODELS = ["openai/gpt-oss-120b", "llama-3.3-70b-versatile", "openai/gpt-oss-20b"];
+// (llama-3.3-70b-versatile ถูกเลิกให้บริการแล้ว จึงเอาออก)
+const GROQ_MODELS = ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3-32b"];
+const COOLDOWN_MS = 60000; // รุ่นที่เพิ่งโดน 429 พักไว้ 60 วินาที
 const DEFAULT_MODELS = ["gemini-flash-lite-latest", "gemini-2.5-flash-lite", "gemini-flash-latest", "gemini-2.5-flash"];
 const RETRYABLE = new Set([429, 500, 502, 503, 504]);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -94,13 +97,16 @@ async function callOne({ p, m }, system, user, maxTokens, keys, fetchImpl, timeo
 }
 
 // ลองทีละรุ่นจนได้คำตอบ คืน { text, model, finish }
-async function runChain(system, user, maxTokens, { apiKey, groqKey, models = DEFAULT_MODELS, groqModels = GROQ_MODELS, fetchImpl = fetch, log = console, waitMs = 2000, timeoutMs = 60000, deadline = Infinity }) {
+async function runChain(system, user, maxTokens, { apiKey, groqKey, models = DEFAULT_MODELS, groqModels = GROQ_MODELS, fetchImpl = fetch, log = console, waitMs = 2000, timeoutMs = 60000, deadline = Infinity, cool = new Map(), exclude = new Set() }) {
   const chain = [...(groqKey ? groqModels.map(m => ({ p: "groq", m })) : []), ...(apiKey ? models.map(m => ({ p: "gemini", m })) : [])];
   if (!chain.length) throw new Error("no AI key (GROQ_API_KEY / GEMINI_API_KEY)");
   let last = "", busy = [], quotaOnly = true;
   const skip = new Set(); // เจ้าที่คีย์ใช้ไม่ได้ ข้ามทั้งเจ้า
   for (const entry of chain) {
     if (skip.has(entry.p)) continue;
+    const ctag = `${entry.p}:${entry.m}`;
+    if (exclude.has(ctag)) continue;
+    if ((cool.get(ctag) || 0) > Date.now()) { busy.push(`${ctag} cooling`); continue; } // เพิ่งโดน 429 ข้ามไปก่อน
     for (let attempt = 0; attempt < 2; attempt++) {
       const left = deadline - Date.now();
       if (left < 5000) { busy.push("time budget"); quotaOnly = false; last = last || "time budget reached"; break; }
@@ -109,7 +115,7 @@ async function runChain(system, user, maxTokens, { apiKey, groqKey, models = DEF
       // รุ่นนี้ไม่รับพารามิเตอร์เสริม: ลองรุ่นเดิมอีกครั้งแบบพื้นฐาน
       if (r.status === 400 && r.extras && !/api key|api_key|invalid.*key/i.test(r.msg)) { plain.add(tag); log.warn(`${tag} rejected extra params, retrying plain`); continue; }
       if (RETRYABLE.has(r.status) || /overloaded|high demand|unavailable|capacity/i.test(r.msg)) {
-        if (r.status !== 429) quotaOnly = false;
+        if (r.status !== 429) quotaOnly = false; else cool.set(tag, Date.now() + COOLDOWN_MS);
         busy.push(`${tag} ${r.status}${/timeout/.test(r.msg) ? " timeout" : ""}`); last = r.msg;
         log.warn(`${tag} busy (${r.status}), trying next`);
         if (waitMs && deadline - Date.now() > waitMs + 5000) await sleep(waitMs);
@@ -131,31 +137,42 @@ async function runChain(system, user, maxTokens, { apiKey, groqKey, models = DEF
   throw new Error("No AI model available: " + String(last).slice(0, 200));
 }
 
-// แปลเต็ม (หัวข้อ สรุป เนื้อหา หมวด ระดับความด่วน) ทีละชุดเล็ก
+// แปลเต็ม (หัวข้อ สรุปละเอียด เนื้อหา หมวด ระดับความด่วน สิ่งที่ควรรู้) ทีละชุดเล็ก
 async function translate(items, opts) {
   const log = opts.log || console;
   if (!items.length) return { results: [], model: null, partial: false };
-  const input = items.map((n, i) => ({ i, headline: n.titleKo, snippet: n.snippet, source: n.source, guessedCategories: n.cats }));
-  const { text, model, finish } = await runChain(SYSTEM, JSON.stringify(input), 8192, opts);
-  const { items: arr, partial } = parseItems(text);
-  const results = items.map(() => null);
-  for (const o of arr) {
-    const i = Number(o?.i);
-    if (!Number.isInteger(i) || i < 0 || i >= items.length) continue;
-    const cats = (Array.isArray(o.categories) ? o.categories : []).filter(c => CAT_KEYS.includes(c));
-    const title = pair(o.title), summary = pair(o.summary);
-    if (o.relevant !== false && (!hasThai(title.th) || (summary.th && !hasThai(summary.th)))) {
-      log.warn(`${model} item ${i}: Thai field is not Thai, will retry`);
-      continue; // ไม่รับผลนี้ → นับเป็นแปลไม่สำเร็จ แล้วแปลใหม่รอบหน้า
+  const input = items.map((n, i) => ({ i, headline: n.titleKo, snippet: n.snippet, article: n.article || "", source: n.source, guessedCategories: n.cats }));
+  const exclude = new Set(opts.exclude || []);
+  for (let round = 0; ; round++) {
+    const { text, model, finish } = await runChain(SYSTEM, JSON.stringify(input), 8192, { ...opts, exclude });
+    const { items: arr, partial } = parseItems(text);
+    const results = items.map(() => null);
+    let bad = 0, judged = 0;
+    for (const o of arr) {
+      const i = Number(o?.i);
+      if (!Number.isInteger(i) || i < 0 || i >= items.length) continue;
+      const cats = (Array.isArray(o.categories) ? o.categories : []).filter(c => CAT_KEYS.includes(c));
+      const title = pair(o.title), summary = pair(o.summary);
+      // AI ตอบว่างทั้งหัวข้อและหมวด = ไม่เกี่ยวข้อง (ไม่ต้องลองแปลซ้ำ)
+      const relevant = o.relevant !== false && !(!title.th && !cats.length);
+      judged++;
+      if (relevant && (!hasThai(title.th) || (summary.th && !hasThai(summary.th)))) { bad++; continue; }
+      results[i] = {
+        relevant: relevant && cats.length > 0 && !!title.th,
+        categories: cats, level: ["critical", "high"].includes(o.level) ? o.level : "normal",
+        title, summary, body: { th: paras(o.body_th ?? o.body?.th) }, tips: { th: paras(o.tips_th).slice(0, 3) }
+      };
     }
-    results[i] = {
-      relevant: o.relevant !== false && cats.length > 0 && !!title.th,
-      categories: cats, level: ["critical", "high"].includes(o.level) ? o.level : "normal",
-      title, summary, body: { th: paras(o.body_th ?? o.body?.th) }
-    };
+    // ข่าวเกินครึ่งช่องภาษาไทยไม่ใช่ภาษาไทย: ลองชุดเดิมกับรุ่นถัดไปทันที (ไม่ต้องรอรอบหน้า)
+    if (bad && bad * 2 > judged && round < 2) {
+      log.warn(`${model}: ${bad}/${judged} items not in Thai, retrying with next model now`);
+      exclude.add(model);
+      continue;
+    }
+    if (bad) log.warn(`${model}: ${bad} item(s) not in Thai, will retry next run`);
+    if (partial) log.warn(`${model} reply cut off (${finish}); kept ${results.filter(Boolean).length}/${items.length}`);
+    return { results, model, partial };
   }
-  if (partial) log.warn(`${model} reply cut off (${finish}); kept ${results.filter(Boolean).length}/${items.length}`);
-  return { results, model, partial };
 }
 
 // แปลเฉพาะหัวข้อ ทีละมาก (ให้การ์ดทุกใบเป็นภาษาที่เลือกเร็วที่สุด)

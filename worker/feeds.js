@@ -30,8 +30,17 @@ const FEEDS = [
   { id: "gn_oil_fx",    hint: null,        take: 10, url: gn("국제유가 OR 휘발유 가격 OR 원달러 환율") },
   { id: "gn_labor",     hint: null,        take: 10, url: gn("최저임금 OR 외국인 노동자 OR 고용허가제 OR 근로기준법") },
   { id: "gn_president", hint: "president", take: 6,  url: gn("대통령실 OR 대통령 발표") },
-  // ฟีดทั่วไป: เก็บเฉพาะข่าวที่ตรงคำค้นของหมวดใดหมวดหนึ่ง
-  { id: "yonhaptv",     hint: null, keywordOnly: true, take: 40, url: "http://www.yonhapnewstv.co.kr/browse/feed/" }
+  // ฟีดตรงของสำนักข่าว: ได้ลิงก์จริง (ไม่ต้องถอดลิงก์ Google) และหลายเจ้าแนบภาพ/คำโปรยมาในฟีด
+  // เก็บเฉพาะข่าวที่ตรงคำค้นของหมวดใดหมวดหนึ่ง ฟีดไหนใช้ไม่ได้จะถูกข้ามอัตโนมัติ
+  // หมายเหตุ: ฟีด RSS ของสำนักข่าวอนุญาตให้ใช้ส่วนบุคคล/ไม่แสวงหากำไร
+  { id: "yonhaptv",     source: "연합뉴스TV", keywordOnly: true, take: 40, url: "http://www.yonhapnewstv.co.kr/browse/feed/" },
+  { id: "yna",          source: "연합뉴스",   keywordOnly: true, take: 50, url: "https://www.yna.co.kr/rss/news.xml" },
+  { id: "sbs_flash",    source: "SBS",        keywordOnly: true, take: 40, url: "https://news.sbs.co.kr/news/newsflashRssFeed.do?plink=RSSREADER" },
+  { id: "sbs_society",  source: "SBS",        keywordOnly: true, take: 30, url: "https://news.sbs.co.kr/news/SectionRssFeed.do?sectionId=03&plink=RSSREADER" },
+  { id: "sbs_world",    source: "SBS",        keywordOnly: true, take: 30, url: "https://news.sbs.co.kr/news/SectionRssFeed.do?sectionId=07&plink=RSSREADER" },
+  { id: "sbs_economy",  source: "SBS",        keywordOnly: true, take: 30, url: "https://news.sbs.co.kr/news/SectionRssFeed.do?sectionId=02&plink=RSSREADER" },
+  { id: "donga",        source: "동아일보",   keywordOnly: true, take: 40, url: "https://rss.donga.com/total.xml" },
+  { id: "khan_society", source: "경향신문",   keywordOnly: true, take: 30, url: "https://www.khan.co.kr/rss/rssdata/society.xml" }
 ];
 
 module.exports = { CATS, FEEDS, CAT_KEYS: Object.keys(CATS) };

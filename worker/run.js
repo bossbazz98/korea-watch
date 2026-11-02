@@ -6,11 +6,13 @@ const { CAT_KEYS } = require("./feeds");
 const { resolveArticle } = require("./lib/images");
 
 const CFG = {
-  MAX_TRANSLATE: 30,   // ข่าวที่แปลเต็มต่อรอบ (ถ้า AI ตอบเร็ว)
+  MAX_TRANSLATE: 12,   // ข่าวที่แปลเต็ม (สรุปละเอียด) ต่อรอบ
   TITLE_BATCH: 40,     // หัวข้อต่อ 1 คำขอ (โหมดแปลเฉพาะหัวข้อ)
   TITLES_MAX: 80,      // หัวข้อสูงสุดต่อรอบ
   PRIORITY_MAX: 20,    // อ่านคิวแปลด่วนสูงสุดต่อรอบ
-  BATCH: 5,            // ข่าวต่อ 1 คำขอ (ชุดเล็กเร็วกว่าและไม่ถูกตัดกลางทาง)
+  BATCH: 2,            // ข่าวต่อ 1 คำขอ (ส่งเนื้อข่าวยาวไปด้วย ชุดเล็กไม่ชนเพดานต่อนาที)
+  ENRICH_PER_RUN: 4,   // ข่าวเก่าที่เนื้อหาสั้น เขียนใหม่ให้ละเอียดสูงสุดกี่ข่าวต่อรอบ
+  SHORT_BODY: 400,     // เนื้อหาไทยสั้นกว่านี้ (ตัวอักษร) ถือว่าสั้นเกินไป
   TIME_BUDGET_MS: 170000, // เวลาแปลสูงสุดต่อรอบ ~3 นาที แล้วบันทึกผลเสมอ (GitHub ตัดงานที่ 8 นาที)
   KEEP_DAYS: 30,       // เก็บข่าวกี่วัน
   FEED_MAX: 250,       // จำนวนข่าวสูงสุดในแอป
@@ -19,10 +21,11 @@ const CFG = {
   MAX_ATTEMPTS: 4,     // แปลไม่สำเร็จกี่ครั้งแล้วพักไว้
   RETRY_AFTER_MS: 3 * 3600e3, // ข่าวที่พักไว้ ลองใหม่ทุก 3 ชั่วโมง (ไม่ทิ้งถาวร)
   PUSH_WINDOW_H: 6,    // แจ้งเตือนเฉพาะข่าวที่ไม่เก่ากว่ากี่ชั่วโมง
-  IMG_PER_RUN: 10,     // หาภาพข่าวสูงสุดกี่ข่าวต่อรอบ
-  IMG_PARALLEL: 4,     // หาภาพพร้อมกันกี่ข่าว
+  IMG_PER_RUN: 20,     // หาภาพข่าวสูงสุดกี่ข่าวต่อรอบ
+  IMG_PARALLEL: 6,     // เปิดหน้าข่าวพร้อมกันกี่ข่าว
+  IMG_RETRY_MS: 12 * 3600e3, // ข่าวที่หาภาพไม่เจอ ลองใหม่ทุก 12 ชั่วโมง
   IMG_TIMEOUT_MS: 8000,// รอแต่ละหน้าเว็บไม่เกิน
-  IMG_MAX_TRIES: 3     // หาภาพไม่เจอกี่ครั้งแล้วเลิก
+  IMG_MAX_TRIES: 3     // หาภาพไม่เจอกี่ครั้งแล้วพักไว้ (แล้วลองใหม่ตาม IMG_RETRY_MS)
 };
 const DAY = 864e5;
 const iso = ms => new Date(ms).toISOString();
@@ -36,8 +39,23 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, models = DEF
   const seen = seenSnap.exists ? { ...(seenSnap.data().ids || {}) } : {};
   const stat = { lastRun: iso(now), added: 0, translated: 0, dropped: 0, pushed: 0, feedErrors: [], lastError: null };
   let feedChanged = false, seenChanged = false;
+
+  // 0) งานที่ AI Agent ตรวจเจอแล้วสั่งแก้ (Agent ไม่เขียนข้อมูลข่าวเอง เพื่อไม่ให้ชนกับรอบนี้)
+  stat.fixes = 0;
+  try {
+    const fx = await db.doc("meta/fixes").get();
+    if (fx.exists) {
+      const f = fx.data() || {}, by = new Map(items.map(i => [i.id, i]));
+      for (const id of f.requeueImage || []) { const it = by.get(id); if (it) { delete it.image; it.imgTries = 0; delete it.imgLastTry; stat.fixes++ } }
+      for (const id of f.retranslate || []) { const it = by.get(id); if (it) { Object.assign(it, { translated: false, attempts: 0, title: { ko: it.titleKo } }); delete it.rich; stat.fixes++ } }
+      for (const id of f.enrich || []) { const it = by.get(id); if (it && it.translated) { it.needsEnrich = true; it.enrichTries = 0; stat.fixes++ } }
+      for (const id of f.remove || []) { if (by.has(id)) { items = items.filter(i => i.id !== id); stat.fixes++ } }
+      if (stat.fixes) feedChanged = true;
+      await db.doc("meta/fixes").delete();
+    }
+  } catch (e) { log.warn("fixes read failed", e.message) }
   // ครั้งเดียว: ล้างตัวนับของข่าวที่เคยถูกนับผิดตอน Gemini ยุ่ง (เวอร์ชันก่อน)
-  const FEED_V = 6;
+  const FEED_V = 7;
   const oldV = feedSnap.exists ? (feedSnap.data().v || 1) : FEED_V;
   if (oldV < FEED_V) {
     items.forEach(i => { if (!i.translated && i.attempts) i.attempts = 0 });
@@ -68,16 +86,46 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, models = DEF
     stat.added++; feedChanged = true;
   }
 
+  // เปิดหน้าข่าวจริง: ได้ลิงก์จริง ภาพ และเนื้อข่าว (เนื้อข่าวใช้ส่งให้ AI สรุปในรอบนี้เท่านั้น ไม่เก็บลงฐานข้อมูล)
+  const article = new Map(), opened = new Set();
+  stat.images = 0;
+  const openPages = async list => {
+    let next = 0;
+    const worker = async () => {
+      while (next < list.length) {
+        const it = list[next++];
+        if (opened.has(it.id)) continue;
+        opened.add(it.id);
+        const left = runDeadline - Date.now();
+        if (left < 8000) return;
+        try {
+          const a = await resolveArticle(it.sourceUrl, { fetchImpl, timeoutMs: Math.min(CFG.IMG_TIMEOUT_MS, left - 4000) });
+          if (a.url && a.url !== it.sourceUrl) { it.sourceUrl = a.url; if (it.links && it.links[0]) it.links[0].url = a.url; }
+          if (a.text) article.set(it.id, a.text);
+          if (!it.image) {
+            if (a.image) { it.image = a.image; delete it.imgTries; delete it.imgLastTry; stat.images++ }
+            else { it.imgTries = (it.imgTries || 0) + 1; it.imgLastTry = now }
+          }
+        } catch (e) {
+          if (!it.image) { it.imgTries = (it.imgTries || 0) + 1; it.imgLastTry = now }
+          log.warn("page failed", it.id, String(e.message || e).slice(0, 120));
+        }
+        feedChanged = true;
+      }
+    };
+    await Promise.all(Array.from({ length: CFG.IMG_PARALLEL }, worker));
+  };
+
   // 2) แปลข่าว ตามลำดับ:
   //    (ก) ข่าวที่มีคนกดอ่าน (คิวแปลด่วน) แปลเต็มก่อนเสมอ
   //    (ข) แปลหัวข้อทุกข่าวที่ยังไม่มีหัวข้อภาษาไทย ทีละ 40 ข่าว ให้การ์ดทุกใบเป็นภาษาที่เลือกเร็วที่สุด
-  //    (ค) แปลเนื้อหาเต็มของข่าวที่เหลือ ทีละ 5 ข่าว
+  //    (ค) แปลเนื้อหาเต็ม (สรุปละเอียดจากเนื้อข่าวจริง) ของข่าวที่เหลือ แล้วเขียนข่าวเก่าที่สั้นเกินไปใหม่
   const toPush = [];
   const hasAI = !!(geminiKey || groqKey);
-  const aiOpts = { apiKey: geminiKey, groqKey, models, groqModels, fetchImpl, log, waitMs };
+  const aiOpts = { apiKey: geminiKey, groqKey, models, groqModels, fetchImpl, log, waitMs, cool: new Map() };
   const deadline = runDeadline - imgBudgetMs, used = new Set(), errs = [], drop = new Set(), tried = new Set();
   let ok = 0, total = 0, stopAI = false;
-  stat.titled = 0; stat.priority = 0;
+  stat.titled = 0; stat.priority = 0; stat.enriched = 0;
 
   // อ่านคิวแปลด่วนที่แอปส่งมา (มีแค่ id ของข่าว)
   let prDocs = [];
@@ -87,27 +135,31 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, models = DEF
   } catch (e) { log.warn("priority read failed", e.message) }
   const prIds = new Set(prDocs.map(d => d.id));
 
+  const bodyLen = i => ((i.body && i.body.th) || []).join("").length;
   const due = i => !i.translated && ((i.attempts || 0) < CFG.MAX_ATTEMPTS || now - (i.lastTry || 0) > CFG.RETRY_AFTER_MS);
+  const enrichDue = i => i.translated && !i.rich && (i.needsEnrich || bodyLen(i) < CFG.SHORT_BODY) && (i.enrichTries || 0) < 2;
   const fullBatch = async batch => {
+    await openPages(batch); // เนื้อข่าวจริงก่อนแปล
     total++; batch.forEach(i => tried.add(i.id));
     try {
-      const { results, model, partial } = await translate(batch.map(i => ({ titleKo: i.titleKo, snippet: i.snippetKo || "", source: i.source, cats: i.categories })), { ...aiOpts, deadline });
+      const { results, model, partial } = await translate(batch.map(i => ({ titleKo: i.titleKo, snippet: i.snippetKo || "", article: article.get(i.id) || "", source: i.source, cats: i.categories })), { ...aiOpts, deadline });
       used.add(model + (partial ? " (partial)" : "")); ok++;
       batch.forEach((it, k) => {
-        const r = results[k];
-        if (!r) { it.attempts = (it.attempts || 0) + 1; it.lastTry = now; return; }
-        if (!r.relevant) { drop.add(it.id); return; }
-        Object.assign(it, { title: r.title, summary: r.summary, body: r.body, categories: r.categories, level: r.level, translated: true });
+        const r = results[k], wasNew = !it.translated, hadText = (article.get(it.id) || "").length > 300;
+        if (!r) { if (wasNew) { it.attempts = (it.attempts || 0) + 1; it.lastTry = now } else it.enrichTries = (it.enrichTries || 0) + 1; return; }
+        if (!r.relevant) { if (wasNew) drop.add(it.id); else it.enrichTries = 9; return; } // ข่าวเก่าไม่ลบทิ้งเพราะการเขียนใหม่
+        Object.assign(it, { title: r.title, summary: r.summary, body: r.body, tips: r.tips, categories: r.categories, level: r.level, translated: true });
+        if (hadText) { it.rich = true; delete it.needsEnrich } else if (!wasNew) it.enrichTries = (it.enrichTries || 0) + 1;
         delete it.snippetKo; delete it.attempts; delete it.lastTry; delete it.titleTries;
-        stat.translated++;
-        if ((r.level === "critical" || r.level === "high") && now - Date.parse(it.publishedAt) < CFG.PUSH_WINDOW_H * 3600e3) toPush.push(it);
+        if (wasNew) { stat.translated++; if ((r.level === "critical" || r.level === "high") && now - Date.parse(it.publishedAt) < CFG.PUSH_WINDOW_H * 3600e3) toPush.push(it) }
+        else stat.enriched++;
       });
       feedChanged = true;
     } catch (e) {
       errs.push(String(e.message || e).slice(0, 200));
       log.warn("translate batch failed", e.message);
       if (e.transient) { stopAI = true; return; } // ทุกรุ่นยุ่ง/โควตาเต็ม: ไม่นับ รอรอบหน้า
-      batch.forEach(it => { it.attempts = (it.attempts || 0) + 1; it.lastTry = now }); feedChanged = true;
+      batch.forEach(it => { if (!it.translated) { it.attempts = (it.attempts || 0) + 1; it.lastTry = now } else it.enrichTries = (it.enrichTries || 0) + 1 }); feedChanged = true;
     }
   };
   const timeLeft = () => { if (deadline - Date.now() < 20000) { errs.push("time budget reached"); return false } return true };
@@ -140,11 +192,19 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, models = DEF
       }
     }
 
-    // (ค) แปลเนื้อหาเต็มที่เหลือ (ข่าวในคิวด่วนก่อน แล้วตามหมวดสำคัญ ข่าวใหม่ก่อน)
+    // (ค) แปลเต็มข่าวที่เหลือ (คิวด่วนก่อน แล้วตามหมวดสำคัญ ข่าวใหม่ก่อน) ตามด้วยเขียนข่าวเก่าที่สั้นใหม่
     const queue = items.filter(i => due(i) && !tried.has(i.id))
       .sort((a, b) => (prIds.has(b.id) - prIds.has(a.id)) || rank(a) - rank(b) || b.publishedAt.localeCompare(a.publishedAt))
       .slice(0, Math.max(0, CFG.MAX_TRANSLATE - tried.size));
-    for (let b = 0; b < queue.length && !stopAI && timeLeft(); b += CFG.BATCH) await fullBatch(queue.slice(b, b + CFG.BATCH));
+    const enrichQ = items.filter(i => enrichDue(i) && !tried.has(i.id))
+      .sort((a, b) => (!!b.needsEnrich - !!a.needsEnrich) || rank(a) - rank(b) || b.publishedAt.localeCompare(a.publishedAt))
+      .slice(0, CFG.ENRICH_PER_RUN);
+    // เขียนข่าวเก่าใหม่เฉพาะเมื่อได้เนื้อข่าวจริงมา ไม่อย่างนั้นได้ผลเท่าเดิมและเปลืองโควตา
+    if (enrichQ.length && timeLeft()) await openPages(enrichQ);
+    const enrichOk = enrichQ.filter(i => (article.get(i.id) || "").length > 300);
+    enrichQ.filter(i => !enrichOk.includes(i)).forEach(i => { i.enrichTries = (i.enrichTries || 0) + 1; feedChanged = true });
+    const work = [...queue, ...enrichOk];
+    for (let b = 0; b < work.length && !stopAI && timeLeft(); b += CFG.BATCH) await fullBatch(work.slice(b, b + CFG.BATCH));
 
     if (drop.size) { items = items.filter(i => !drop.has(i.id)); stat.dropped = drop.size; }
     stat.model = [...used].join(", ") || null;
@@ -161,30 +221,10 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, models = DEF
     return (!it || it.translated || stale) ? Promise.resolve(d.ref.delete()).catch(() => { }) : null;
   }));
 
-  // 2.5) หาภาพหลักของข่าวที่แปลแล้ว (ข่าวใหม่ก่อน) และเก็บลิงก์จริงของสำนักข่าว
-  const imgQueue = items.filter(i => i.translated && !i.image && (i.imgTries || 0) < CFG.IMG_MAX_TRIES)
+  // 2.5) หาภาพให้ข่าวที่ยังไม่มีภาพ (ข่าวใหม่ก่อน) ข่าวที่เคยหาไม่เจอ ลองใหม่ทุก 12 ชั่วโมง
+  const imgQueue = items.filter(i => !i.image && !opened.has(i.id) && ((i.imgTries || 0) < CFG.IMG_MAX_TRIES || now - (i.imgLastTry || 0) > CFG.IMG_RETRY_MS))
     .sort((a, b) => b.publishedAt.localeCompare(a.publishedAt)).slice(0, CFG.IMG_PER_RUN);
-  stat.images = 0;
-  if (imgQueue.length) {
-    let next = 0;
-    const worker = async () => {
-      while (next < imgQueue.length) {
-        const it = imgQueue[next++];
-        const left = runDeadline - Date.now();
-        if (left < 6000) return;
-        try {
-          const { url, image } = await resolveArticle(it.sourceUrl, { fetchImpl, timeoutMs: Math.min(CFG.IMG_TIMEOUT_MS, left - 3000) });
-          if (url && url !== it.sourceUrl) { it.sourceUrl = url; if (it.links && it.links[0]) it.links[0].url = url; }
-          if (image) { it.image = image; delete it.imgTries; stat.images++; } else it.imgTries = (it.imgTries || 0) + 1;
-        } catch (e) {
-          it.imgTries = (it.imgTries || 0) + 1;
-          log.warn("image failed", it.id, String(e.message || e).slice(0, 120));
-        }
-        feedChanged = true;
-      }
-    };
-    await Promise.all(Array.from({ length: CFG.IMG_PARALLEL }, worker));
-  }
+  if (imgQueue.length) await openPages(imgQueue);
 
   // 3) ตัดข่าวเก่าและคุมขนาดเอกสาร
   const cut = now - CFG.KEEP_DAYS * DAY;
@@ -205,7 +245,7 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, models = DEF
   stat.total = items.length;
   await statusRef.set(stat);
   log.log(`added ${stat.added}, translated ${stat.translated}, dropped ${stat.dropped}, pushed ${stat.pushed}, pending ${stat.pending}` +
-    `, titled ${stat.titled || 0}` + (stat.priority ? `, priority ${stat.priority}` : "") +
+    `, titled ${stat.titled || 0}` + (stat.priority ? `, priority ${stat.priority}` : "") + (stat.enriched ? `, enriched ${stat.enriched}` : "") + (stat.fixes ? `, agent fixes ${stat.fixes}` : "") +
     (stat.batches ? `, batches ${stat.batches}` : "") + `, images ${stat.images}` + (stat.model ? `, model ${stat.model}` : "") + (stat.lastError ? `, error: ${stat.lastError}` : ""));
   return stat;
 }
