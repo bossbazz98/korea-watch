@@ -71,7 +71,7 @@ async function post(url, headers, body, fetchImpl, timeoutMs, signal) {
   try {
     const r = await fetchImpl(url, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body), signal: ctl.signal });
     const data = await r.json().catch(() => ({}));
-    return { status: r.status, ok: r.ok, data };
+    return { status: r.status, ok: r.ok, data, headers: r.headers && typeof r.headers.get === "function" ? r.headers : null };
   } catch (e) {
     if (signal && signal.aborted) return { status: 499, ok: false, data: { error: { message: "aborted (another AI answered first)" } } };
     return { status: 503, ok: false, data: { error: { message: e.name === "AbortError" ? "timeout" : "network: " + (e.message || e) } } };
@@ -92,17 +92,36 @@ async function callOne({ p, m }, system, user, maxTokens, keys, fetchImpl, timeo
     }
     const url = p === "groq" ? "https://api.groq.com/openai/v1/chat/completions" : "https://models.github.ai/inference/chat/completions";
     const headers = p === "groq" ? { authorization: "Bearer " + keys.groq } : { authorization: "Bearer " + keys.github, accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28" };
-    const { status, ok, data } = await post(url, headers, body, fetchImpl, timeoutMs, signal);
+    const { status, ok, data, headers: h } = await post(url, headers, body, fetchImpl, timeoutMs, signal);
     const ch = data?.choices?.[0];
-    return { status, ok, msg: data?.error?.message || data?.message || "", text: ch?.message?.content || "", finish: ch?.finish_reason, extras, tokens: data?.usage?.total_tokens || 0 };
+    return { status, ok, msg: data?.error?.message || data?.message || "", text: ch?.message?.content || "", finish: ch?.finish_reason, extras, tokens: data?.usage?.total_tokens || 0, h };
   }
   const generationConfig = { responseMimeType: "application/json", temperature: 0.2, maxOutputTokens: maxTokens };
   if (extras) generationConfig.thinkingConfig = /2\.5/.test(m) ? { thinkingBudget: 0 } : { thinkingLevel: "low" };
   const body = { systemInstruction: { parts: [{ text: system }] }, contents: [{ role: "user", parts: [{ text: user }] }], generationConfig };
-  const { status, ok, data } = await post(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(m)}:generateContent`, { "x-goog-api-key": keys.gemini }, body, fetchImpl, timeoutMs, signal);
+  const { status, ok, data, headers: h } = await post(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(m)}:generateContent`, { "x-goog-api-key": keys.gemini }, body, fetchImpl, timeoutMs, signal);
   const cand = data?.candidates?.[0];
   const text = (cand?.content?.parts || []).filter(x => !x.thought).map(x => x.text || "").join("");
-  return { status, ok, msg: data?.error?.message || (ok && !text ? `empty reply (${cand?.finishReason || data?.promptFeedback?.blockReason || "unknown"})` : ""), text, finish: cand?.finishReason, extras, tokens: data?.usageMetadata?.totalTokenCount || 0 };
+  return { status, ok, msg: data?.error?.message || (ok && !text ? `empty reply (${cand?.finishReason || data?.promptFeedback?.blockReason || "unknown"})` : ""), text, finish: cand?.finishReason, extras, tokens: data?.usageMetadata?.totalTokenCount || 0, h };
+}
+
+// อ่านเวลาที่ผู้ให้บริการบอกให้รอ (retry-after หรือ x-ratelimit-reset-tokens เช่น "7.66s" / "1m2s")
+function waitHint(h) {
+  if (!h) return null;
+  const ra = parseFloat(h.get("retry-after"));
+  if (Number.isFinite(ra)) return ra * 1000;
+  const reset = h.get("x-ratelimit-reset-tokens") || h.get("x-ratelimit-reset-requests");
+  if (!reset) return null;
+  const m = String(reset).match(/(?:(\d+)m)?(?:([\d.]+)s)?/); if (!m) return null;
+  const ms = ((+m[1] || 0) * 60 + (+m[2] || 0)) * 1000;
+  return ms > 0 ? ms : null;
+}
+// จำโควตาต่อนาทีที่เหลือของแต่ละรุ่น (จาก header) เพื่อไม่ส่งคำขอที่รู้อยู่แล้วว่าจะโดน 429
+function noteTpm(tpm, tag, h) {
+  if (!tpm || !h) return;
+  const rem = parseInt(h.get("x-ratelimit-remaining-tokens"), 10);
+  if (!Number.isFinite(rem)) return;
+  tpm.set(tag, { rem, until: Date.now() + (waitHint({ get: k => k === "retry-after" ? null : h.get(k) }) || 60000) });
 }
 
 // รายชื่อช่องทาง AI ทั้งหมดที่มีคีย์ (เรียงตามลำดับที่ต้องการ)
@@ -112,7 +131,8 @@ function chainOf({ apiKey, groqKey, githubToken, models = DEFAULT_MODELS, groqMo
 
 // ลองทีละรุ่นจนได้คำตอบ คืน { text, model, finish }
 async function runChain(system, user, maxTokens, opts) {
-  const { apiKey, groqKey, githubToken, fetchImpl = fetch, log = console, waitMs = 2000, timeoutMs = 60000, deadline = Infinity, cool = new Map(), exclude = new Set(), only = null, rotate = 0, quota = null, emergency = false, signal = null } = opts;
+  const { apiKey, groqKey, githubToken, fetchImpl = fetch, log = console, waitMs = 2000, timeoutMs = 60000, deadline = Infinity, cool = new Map(), exclude = new Set(), only = null, rotate = 0, quota = null, emergency = false, signal = null, tpm = null } = opts;
+  const need = Math.ceil((system.length + user.length) / 2.5) + Math.min(maxTokens, 2000); // token ที่คำขอนี้น่าจะใช้
   let chain = chainOf(opts);
   if (!chain.length) throw new Error("no AI key (GROQ_API_KEY / GEMINI_API_KEY)");
   if (only) chain = chain.filter(e => only.has(`${e.p}:${e.m}`));
@@ -126,7 +146,10 @@ async function runChain(system, user, maxTokens, opts) {
     const ctag = `${entry.p}:${entry.m}`;
     if (exclude.has(ctag)) continue;
     if ((cool.get(ctag) || 0) > Date.now()) { busy.push(`${ctag} cooling`); reservedOnly = false; continue; } // เพิ่งโดน 429 ข้ามไปก่อน
+    if (quota && quota.isDisabled && quota.isDisabled(entry.p)) { skip.add(entry.p); last = last || `${entry.p} disabled: ${quota.disabled[entry.p].reason}`; continue; } // ช่องทางที่เสีย พักไว้
     if (quota && !quota.canUse(ctag, emergency)) { busy.push(`${ctag} reserved`); continue; } // เหลือแต่โควตาฉุกเฉิน
+    const tp = tpm && tpm.get(ctag);
+    if (tp && tp.until > Date.now() && tp.rem < need) { busy.push(`${ctag} minute-quota`); reservedOnly = false; continue; } // โควตาต่อนาทีไม่พอ ข้ามไปตัวอื่นก่อน
     reservedOnly = false;
     for (let attempt = 0; attempt < 2; attempt++) {
       const left = deadline - Date.now();
@@ -134,6 +157,7 @@ async function runChain(system, user, maxTokens, opts) {
       if (signal && signal.aborted) throw new QuotaError("cancelled (another AI answered first)", 499);
       const r = await callOne(entry, system, user, maxTokens, { groq: groqKey, gemini: apiKey, github: githubToken }, fetchImpl, Math.min(timeoutMs, left - 2000), signal);
       const tag = `${entry.p}:${entry.m}`;
+      noteTpm(tpm, tag, r.h);
       // ตัวที่ถูกยกเลิกกลางคันก็ใช้โควตาไปแล้ว: ประมาณจากขนาดคำขอ (ภาษาเกาหลี/ไทย ~2.5 ตัวอักษรต่อ token)
       if (quota && r.status === 499) quota.record(tag, Math.ceil((system.length + user.length) / 2.5));
       else if (quota && !/timeout|network/.test(r.msg)) quota.record(tag, r.tokens);
@@ -141,7 +165,8 @@ async function runChain(system, user, maxTokens, opts) {
       // รุ่นนี้ไม่รับพารามิเตอร์เสริม: ลองรุ่นเดิมอีกครั้งแบบพื้นฐาน
       if (r.status === 400 && r.extras && !/api key|api_key|invalid.*key/i.test(r.msg)) { plain.add(tag); log.warn(`${tag} rejected extra params, retrying plain`); continue; }
       if (RETRYABLE.has(r.status) || /overloaded|high demand|unavailable|capacity/i.test(r.msg)) {
-        if (r.status !== 429) quotaOnly = false; else cool.set(tag, Date.now() + COOLDOWN_MS);
+        // พักตามเวลาที่ผู้ให้บริการบอก (3–60 วินาที) ถ้าไม่บอก พัก 60 วินาที
+        if (r.status !== 429) quotaOnly = false; else cool.set(tag, Date.now() + Math.min(COOLDOWN_MS, Math.max(3000, waitHint(r.h) || COOLDOWN_MS)));
         if (quota && r.status === 429 && /per day|per-day|daily|TPD|RPD|requests per day|tokens per day|UserByModelByDay/i.test(r.msg)) quota.exhaust(tag); // โควตารายวันหมด
         busy.push(`${tag} ${r.status}${/timeout/.test(r.msg) ? " timeout" : ""}`); last = r.msg;
         log.warn(`${tag} busy (${r.status}), trying next`);
@@ -151,7 +176,10 @@ async function runChain(system, user, maxTokens, opts) {
       if (r.status === 404 || (r.status === 400 && /not found|not supported|decommission|does not exist/i.test(r.msg))) { log.warn(`${tag} unavailable, trying next`); last = r.msg; break; }
       if (r.status === 401 || r.status === 403 || (r.status === 400 && /api key|api_key/i.test(r.msg))) {
         // คีย์ของเจ้านี้ใช้ไม่ได้: ข้ามไปเจ้าอื่น (ถ้าไม่มีเจ้าอื่นจะแจ้งเป็นข้อผิดพลาด)
-        skip.add(entry.p); last = `${entry.p} key rejected (${r.status}): ${r.msg}`; log.warn(last); break;
+        const hint = entry.p === "github" ? " (no permission: upload fetch-news.yml with 'models: read')" : " (check the API key in GitHub Secrets)";
+        skip.add(entry.p); last = `${entry.p} key rejected (${r.status})${hint}: ${r.msg}`; log.warn(last);
+        if (quota && quota.disable) quota.disable(entry.p, `${r.status}${hint}`); // พัก 6 ชั่วโมง ไม่ลองซ้ำทุกรอบ
+        break;
       }
       if (!r.ok || !r.text) throw new Error(`${tag} ${r.status}: ${r.msg || "request failed"}`.slice(0, 280));
       return { text: r.text, model: tag, finish: r.finish };
@@ -224,8 +252,8 @@ async function translateTitles(items, opts) {
 // (เดิมส่งทุกตัว 9 ช่องทาง เปลืองโควตาเกินไป จนโควตาหมดและแปลไม่ได้ทั้งวัน)
 const RACE_PREF = ["groq:openai/gpt-oss-20b", "github:openai/gpt-4o-mini", "gemini:gemini-flash-lite-latest"];
 function raceLanes(opts, max) {
-  const all = chainOf(opts).map(e => `${e.p}:${e.m}`).filter(t => !opts.quota || opts.quota.canUse(t, opts.emergency));
-  const cooled = t => (opts.cool && (opts.cool.get(t) || 0) > Date.now());
+  const all = chainOf(opts).map(e => `${e.p}:${e.m}`).filter(t => !opts.quota || (opts.quota.canUse(t, opts.emergency) && !(opts.quota.isDisabled && opts.quota.isDisabled(t.split(":")[0]))));
+  const cooled = t => (opts.cool && (opts.cool.get(t) || 0) > Date.now()) || (opts.tpm && opts.tpm.get(t) && opts.tpm.get(t).until > Date.now() && opts.tpm.get(t).rem < 3000);
   const picked = [];
   // ตัวที่เร็วที่สุดก่อน แล้วเติมด้วยตัวอื่นจากผู้ให้บริการที่ยังไม่มีในรายการ
   for (const t of [...RACE_PREF, ...all]) {
@@ -252,4 +280,4 @@ async function race(fn, items, opts, valid, max = 3) {
 const raceTranslate = (items, opts) => race(translate, items, opts, r => r.results.some(Boolean), 3);
 const raceTitles = (items, opts) => race(translateTitles, items, opts, r => r.results.some(Boolean), 2);
 
-module.exports = { translate, translateTitles, raceTranslate, raceTitles, raceLanes, parseItems, QuotaError, DEFAULT_MODELS, GROQ_MODELS, GITHUB_MODELS, hasThai, chainOf };
+module.exports = { translate, translateTitles, raceTranslate, raceTitles, raceLanes, waitHint, parseItems, QuotaError, DEFAULT_MODELS, GROQ_MODELS, GITHUB_MODELS, hasThai, chainOf };

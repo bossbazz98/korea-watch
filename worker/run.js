@@ -27,6 +27,10 @@ const CFG = {
   WATCH_EVERY_MS: 120000, // ระหว่างรอบ ตรวจฟีดข่าวสงครามเกาหลีซ้ำทุก 2 นาที
   KORWAR_PER_RUN: 6,   // ข่าวสงครามเกาหลีที่ทำทางด่วนได้ต่อรอบ
   KORWAR_RETRY_MS: 10 * 60e3, // ข่าวสงครามเกาหลีที่แปลพลาด ลองใหม่ทุก 10 นาที (ข่าวอื่น 3 ชั่วโมง)
+  KORWAR_BUDGET_MS: 120000, // ทางด่วนใช้เวลารวมไม่เกิน 2 นาทีต่อรอบ (เหลือเวลาให้ข่าวอื่น)
+  KORWAR_TITLE_MS: 15000,   // เวลารอสูงสุดต่อคำขอแปลหัวข้อ
+  KORWAR_ITEM_MS: 40000,    // เวลารอสูงสุดต่อคำขอแปลเนื้อหา
+  KORWAR_TEXT: 1500,        // ทางด่วนส่งเนื้อข่าวสั้นลง (เร็วขึ้น ไม่ชนเพดานต่อนาที) แล้วเขียนละเอียดภายหลัง
   KEEP_DAYS: 30,       // เก็บข่าวกี่วัน
   FEED_MAX: 250,       // จำนวนข่าวสูงสุดในแอป
   FEED_MAX_BYTES: 900000, // เอกสาร Firestore ต้องไม่เกิน 1 MB
@@ -167,12 +171,12 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
   stat.pushFailed = 0; stat.pushErrors = {};
   const addPush = pr => { stat.pushed += pr.sent; stat.pushFailed += pr.failed; for (const [k, v] of Object.entries(pr.errors || {})) stat.pushErrors[k] = (stat.pushErrors[k] || 0) + v };
   const hasAI = !!(geminiKey || groqKey || githubToken);
-  const aiOpts = { apiKey: geminiKey, groqKey, githubToken, models, groqModels, githubModels, fetchImpl, log, waitMs, cool: new Map(), quota };
+  const aiOpts = { apiKey: geminiKey, groqKey, githubToken, models, groqModels, githubModels, fetchImpl, log, waitMs, cool: new Map(), quota, tpm: new Map() };
   const deadline = runDeadline - imgBudgetMs, used = new Set(), errs = [], drop = new Set(), tried = new Set();
   let ok = 0, total = 0, stopAI = false;
   stat.titled = 0; stat.priority = 0; stat.enriched = 0;
   const timeLeft = () => { if (deadline - Date.now() < 20000) { errs.push("time budget reached"); return false } return true };
-  const inputOf = i => ({ titleKo: i.titleKo, snippet: i.snippetKo || "", article: article.get(i.id) || "", source: i.source, cats: i.categories });
+  const inputOf = (i, max = Infinity) => ({ titleKo: i.titleKo, snippet: i.snippetKo || "", article: (article.get(i.id) || "").slice(0, max), source: i.source, cats: i.categories });
 
   // นำผลแปลเต็มไปใส่ข่าว (ใช้ทั้งทางด่วนและงานปกติ)
   const apply = (batch, results, model, partial) => {
@@ -205,7 +209,7 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
     await openPages(batch); // เนื้อข่าวจริงก่อนแปล
     total++; batch.forEach(i => tried.add(i.id));
     try {
-      const { results, model, partial } = await withEmergency(batch, emergency => translate(batch.map(inputOf), { ...aiOpts, deadline, rotate, emergency }));
+      const { results, model, partial } = await withEmergency(batch, emergency => translate(batch.map(i => inputOf(i)), { ...aiOpts, deadline, rotate, emergency }));
       ok++; apply(batch, results, model, partial);
     } catch (e) {
       errs.push(String(e.message || e).slice(0, 200));
@@ -221,29 +225,43 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
     await Promise.all(Array.from({ length: Math.min(CFG.LANES, batches.length) }, (_, k) => lane(k)));
   };
 
-  // 2) ทางด่วนข่าวสงครามเกาหลี: AI ทุกตัวแข่งกันแปล ใครเสร็จก่อนใช้ของคนนั้น แล้วบันทึกขึ้นแอปทันที
+  // 2) ทางด่วนข่าวสงครามเกาหลี
+  //    (1) แปลหัวข้อของทุกข่าวที่ค้างในคำขอเดียว (เร็ว ใช้โควตาน้อย) ไล่ลอง AI ทุกตัวจนสำเร็จ → หัวข้อไทยขึ้นแอปทันที
+  //    (2) แปลเนื้อหาทีละข่าว: แข่งกัน 3 ช่องทางที่เร็วที่สุด ถ้าไม่สำเร็จใช้วิธีปกติ แล้วบันทึกขึ้นแอป + แจ้งเตือนทันที
+  //    คิว: ข่าวที่ยังไม่เคยลอง และข่าวที่ลองล่าสุดนานที่สุดได้ก่อน (ไม่มีข่าวไหนถูกแซงคิวตลอด)
   const korwarDone = new Set();
+  const korwarTitles = async (until) => {
+    const need = items.filter(i => isKorwar(i) && !i.translated && !hasThai(i.title && i.title.th)).slice(0, CFG.TITLE_BATCH);
+    if (!need.length || !hasAI) return;
+    try {
+      const t = await withEmergency(need, emergency => translateTitles(need.map(i => ({ titleKo: i.titleKo })), { ...aiOpts, deadline: until, timeoutMs: CFG.KORWAR_TITLE_MS, waitMs: 0, emergency }));
+      need.forEach((it, k) => { const x = t.results[k]; if (x) { it.title = { ...it.title, th: x.th, en: x.en }; stat.titled++ } });
+      used.add(t.model + " (korwar titles)"); feedChanged = true;
+      await saveFeed();
+    } catch (e) { errs.push("korwar titles: " + String(e.message || e).slice(0, 140)) }
+  };
   const fastKorwar = async () => {
+    const until = Math.min(runDeadline - 15000, Date.now() + CFG.KORWAR_BUDGET_MS);
+    await korwarTitles(until);
     const q = items.filter(i => isKorwar(i) && !i.translated && !korwarDone.has(i.id) && ((i.attempts || 0) < CFG.MAX_ATTEMPTS || Date.now() - (i.lastTry || 0) > CFG.KORWAR_RETRY_MS))
-      .sort((a, b) => b.publishedAt.localeCompare(a.publishedAt)).slice(0, Math.max(0, CFG.KORWAR_PER_RUN - korwarDone.size));
+      .sort((a, b) => (a.lastTry || 0) - (b.lastTry || 0) || b.publishedAt.localeCompare(a.publishedAt))
+      .slice(0, Math.max(0, CFG.KORWAR_PER_RUN - korwarDone.size));
     for (const it of q) {
-      if (!hasAI || runDeadline - Date.now() < 15000) return;
+      if (!hasAI || until - Date.now() < 10000) return;
       korwarDone.add(it.id); tried.add(it.id);
       try {
-        if (!hasThai(it.title && it.title.th)) { // หัวข้อก่อน (ไม่กี่วินาที) แล้วขึ้นแอปทันที
-          try {
-            const t = await withEmergency([it], emergency => raceTitles([{ titleKo: it.titleKo }], { ...aiOpts, deadline: runDeadline, emergency }));
-            it.title = { ...it.title, th: t.results[0].th, en: t.results[0].en }; stat.titled++;
-            await saveFeed();
-          } catch (e) { errs.push("korwar title: " + String(e.message || e).slice(0, 120)) } // ไม่หยุด ไปแปลเนื้อหาต่อ (ได้หัวข้อมาด้วย)
-        }
         await openPages([it]);
-        // แข่งแปลก่อน ถ้าไม่สำเร็จ (และไม่ใช่เพราะโควตาหมด) ใช้วิธีแปลปกติทันทีในรอบเดียวกัน
+        const itemUntil = Math.min(until, Date.now() + CFG.KORWAR_ITEM_MS + 5000);
+        const o = { ...aiOpts, deadline: itemUntil, timeoutMs: CFG.KORWAR_ITEM_MS };
+        const input = [inputOf(it, CFG.KORWAR_TEXT)];
+        // แข่งแปลก่อน ถ้าไม่สำเร็จ (และไม่ใช่เพราะโควตาหมด) ใช้วิธีปกติทันทีในรอบเดียวกัน
         const r = await withEmergency([it], async emergency => {
-          try { return await raceTranslate([inputOf(it)], { ...aiOpts, deadline: runDeadline, emergency }) }
-          catch (e) { if (e.reserved) throw e; log.warn("korwar race failed, trying normal chain", e.message); return await translate([inputOf(it)], { ...aiOpts, deadline: runDeadline, emergency }) }
+          try { return await raceTranslate(input, { ...o, emergency }) }
+          catch (e) { if (e.reserved) throw e; log.warn("korwar race failed, trying normal chain", e.message); return await translate(input, { ...o, deadline: Math.min(until, Date.now() + CFG.KORWAR_ITEM_MS + 5000), emergency, waitMs: 0 }) }
         });
-        apply([it], r.results, r.model + " (race)", r.partial); stat.korwar++;
+        apply([it], r.results, r.model + " (fast)", r.partial); stat.korwar++;
+        if (it.translated) { it.rich = false; it.needsEnrich = true } // เนื้อหาย่อจากข่าวสั้น: เขียนให้ละเอียดภายหลัง
+        it.lastTry = Date.now();
         await saveFeed();
         if (toPush.includes(it)) { const pr = await sendNews(db, messaging, [it], appUrl, log).catch(e => ({ sent: 0, failed: 1, errors: { [e.message]: 1 } })); addPush(pr); toPush.splice(toPush.indexOf(it), 1) }
       } catch (e) {
@@ -386,11 +404,13 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
   // โควตาที่ใช้ไปวันนี้ (% ของเพดานรายวัน) ดูได้ในบรรทัดสรุปและหน้า Firebase (meta/status)
   stat.quotaUsed = Object.fromEntries(Object.entries(quota.used).map(([t, u]) => { const L = quota.limit(t); const pct = Math.max(L.tokens ? u.tokens / L.tokens : 0, L.requests ? u.requests / L.requests : 0); return [t, Math.round(pct * 100)] }));
   stat.korwarWaiting = items.filter(i => isKorwar(i) && !i.translated).length;
+  stat.disabled = Object.fromEntries(Object.entries(quota.disabled || {}).map(([p, v]) => [p, v.reason]));
   await statusRef.set(stat);
   log.log(`added ${stat.added}, merged ${stat.merged}, translated ${stat.translated}, korwar fast ${stat.korwar}, dropped ${stat.dropped}, pushed ${stat.pushed}, pending ${stat.pending}` +
     `, titled ${stat.titled || 0}` + (stat.priority ? `, priority ${stat.priority}` : "") + (stat.enriched ? `, enriched ${stat.enriched}` : "") + (stat.fixes ? `, agent fixes ${stat.fixes}` : "") +
     (stat.pushFailed ? `, push failed ${stat.pushFailed} (${Object.entries(stat.pushErrors).map(([k, v]) => k + "×" + v).join(" ")})` : "") +
     (stat.emergency ? `, emergency used ${stat.emergency}` : "") + `, emergency left ${stat.emergencyLeft}/3` + (stat.korwarWaiting ? `, korwar waiting ${stat.korwarWaiting}` : "") +
+    (Object.keys(stat.disabled).length ? `, disabled ${Object.entries(stat.disabled).map(([p, why]) => p + ": " + why).join("; ")}` : "") +
     `, quota ${Object.entries(stat.quotaUsed).map(([t, p]) => t.replace(/^(\w+):(?:\w+\/)?/, "$1:") + " " + p + "%").join(" ") || "-"}` +
     (stat.batches ? `, batches ${stat.batches}` : "") + `, images ${stat.images}` +
     (stat.model ? `, model ${stat.model}` : "") + (stat.lastError ? `, error: ${stat.lastError}` : ""));

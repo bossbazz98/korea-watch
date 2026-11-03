@@ -22,7 +22,11 @@ class Quota {
     this.used = same ? { ...(state.used || {}) } : {};
     this.exhausted = same ? { ...(state.exhausted || {}) } : {};
     this.emergencyUsed = same ? (state.emergencyUsed || 0) : 0;
+    // ผู้ให้บริการที่ใช้ไม่ได้ (คีย์ผิด / ไม่มีสิทธิ์) พักไว้ระยะหนึ่ง ไม่ต้องลองซ้ำทุกรอบ (จำข้ามวัน)
+    this.disabled = Object.fromEntries(Object.entries(state.disabled || {}).filter(([, v]) => v && v.until > now));
   }
+  disable(provider, reason, ms = 6 * 3600e3) { this.disabled[provider] = { until: Date.now() + ms, reason: String(reason || "").slice(0, 160) } }
+  isDisabled(provider) { const d = this.disabled[provider]; return !!(d && d.until > Date.now()) }
   limit(tag) { return LIMITS[tag] || LIMITS[tag.split(":")[0] + ":*"] || {} }
   u(tag) { return this.used[tag] || (this.used[tag] = { tokens: 0, requests: 0 }) }
   // งานปกติใช้ได้จนถึงเส้นสำรอง / ข่าวฉุกเฉินใช้ได้ถึงเพดาน
@@ -37,7 +41,7 @@ class Quota {
   exhaust(tag) { this.exhausted[tag] = true }
   emergencyLeft() { return Math.max(0, EMERGENCY_PER_DAY - this.emergencyUsed) }
   useEmergency() { this.emergencyUsed++ }
-  toJSON() { return { day: this.day, used: this.used, exhausted: this.exhausted, emergencyUsed: this.emergencyUsed } }
+  toJSON() { return { day: this.day, used: this.used, exhausted: this.exhausted, emergencyUsed: this.emergencyUsed, disabled: this.disabled } }
 }
 
 module.exports = { Quota, LIMITS, RESERVE, EMERGENCY_PER_DAY, kstDay };

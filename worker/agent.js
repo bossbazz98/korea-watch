@@ -44,6 +44,7 @@ async function auditData({ items, status, now = Date.now(), fetchImpl = fetch, s
   const kwStuck = items.filter(i => !i.translated && (i.categories || []).includes("korwar") && now - Date.parse(i.addedAt || i.publishedAt) > 30 * 60e3);
   if (kwStuck.length) add("korwar-stuck", "high", `ข่าวสงครามเกาหลีค้างแปลเกิน 30 นาที ${kwStuck.length} ข่าว (เช่น "${String(kwStuck[0].titleKo).slice(0, 40)}") ให้ดูบรรทัด quota และ error ใน log ของ Fetch news`);
   if (status && status.quotaUsed) { const hot = Object.entries(status.quotaUsed).filter(([, p]) => p >= 90); if (hot.length) add("quota-high", "medium", `โควตา AI วันนี้ใกล้หมด: ${hot.map(([t, p]) => `${t} ${p}%`).join(", ")}`) }
+  if (status && status.disabled && Object.keys(status.disabled).length) add("ai-disabled", "medium", `ช่องทาง AI ใช้ไม่ได้ (พักไว้ชั่วคราว): ${Object.entries(status.disabled).map(([p, w]) => `${p} ${w}`).join("; ")}`);
   if (status && status.pushFailed) add("push-failed", "high", `ส่งแจ้งเตือนเข้ามือถือไม่สำเร็จ ${status.pushFailed} ครั้งในรอบล่าสุด (${Object.entries(status.pushErrors || {}).map(([k, v]) => `${k} ×${v}`).join(", ")})`);
   // ข่าวค้างแปลนาน
   const stuck = items.filter(i => !i.translated && now - Date.parse(i.addedAt || i.publishedAt) > 2 * H);
