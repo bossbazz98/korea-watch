@@ -40,6 +40,10 @@ async function auditData({ items, status, now = Date.now(), fetchImpl = fetch, s
   // ตัวค้นข่าวหยุดทำงาน
   if (m.lastRunMin == null || m.lastRunMin > 30) add("stale", "high", `ตัวค้นข่าวไม่ได้อัปเดตมา ${m.lastRunMin ?? "?"} นาที (ปกติไม่เกิน 15 นาที) ให้ตรวจแท็บ Actions ของ Fetch news`);
   if (status && status.lastError && !/time budget|cooling|busy|quota/i.test(status.lastError)) add("worker-error", "medium", `ตัวค้นข่าวรายงานข้อผิดพลาด: ${String(status.lastError).slice(0, 200)}`);
+  // ข่าวสงครามเกาหลีต้องแปลเร็ว: ค้างเกิน 30 นาที = ปัญหาร้ายแรง
+  const kwStuck = items.filter(i => !i.translated && (i.categories || []).includes("korwar") && now - Date.parse(i.addedAt || i.publishedAt) > 30 * 60e3);
+  if (kwStuck.length) add("korwar-stuck", "high", `ข่าวสงครามเกาหลีค้างแปลเกิน 30 นาที ${kwStuck.length} ข่าว (เช่น "${String(kwStuck[0].titleKo).slice(0, 40)}") ให้ดูบรรทัด quota และ error ใน log ของ Fetch news`);
+  if (status && status.quotaUsed) { const hot = Object.entries(status.quotaUsed).filter(([, p]) => p >= 90); if (hot.length) add("quota-high", "medium", `โควตา AI วันนี้ใกล้หมด: ${hot.map(([t, p]) => `${t} ${p}%`).join(", ")}`) }
   // ข่าวค้างแปลนาน
   const stuck = items.filter(i => !i.translated && now - Date.parse(i.addedAt || i.publishedAt) > 2 * H);
   if (stuck.length > 10) add("backlog", "medium", `มีข่าวค้างแปลเกิน 2 ชั่วโมง ${stuck.length} ข่าว (อาจติดโควตา AI)`);

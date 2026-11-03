@@ -57,8 +57,8 @@ const okItem = (x, by) => ({ i: x.i, relevant: true, categories: x.guessedCatego
   const rr = await raceTranslate([{ titleKo: "북한 미사일", snippet: "", article: "", source: "", cats: ["korwar"] }], { groqKey: "g", githubToken: "t", apiKey: "k", fetchImpl: multi, log });
   assert.strictEqual(rr.model, "github:openai/gpt-4o-mini", "fastest valid answer wins");
   assert.ok(Date.now() - t0 < 300, "did not wait for slower AIs");
-  assert.strictEqual(new Set(order).size, 9 - 3, "all lanes asked at once (3 groq + 2 github + gemini models)") ;
-  await sleep(20); assert.ok(aborted.length >= 5, "slower AIs cancelled");
+  assert.deepStrictEqual([...new Set(order)].sort(), ["gemini", "github:openai/gpt-4o-mini", "groq:openai/gpt-oss-20b"], "only the fastest AI of each provider races (saves quota)");
+  await sleep(20); assert.ok(aborted.length >= 2, "slower AIs cancelled");
 
   // ── 4) รอบจริง: ข่าวซ้ำ, ข่าวซ่อน, ทางด่วนสงครามเกาหลี, ตัวเฝ้าฟีด ──
   const db = fakeDb();

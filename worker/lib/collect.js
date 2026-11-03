@@ -28,6 +28,7 @@ function rssImage(it, rawDesc) {
 }
 
 function matchCats(s) {
+  s = String(s).replace(/北京/g, "베이징"); // 北京 = ปักกิ่ง ไม่ใช่เกาหลีเหนือ
   const out = [];
   for (const k of CAT_KEYS) if (CATS[k].kw.some(w => s.includes(w))) out.push(k);
   return out;

@@ -26,6 +26,7 @@ const CFG = {
   TIME_BUDGET_MS: 280000, // ทำงานได้ ~4.7 นาทีต่อรอบ แล้วบันทึกผลเสมอ (GitHub ตัดงานที่ 9 นาที)
   WATCH_EVERY_MS: 120000, // ระหว่างรอบ ตรวจฟีดข่าวสงครามเกาหลีซ้ำทุก 2 นาที
   KORWAR_PER_RUN: 6,   // ข่าวสงครามเกาหลีที่ทำทางด่วนได้ต่อรอบ
+  KORWAR_RETRY_MS: 10 * 60e3, // ข่าวสงครามเกาหลีที่แปลพลาด ลองใหม่ทุก 10 นาที (ข่าวอื่น 3 ชั่วโมง)
   KEEP_DAYS: 30,       // เก็บข่าวกี่วัน
   FEED_MAX: 250,       // จำนวนข่าวสูงสุดในแอป
   FEED_MAX_BYTES: 900000, // เอกสาร Firestore ต้องไม่เกิน 1 MB
@@ -221,25 +222,33 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
   // 2) ทางด่วนข่าวสงครามเกาหลี: AI ทุกตัวแข่งกันแปล ใครเสร็จก่อนใช้ของคนนั้น แล้วบันทึกขึ้นแอปทันที
   const korwarDone = new Set();
   const fastKorwar = async () => {
-    const q = items.filter(i => isKorwar(i) && !i.translated && !korwarDone.has(i.id) && (i.attempts || 0) < CFG.MAX_ATTEMPTS)
+    const q = items.filter(i => isKorwar(i) && !i.translated && !korwarDone.has(i.id) && ((i.attempts || 0) < CFG.MAX_ATTEMPTS || Date.now() - (i.lastTry || 0) > CFG.KORWAR_RETRY_MS))
       .sort((a, b) => b.publishedAt.localeCompare(a.publishedAt)).slice(0, Math.max(0, CFG.KORWAR_PER_RUN - korwarDone.size));
     for (const it of q) {
       if (!hasAI || runDeadline - Date.now() < 15000) return;
       korwarDone.add(it.id); tried.add(it.id);
       try {
         if (!hasThai(it.title && it.title.th)) { // หัวข้อก่อน (ไม่กี่วินาที) แล้วขึ้นแอปทันที
-          const t = await withEmergency([it], emergency => raceTitles([{ titleKo: it.titleKo }], { ...aiOpts, deadline: runDeadline, emergency }));
-          it.title = { ...it.title, th: t.results[0].th, en: t.results[0].en }; stat.titled++;
-          await saveFeed();
+          try {
+            const t = await withEmergency([it], emergency => raceTitles([{ titleKo: it.titleKo }], { ...aiOpts, deadline: runDeadline, emergency }));
+            it.title = { ...it.title, th: t.results[0].th, en: t.results[0].en }; stat.titled++;
+            await saveFeed();
+          } catch (e) { errs.push("korwar title: " + String(e.message || e).slice(0, 120)) } // ไม่หยุด ไปแปลเนื้อหาต่อ (ได้หัวข้อมาด้วย)
         }
         await openPages([it]);
-        const r = await withEmergency([it], emergency => raceTranslate([inputOf(it)], { ...aiOpts, deadline: runDeadline, emergency }));
+        // แข่งแปลก่อน ถ้าไม่สำเร็จ (และไม่ใช่เพราะโควตาหมด) ใช้วิธีแปลปกติทันทีในรอบเดียวกัน
+        const r = await withEmergency([it], async emergency => {
+          try { return await raceTranslate([inputOf(it)], { ...aiOpts, deadline: runDeadline, emergency }) }
+          catch (e) { if (e.reserved) throw e; log.warn("korwar race failed, trying normal chain", e.message); return await translate([inputOf(it)], { ...aiOpts, deadline: runDeadline, emergency }) }
+        });
         apply([it], r.results, r.model + " (race)", r.partial); stat.korwar++;
         await saveFeed();
         if (toPush.includes(it)) { stat.pushed += await sendNews(db, messaging, [it], appUrl, log).catch(() => 0); toPush.splice(toPush.indexOf(it), 1) }
       } catch (e) {
         errs.push("korwar: " + String(e.message || e).slice(0, 160));
-        if (!e.transient) { it.attempts = (it.attempts || 0) + 1; it.lastTry = now }
+        it.lastTry = Date.now();
+        if (!e.transient) it.attempts = (it.attempts || 0) + 1;
+        feedChanged = true;
       }
     }
   };
@@ -372,10 +381,14 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
   stat.hidden = items.filter(i => !shown(i)).length;
   stat.total = items.length;
   stat.emergencyLeft = quota.emergencyLeft();
+  // โควตาที่ใช้ไปวันนี้ (% ของเพดานรายวัน) ดูได้ในบรรทัดสรุปและหน้า Firebase (meta/status)
+  stat.quotaUsed = Object.fromEntries(Object.entries(quota.used).map(([t, u]) => { const L = quota.limit(t); const pct = Math.max(L.tokens ? u.tokens / L.tokens : 0, L.requests ? u.requests / L.requests : 0); return [t, Math.round(pct * 100)] }));
+  stat.korwarWaiting = items.filter(i => isKorwar(i) && !i.translated).length;
   await statusRef.set(stat);
   log.log(`added ${stat.added}, merged ${stat.merged}, translated ${stat.translated}, korwar fast ${stat.korwar}, dropped ${stat.dropped}, pushed ${stat.pushed}, pending ${stat.pending}` +
     `, titled ${stat.titled || 0}` + (stat.priority ? `, priority ${stat.priority}` : "") + (stat.enriched ? `, enriched ${stat.enriched}` : "") + (stat.fixes ? `, agent fixes ${stat.fixes}` : "") +
-    (stat.emergency ? `, emergency used ${stat.emergency}` : "") + `, emergency left ${stat.emergencyLeft}/3` +
+    (stat.emergency ? `, emergency used ${stat.emergency}` : "") + `, emergency left ${stat.emergencyLeft}/3` + (stat.korwarWaiting ? `, korwar waiting ${stat.korwarWaiting}` : "") +
+    `, quota ${Object.entries(stat.quotaUsed).map(([t, p]) => t.replace(/^(\w+):(?:\w+\/)?/, "$1:") + " " + p + "%").join(" ") || "-"}` +
     (stat.batches ? `, batches ${stat.batches}` : "") + `, images ${stat.images}` +
     (stat.model ? `, model ${stat.model}` : "") + (stat.lastError ? `, error: ${stat.lastError}` : ""));
   return stat;
@@ -401,12 +414,21 @@ async function sendMulticast(db, messaging, subs, msg, log) {
   return sent;
 }
 
+// ช่วงเวลางดแจ้งเตือน (เวลาเกาหลี) ของแต่ละเครื่อง / ข่าวสงครามเกาหลีด่วนมากแจ้งได้เสมอถ้าผู้ใช้เลือกไว้
+function inQuiet(s, ms = Date.now()) {
+  if (!s.quietOn) return false;
+  const h = new Date(ms + 9 * 3600e3).getUTCHours(), from = +s.quietFrom, to = +s.quietTo;
+  if (!Number.isInteger(from) || !Number.isInteger(to) || from === to) return false;
+  return from < to ? h >= from && h < to : h >= from || h < to; // เช่น 22 → 7 ข้ามเที่ยงคืน
+}
+const quietBlocks = (s, n, ms) => inQuiet(s, ms) && !(s.quietBypass !== false && (n.categories || []).includes("korwar") && n.level === "critical");
+
 async function sendNews(db, messaging, news, appUrl, log) {
   const snap = await db.collection("subscribers").where("enabled", "==", true).get();
   const subs = snap.docs.map(d => ({ ref: d.ref, ...d.data() })).filter(s => typeof s.token === "string");
   let total = 0;
   for (const n of news) {
-    const targets = subs.filter(s => Array.isArray(s.cats) && s.cats.some(c => n.categories.includes(c)) && (n.level === "critical" || s.level === "high"));
+    const targets = subs.filter(s => Array.isArray(s.cats) && s.cats.some(c => n.categories.includes(c)) && (n.level === "critical" || s.level === "high") && !quietBlocks(s, n));
     if (!targets.length) continue;
     const tag = n.level === "critical" ? "🔴 ด่วนมาก" : "🟠 สำคัญ";
     try {
@@ -451,4 +473,4 @@ async function main() {
 }
 
 if (require.main === module) main().catch(e => { console.error(e); process.exit(1) });
-module.exports = { runOnce, CFG, shown };
+module.exports = { runOnce, CFG, shown, inQuiet };

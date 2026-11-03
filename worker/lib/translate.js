@@ -73,6 +73,7 @@ async function post(url, headers, body, fetchImpl, timeoutMs, signal) {
     const data = await r.json().catch(() => ({}));
     return { status: r.status, ok: r.ok, data };
   } catch (e) {
+    if (signal && signal.aborted) return { status: 499, ok: false, data: { error: { message: "aborted (another AI answered first)" } } };
     return { status: 503, ok: false, data: { error: { message: e.name === "AbortError" ? "timeout" : "network: " + (e.message || e) } } };
   } finally { clearTimeout(timer); }
 }
@@ -133,7 +134,10 @@ async function runChain(system, user, maxTokens, opts) {
       if (signal && signal.aborted) throw new QuotaError("cancelled (another AI answered first)", 499);
       const r = await callOne(entry, system, user, maxTokens, { groq: groqKey, gemini: apiKey, github: githubToken }, fetchImpl, Math.min(timeoutMs, left - 2000), signal);
       const tag = `${entry.p}:${entry.m}`;
-      if (quota && r.status !== 499 && !/timeout|network|aborted/.test(r.msg)) quota.record(tag, r.tokens);
+      // ตัวที่ถูกยกเลิกกลางคันก็ใช้โควตาไปแล้ว: ประมาณจากขนาดคำขอ (ภาษาเกาหลี/ไทย ~2.5 ตัวอักษรต่อ token)
+      if (quota && r.status === 499) quota.record(tag, Math.ceil((system.length + user.length) / 2.5));
+      else if (quota && !/timeout|network/.test(r.msg)) quota.record(tag, r.tokens);
+      if (r.status === 499) throw new QuotaError("cancelled (another AI answered first)", 499);
       // รุ่นนี้ไม่รับพารามิเตอร์เสริม: ลองรุ่นเดิมอีกครั้งแบบพื้นฐาน
       if (r.status === 400 && r.extras && !/api key|api_key|invalid.*key/i.test(r.msg)) { plain.add(tag); log.warn(`${tag} rejected extra params, retrying plain`); continue; }
       if (RETRYABLE.has(r.status) || /overloaded|high demand|unavailable|capacity/i.test(r.msg)) {
@@ -216,9 +220,24 @@ async function translateTitles(items, opts) {
   return { results, model };
 }
 
-// แข่งกันแปล: ส่งงานเดียวกันให้ AI ทุกตัวพร้อมกัน ใช้คำตอบแรกที่ถูกต้อง แล้วยกเลิกตัวที่เหลือ (ใช้กับข่าวสงครามเกาหลี)
-async function race(fn, items, opts, valid) {
-  const lanes = chainOf(opts).map(e => `${e.p}:${e.m}`).filter(t => !opts.quota || opts.quota.canUse(t, opts.emergency));
+// แข่งกันแปล (ข่าวสงครามเกาหลี): ส่งงานเดียวกันให้ AI ที่เร็วที่สุด "ผู้ให้บริการละ 1 ตัว" พร้อมกัน ใช้คำตอบแรกที่ถูกต้อง แล้วยกเลิกตัวที่เหลือ
+// (เดิมส่งทุกตัว 9 ช่องทาง เปลืองโควตาเกินไป จนโควตาหมดและแปลไม่ได้ทั้งวัน)
+const RACE_PREF = ["groq:openai/gpt-oss-20b", "github:openai/gpt-4o-mini", "gemini:gemini-flash-lite-latest"];
+function raceLanes(opts, max) {
+  const all = chainOf(opts).map(e => `${e.p}:${e.m}`).filter(t => !opts.quota || opts.quota.canUse(t, opts.emergency));
+  const cooled = t => (opts.cool && (opts.cool.get(t) || 0) > Date.now());
+  const picked = [];
+  // ตัวที่เร็วที่สุดก่อน แล้วเติมด้วยตัวอื่นจากผู้ให้บริการที่ยังไม่มีในรายการ
+  for (const t of [...RACE_PREF, ...all]) {
+    if (picked.length >= max) break;
+    if (!all.includes(t) || cooled(t) || picked.includes(t) || picked.some(x => x.split(":")[0] === t.split(":")[0])) continue;
+    picked.push(t);
+  }
+  for (const t of all) { if (picked.length >= max) break; if (!picked.includes(t) && !cooled(t)) picked.push(t) }
+  return picked;
+}
+async function race(fn, items, opts, valid, max = 3) {
+  const lanes = raceLanes(opts, max);
   if (!lanes.length) { const e = new QuotaError("no AI lane available for race", 429); e.reserved = true; throw e; }
   const ctl = new AbortController();
   try {
@@ -230,7 +249,7 @@ async function race(fn, items, opts, valid) {
     throw err;
   } finally { ctl.abort() }
 }
-const raceTranslate = (items, opts) => race(translate, items, opts, r => r.results.some(Boolean));
-const raceTitles = (items, opts) => race(translateTitles, items, opts, r => r.results.some(Boolean));
+const raceTranslate = (items, opts) => race(translate, items, opts, r => r.results.some(Boolean), 3);
+const raceTitles = (items, opts) => race(translateTitles, items, opts, r => r.results.some(Boolean), 2);
 
-module.exports = { translate, translateTitles, raceTranslate, raceTitles, parseItems, QuotaError, DEFAULT_MODELS, GROQ_MODELS, GITHUB_MODELS, hasThai, chainOf };
+module.exports = { translate, translateTitles, raceTranslate, raceTitles, raceLanes, parseItems, QuotaError, DEFAULT_MODELS, GROQ_MODELS, GITHUB_MODELS, hasThai, chainOf };

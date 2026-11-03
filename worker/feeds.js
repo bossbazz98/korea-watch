@@ -7,7 +7,8 @@ const gn = q =>
 // ลำดับในรายการนี้ = ลำดับความสำคัญเวลาเลือกข่าวไปแปล
 const CATS = {
   korwar:    { th: "สงครามเกาหลี", desc: "Korean Peninsula conflict: North Korean military actions, missiles, nuclear tests, DMZ/border incidents, inter-Korean tension, ROK-US drills, air-raid/civil-defence alerts in Korea",
-               kw: ["북한", "北", "미사일", "탄도", "남북", "군사분계선", "비무장지대", "DMZ", "휴전선", "합참", "합동참모본부", "북한군", "도발", "핵실험", "북핵", "포격", "연평도", "무인기", "공습경보", "민방위", "계엄", "김정은", "한미연합", "을지"] },
+               // ไม่ใช้ "北" หรือ "도발" เดี่ยวๆ (北 ติดชื่อเมือง 北京 / 도발 ใช้ในข่าวการเมืองทั่วไป) ใช้เฉพาะคำที่ชี้ชัดว่าเป็นเกาหลีเหนือ/การทหาร
+               kw: ["북한", "北 ", "北,", "北미사일", "北 미사일", "北 도발", "北 핵", "北군", "대북", "북측", "탄도미사일", "남북", "군사분계선", "비무장지대", "DMZ", "휴전선", "합참", "합동참모본부", "북한군", "핵실험", "북핵", "연평도", "공습경보", "민방위 훈련", "김정은", "김여정", "한미연합", "을지"] },
   war:       { th: "สงครามทั่วโลก", desc: "wars and security crises elsewhere in the world (Ukraine-Russia, Middle East, Taiwan Strait etc.), NOT the Korean Peninsula",
                kw: ["전쟁", "공습", "교전", "휴전", "우크라이나", "러시아군", "이스라엘", "가자", "이란", "중동", "하마스", "헤즈볼라", "대만해협", "분쟁", "나토", "NATO"] },
   disease:   { th: "โรคติดต่อ/ไวรัส", desc: "infectious diseases, viruses and outbreaks in Korea",
