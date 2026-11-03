@@ -164,6 +164,8 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
   };
 
   const toPush = [];
+  stat.pushFailed = 0; stat.pushErrors = {};
+  const addPush = pr => { stat.pushed += pr.sent; stat.pushFailed += pr.failed; for (const [k, v] of Object.entries(pr.errors || {})) stat.pushErrors[k] = (stat.pushErrors[k] || 0) + v };
   const hasAI = !!(geminiKey || groqKey || githubToken);
   const aiOpts = { apiKey: geminiKey, groqKey, githubToken, models, groqModels, githubModels, fetchImpl, log, waitMs, cool: new Map(), quota };
   const deadline = runDeadline - imgBudgetMs, used = new Set(), errs = [], drop = new Set(), tried = new Set();
@@ -182,7 +184,7 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
       Object.assign(it, { title: r.title, summary: r.summary, body: r.body, tips: r.tips, categories: r.categories, level: r.level, translated: true });
       if (hadText) { it.rich = true; delete it.needsEnrich } else if (!wasNew) it.enrichTries = (it.enrichTries || 0) + 1;
       delete it.snippetKo; delete it.attempts; delete it.lastTry; delete it.titleTries;
-      if (wasNew) { stat.translated++; if ((r.level === "critical" || r.level === "high") && now - Date.parse(it.publishedAt) < CFG.PUSH_WINDOW_H * 3600e3) toPush.push(it) }
+      if (wasNew) { stat.translated++; if (now - Date.parse(it.publishedAt) < CFG.PUSH_WINDOW_H * 3600e3) toPush.push(it) }
       else stat.enriched++;
     });
     feedChanged = true;
@@ -243,7 +245,7 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
         });
         apply([it], r.results, r.model + " (race)", r.partial); stat.korwar++;
         await saveFeed();
-        if (toPush.includes(it)) { stat.pushed += await sendNews(db, messaging, [it], appUrl, log).catch(() => 0); toPush.splice(toPush.indexOf(it), 1) }
+        if (toPush.includes(it)) { const pr = await sendNews(db, messaging, [it], appUrl, log).catch(e => ({ sent: 0, failed: 1, errors: { [e.message]: 1 } })); addPush(pr); toPush.splice(toPush.indexOf(it), 1) }
       } catch (e) {
         errs.push("korwar: " + String(e.message || e).slice(0, 160));
         it.lastTry = Date.now();
@@ -374,8 +376,8 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
   // ส่งแจ้งเตือน (ข่าวที่ยังอยู่ในแอปเท่านั้น)
   const liveIds = new Set(items.map(i => i.id));
   const pushList = toPush.filter(i => liveIds.has(i.id));
-  if (pushList.length) stat.pushed += await sendNews(db, messaging, pushList, appUrl, log);
-  await sendTests(db, messaging, appUrl, log);
+  if (pushList.length) addPush(await sendNews(db, messaging, pushList, appUrl, log));
+  addPush(await sendTests(db, messaging, appUrl, log));
 
   stat.pending = items.filter(i => !i.translated).length;
   stat.hidden = items.filter(i => !shown(i)).length;
@@ -387,6 +389,7 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
   await statusRef.set(stat);
   log.log(`added ${stat.added}, merged ${stat.merged}, translated ${stat.translated}, korwar fast ${stat.korwar}, dropped ${stat.dropped}, pushed ${stat.pushed}, pending ${stat.pending}` +
     `, titled ${stat.titled || 0}` + (stat.priority ? `, priority ${stat.priority}` : "") + (stat.enriched ? `, enriched ${stat.enriched}` : "") + (stat.fixes ? `, agent fixes ${stat.fixes}` : "") +
+    (stat.pushFailed ? `, push failed ${stat.pushFailed} (${Object.entries(stat.pushErrors).map(([k, v]) => k + "×" + v).join(" ")})` : "") +
     (stat.emergency ? `, emergency used ${stat.emergency}` : "") + `, emergency left ${stat.emergencyLeft}/3` + (stat.korwarWaiting ? `, korwar waiting ${stat.korwarWaiting}` : "") +
     `, quota ${Object.entries(stat.quotaUsed).map(([t, p]) => t.replace(/^(\w+):(?:\w+\/)?/, "$1:") + " " + p + "%").join(" ") || "-"}` +
     (stat.batches ? `, batches ${stat.batches}` : "") + `, images ${stat.images}` +
@@ -401,17 +404,34 @@ function webpush(appUrl, id, level) {
     fcmOptions: { link: `${appUrl}/${id ? "?id=" + id : ""}` }
   };
 }
-const BAD_TOKEN = /registration-token-not-registered|invalid-registration-token|invalid-argument/;
+// ลบเครื่องออกจากรายชื่อเฉพาะเมื่อ Firebase ยืนยันว่า token นั้นเลิกใช้แล้วจริงๆ เท่านั้น
+// (เดิมรวม invalid-argument ด้วย ทำให้ถ้าข้อความผิดรูปแบบครั้งเดียว ทุกเครื่องถูกลบทิ้งจนไม่ได้รับแจ้งเตือนอีก)
+const BAD_TOKEN = /registration-token-not-registered|invalid-registration-token/;
+const sid = s => s.ref && (s.ref.id || String(s.ref.path || "").split("/").pop());
 
+// ส่งแบบหลายเครื่อง คืน { sent, failed, errors: {รหัสข้อผิดพลาด: จำนวน}, perToken: Map(token → ok|รหัส) }
 async function sendMulticast(db, messaging, subs, msg, log) {
-  let sent = 0;
+  const out = { sent: 0, failed: 0, errors: {}, perToken: new Map() };
   for (let i = 0; i < subs.length; i += 500) {
     const chunk = subs.slice(i, i + 500);
     const res = await messaging.sendEachForMulticast({ ...msg, tokens: chunk.map(s => s.token) });
-    sent += res.successCount;
-    await Promise.all(res.responses.map((r, k) => !r.success && BAD_TOKEN.test(r.error?.code || "") ? chunk[k].ref.delete().catch(() => {}) : null));
+    out.sent += res.successCount || 0;
+    await Promise.all((res.responses || []).map((r, k) => {
+      if (r.success) { out.perToken.set(chunk[k].token, "ok"); return null }
+      const code = (r.error && (r.error.code || r.error.message)) || "unknown";
+      out.failed++; out.errors[code] = (out.errors[code] || 0) + 1; out.perToken.set(chunk[k].token, code);
+      log.warn("push to one device failed:", code);
+      return BAD_TOKEN.test(code) ? chunk[k].ref.delete().catch(() => {}) : null;
+    }));
   }
-  return sent;
+  return out;
+}
+// ผลการส่งล่าสุดของแต่ละเครื่อง ให้แอปแสดงในหน้าตั้งค่า (เอกสารชื่อเป็นรหัสลับของเครื่อง อ่านได้เฉพาะเครื่องที่รู้รหัส)
+async function logPush(db, subs, perToken, kind, title) {
+  await Promise.all(subs.filter(s => perToken.has(s.token) && sid(s)).map(s => {
+    const r = perToken.get(s.token);
+    return db.doc("pushlog/" + sid(s)).set({ at: new Date().toISOString(), kind, title: String(title || "").slice(0, 80), ok: r === "ok", error: r === "ok" ? null : String(r).slice(0, 120) }).catch(() => {});
+  }));
 }
 
 // ช่วงเวลางดแจ้งเตือน (เวลาเกาหลี) ของแต่ละเครื่อง / ข่าวสงครามเกาหลีด่วนมากแจ้งได้เสมอถ้าผู้ใช้เลือกไว้
@@ -422,38 +442,57 @@ function inQuiet(s, ms = Date.now()) {
   return from < to ? h >= from && h < to : h >= from || h < to; // เช่น 22 → 7 ข้ามเที่ยงคืน
 }
 const quietBlocks = (s, n, ms) => inQuiet(s, ms) && !(s.quietBypass !== false && (n.categories || []).includes("korwar") && n.level === "critical");
+// ระดับที่ผู้ใช้เลือก: critical = ด่วนมากเท่านั้น / high = ด่วนมาก + สำคัญ / all = ทุกข่าวใหม่ในหมวดที่เลือก
+const levelOk = (s, n) => n.level === "critical" || (s.level === "high" && n.level === "high") || s.level === "all";
+const MAX_PER_DEVICE = 4; // ต่อรอบ: เกินนี้รวมเป็นแจ้งเตือนเดียว "มีข่าวใหม่อีก N ข่าว"
 
 async function sendNews(db, messaging, news, appUrl, log) {
+  const out = { sent: 0, failed: 0, errors: {} };
+  const merge = r => { out.sent += r.sent; out.failed += r.failed; for (const [k, v] of Object.entries(r.errors)) out.errors[k] = (out.errors[k] || 0) + v };
   const snap = await db.collection("subscribers").where("enabled", "==", true).get();
   const subs = snap.docs.map(d => ({ ref: d.ref, ...d.data() })).filter(s => typeof s.token === "string");
-  let total = 0;
+  const count = new Map(), extra = new Map(), last = new Map();
   for (const n of news) {
-    const targets = subs.filter(s => Array.isArray(s.cats) && s.cats.some(c => n.categories.includes(c)) && (n.level === "critical" || s.level === "high") && !quietBlocks(s, n));
+    const wanted = subs.filter(s => Array.isArray(s.cats) && s.cats.some(c => (n.categories || []).includes(c)) && levelOk(s, n) && !quietBlocks(s, n));
+    const targets = wanted.filter(s => (count.get(s.token) || 0) < MAX_PER_DEVICE);
+    wanted.filter(s => !targets.includes(s)).forEach(s => extra.set(s.token, (extra.get(s.token) || 0) + 1));
     if (!targets.length) continue;
-    const tag = n.level === "critical" ? "🔴 ด่วนมาก" : "🟠 สำคัญ";
+    targets.forEach(s => count.set(s.token, (count.get(s.token) || 0) + 1));
+    const tag = n.level === "critical" ? "🔴 ด่วนมาก" : n.level === "high" ? "🟠 สำคัญ" : "🆕 ข่าวใหม่";
     try {
-      total += await sendMulticast(db, messaging, targets, {
+      const r = await sendMulticast(db, messaging, targets, {
         notification: { title: `${tag}: ${n.title.th}`.slice(0, 120), body: (n.summary.th || "").slice(0, 240) },
-        data: { id: n.id, level: n.level }, webpush: webpush(appUrl, n.id, n.level)
+        data: { id: String(n.id), level: String(n.level) }, webpush: webpush(appUrl, n.id, n.level)
       }, log);
-    } catch (e) { log.warn("push failed", n.id, e.message) }
+      merge(r); targets.forEach(s => last.set(s.token, { r: r.perToken.get(s.token), title: n.title.th }));
+    } catch (e) { log.warn("push failed", n.id, e.message); out.failed += targets.length; out.errors[e.code || e.message] = (out.errors[e.code || e.message] || 0) + targets.length }
   }
-  return total;
+  // ข่าวที่เกินโควตาต่อเครื่อง: รวมเป็นแจ้งเตือนเดียว
+  const byN = new Map();
+  for (const [tok, k] of extra) { if (!byN.has(k)) byN.set(k, []); byN.get(k).push(subs.find(s => s.token === tok)) }
+  for (const [k, list] of byN) {
+    try { merge(await sendMulticast(db, messaging, list, { notification: { title: "Korea Watch", body: `มีข่าวใหม่อีก ${k} ข่าว แตะเพื่ออ่าน` }, data: { id: "", level: "summary" }, webpush: webpush(appUrl, "", "summary") }, log)) } catch (e) { log.warn("summary push failed", e.message) }
+  }
+  const per = new Map([...last].map(([t, v]) => [t, v.r]));
+  await logPush(db, subs, per, "news", [...last.values()].pop()?.title);
+  return out;
 }
 
 async function sendTests(db, messaging, appUrl, log) {
   const snap = await db.collection("subscribers").where("testRequested", "==", true).limit(50).get();
-  if (snap.empty) return 0;
+  const out = { sent: 0, failed: 0, errors: {} };
+  if (snap.empty) return out;
   const subs = snap.docs.map(d => ({ ref: d.ref, ...d.data() })).filter(s => typeof s.token === "string");
-  let n = 0;
   try {
-    n = await sendMulticast(db, messaging, subs, {
+    const r = await sendMulticast(db, messaging, subs, {
       notification: { title: "Korea Watch: ทดสอบแจ้งเตือน", body: "ระบบส่งแจ้งเตือนถึงเครื่องนี้ได้แล้ว ข่าวด่วนจะเด้งแบบนี้" },
       data: { id: "", level: "test" }, webpush: webpush(appUrl, "", "test")
     }, log);
-  } catch (e) { log.warn("test push failed", e.message) }
+    Object.assign(out, { sent: r.sent, failed: r.failed, errors: r.errors });
+    await logPush(db, subs, r.perToken, "test", "ทดสอบแจ้งเตือน");
+  } catch (e) { log.warn("test push failed", e.message); out.failed = subs.length; out.errors[e.code || e.message] = subs.length }
   await Promise.all(subs.map(s => s.ref.update({ testRequested: false }).catch(() => {})));
-  return n;
+  return out;
 }
 
 async function main() {

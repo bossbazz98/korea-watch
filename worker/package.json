@@ -8,7 +8,7 @@
   "scripts": {
     "start": "node run.js",
     "dry-run": "node tools/dry-run.js",
-    "test": "node tools/selftest.js && node tools/selftest2.js && node tools/selftest3.js && node tools/selftest4.js && node tools/selftest5.js && node tools/selftest6.js && node tools/selftest7.js && node tools/selftest8.js && node tools/selftest9.js && node tools/selftest10.js",
+    "test": "node tools/selftest.js && node tools/selftest2.js && node tools/selftest3.js && node tools/selftest4.js && node tools/selftest5.js && node tools/selftest6.js && node tools/selftest7.js && node tools/selftest8.js && node tools/selftest9.js && node tools/selftest10.js && node tools/selftest11.js",
     "agent": "node agent.js"
   },
   "dependencies": {
