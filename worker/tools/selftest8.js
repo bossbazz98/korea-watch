@@ -55,7 +55,7 @@ const item = (id, x = {}) => ({ id, titleKo: KO[id] || "기사 " + id, title: { 
   const exe = process.env.AGENT_CHROMIUM || chromium?.executablePath();
   if (!chromium || !exe || !fs.existsSync(exe)) throw new Error("Chromium required: run npx playwright install chromium");
   const pub = path.join(__dirname, "..", "..", "public");
-  const srv = http.createServer((q, s) => { const f = path.join(pub, decodeURIComponent(q.url.split("?")[0]) === "/" ? "index.html" : decodeURIComponent(q.url.split("?")[0])); fs.readFile(f, (e, b) => { if (e) { s.writeHead(404); s.end(); return } s.writeHead(200, { "content-type": f.endsWith(".js") ? "text/javascript" : f.endsWith(".html") ? "text/html" : f.endsWith(".png") ? "image/png" : "application/octet-stream" }); s.end(b) }) }).listen(8799);
+  const srv = http.createServer((q, s) => { const f = path.join(pub, decodeURIComponent(q.url.split("?")[0]) === "/" ? "index.html" : decodeURIComponent(q.url.split("?")[0])); fs.readFile(f, (e, b) => { if (e) { s.writeHead(404); s.end(); return } s.writeHead(200, { "content-type": f.endsWith(".css") ? "text/css" : f.endsWith(".js") ? "text/javascript" : f.endsWith(".html") ? "text/html" : f.endsWith(".png") ? "image/png" : "application/octet-stream" }); s.end(b) }) }).listen(8799);
   const feedItems = [items[0], items[4], item("noimg"), item("mid", { image: "https://img.ok/3.jpg" })];
   const img = fs.readFileSync(path.join(pub, "icons", "icon-512.png"));
   const STUB = {
@@ -97,11 +97,12 @@ export function onSnapshot(ref,ok){setTimeout(()=>{if(ref==="meta/feed")ok({exis
       await page.waitForSelector('.card');
       assert.strictEqual(await page.locator('[data-cat="korwar"]').count(), 1, 'Korean Peninsula category is selectable');
       await page.locator('#bell').click();
-      await page.locator('#p-on').check();
+      await page.locator('label:has(#p-on)').click();
+      assert.strictEqual(await page.locator('#p-on').isChecked(), true);
       await page.locator('label:has(input[name="lv"][value="all"])').click();
-      await page.locator('#p-quiet').check();
-      await page.locator('#p-from').fill('22');
-      await page.locator('#p-to').fill('7');
+      await page.locator('label:has(#p-quiet)').click();
+      await page.locator('#p-from').selectOption('22');
+      await page.locator('#p-to').selectOption('7');
       await page.locator('#p-save').click();
       await page.waitForFunction(() => window.__writes?.length > 0);
       const write = await page.evaluate(() => window.__writes.at(-1));

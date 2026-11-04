@@ -31,3 +31,12 @@ Do not treat fixture success as proof of production permissions or delivered not
 - `npm run build:web` and all 12 self-test suites plus 10 regression cases passed under Node 25.9.0, including Chromium UI tests.
 - Added a Node 24 / 25.9.0 CI matrix. Remote CI outcomes are separate from these local test results.
 - Firestore emulator tests and live deployment remain unverified here, as described above.
+
+## Settings/reader UI validation — 2026-11-05 (Asia/Seoul)
+
+- All 12 existing suites and 10 reliability regression cases passed on Node.js 25.9.0.
+- Three audio tests passed, covering five distinct presets, live gain changes, mute, replacing a preview, stopping/disconnecting voices and cancellation while AudioContext resumes. Audio nodes are mocked in these unit tests.
+- Real Chromium UI checks passed at 320×640, 390×844 and 1280×900: theme override/system mode, locale persistence, preserved notification drafts, tone/volume/mute persistence, preview and stop, no horizontal overflow, sticky settings actions, and close-button hit testing with the article image scrolled behind the toolbar.
+- The existing fixture UI suite also saves an authenticated subscription with quiet hours using the redesigned controls.
+- Light/dark and reader screenshots are included under docs/ui for review.
+- Native iOS/Safari hardware, OS-level push audio and live Firebase delivery were not exercised. The selected tones apply only to foreground urgent alerts.

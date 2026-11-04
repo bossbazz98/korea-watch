@@ -13,3 +13,13 @@
 - Mac setup, env-file preload with external service-account path, static server, CI and security-rule tests.
 
 Not a promise of complete semantic deduplication, exactly-once FCM delivery, production readiness without credential tests, or guaranteed emergency-alert latency. See README-iMac.md.
+
+## Settings and reader refresh
+
+- Four grouped settings cards with pinned header/footer and independently scrolling content.
+- Language controls moved from the main header into settings; unsaved notification drafts survive language changes.
+- Persistent system/light/dark preference, initial-load theme application, and matching browser theme color.
+- Five locally synthesized foreground sounds, live volume slider, preview/stop controls, mute, and cleanup on close/background. No external audio downloads.
+- Reader toolbar is outside the image scroll area, keeping the close button visible and clickable.
+- New assets included in offline precache; CSS MIME support in the local/test servers and refreshed hosting cache headers.
+- Chromium coverage at 320, 390 and 1280 pixels; audio lifecycle/volume/cancellation tests.

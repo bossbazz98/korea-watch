@@ -21,7 +21,7 @@
         ]
       },
       {
-        "source": "/@(index.html|app.js|firebase-config.js|manifest.webmanifest)",
+        "source": "/@(index.html|app.js|audio.js|settings.css|categories.js|cache-manifest.js|firebase-config.js|manifest.webmanifest)",
         "headers": [
           {
             "key": "Cache-Control",
