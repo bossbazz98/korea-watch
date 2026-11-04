@@ -51,3 +51,10 @@ Do not treat fixture success as proof of production permissions or delivered not
 - Updated Firestore Emulator tests cover save-after-test, preserving pending requests, replay/history-erasure denial, cross-user denial, cooldown expiry and disabling. New rules have not been compiled/executed here: the proxy explicitly denied the official emulator download (CONNECT 403). Run npm run test:rules on the iMac/CI before deployment.
 - Live public status and Actions API diagnosis was attempted but those destinations were also denied by cloud networking. No production credentials, rules, data or notification state were modified.
 - Native device push delivery, deployed rules and live category output remain to be confirmed after rules/Hosting deployment and merging/running the new worker on main.
+
+## CI investigation after PR #4
+
+- GitHub job pages confirm npm install, web build and browser installation succeeded; failure occurred in npm test, before rules tests. Other matrix jobs were canceled by fail-fast. Detailed failing assertion requires authenticated log access and is not inferred from exit code 1.
+- Settings UI tests now select the installed full Chromium executable consistently with selftest8 and local runs, rather than implicitly switching to headless shell on CI. All existing UI assertions remain enabled. Local changed UI tests passed on Chromium 154.
+- CI no longer cancels the sibling Node version on failure. It retains npm output, screenshots and emulator diagnostics, and includes the last 100 npm-test lines in the run summary. Pipeline exit status is preserved with pipefail.
+- Remote CI success and the original assertion remain unconfirmed until the new run finishes / detailed log is available.

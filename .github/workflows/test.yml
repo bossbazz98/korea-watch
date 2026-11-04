@@ -10,6 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
+      fail-fast: false
       matrix:
         node: [24, 25.9.0]
     defaults:
@@ -29,5 +30,34 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - run: npm run build:web
       - run: npx playwright install --with-deps chromium
-      - run: npm test
+      - name: Run npm test
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee test-output.log
       - run: npm run test:rules
+
+      - name: Save test diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: test-diagnostics-node-${{ matrix.node }}-${{ github.run_id }}
+          path: |
+            worker/agent-out/
+            worker/test-output.log
+            firestore-debug.log
+            worker/firestore-debug.log
+            firebase-debug.log
+            worker/firebase-debug.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Summarize test failure
+        if: failure()
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          if (fs.existsSync('test-output.log')) {
+            const tail = fs.readFileSync('test-output.log', 'utf8').split('\n').slice(-100).join('\n');
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, '### npm test output (last 100 lines)\n\n```text\n' + tail + '\n```\n');
+          }
+          NODE

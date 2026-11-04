@@ -24,7 +24,10 @@ const server = http.createServer((request, response) => {
 (async () => {
   await new Promise(resolve => server.listen(port, '127.0.0.1', resolve));
   fs.mkdirSync(out, { recursive: true });
-  const browser = await chromium.launch(process.env.AGENT_CHROMIUM ? { executablePath: process.env.AGENT_CHROMIUM } : {});
+  const executablePath = process.env.AGENT_CHROMIUM || chromium.executablePath();
+  if (!fs.existsSync(executablePath)) throw new Error('Chromium required: run npx playwright install chromium');
+  const browser = await chromium.launch({ executablePath });
+  console.log('Settings UI browser: ' + browser.version());
   try {
     for (const scenario of [
       { name: 'mobile', width: 390, height: 844 },
@@ -121,6 +124,10 @@ const server = http.createServer((request, response) => {
         assert(await page.locator('#sheet').isHidden());
         assert.deepEqual(errors, []);
         console.log(`Settings UI: ${scenario.name} passed theme/language/audio persistence, draft, layout and scrolled-reader checks`);
+      } catch (error) {
+        await page.screenshot({path:path.join(out, `settings-${scenario.name}-failure.png`)}).catch(()=>{});
+        console.error('UI failure context:', await page.evaluate(()=>({url:location.pathname,notification:typeof Notification,permission:typeof Notification==='undefined'?'unavailable':Notification.permission,refreshReads:window.__refreshReads,theme:document.documentElement.dataset.theme,scrollY,errors:document.querySelector('#toast')?.textContent})).catch(()=>({})));
+        throw error;
       } finally { await context.close(); }
     }
   } finally { await browser.close(); }
