@@ -1,4 +1,4 @@
-const { allItems } = require("./test-data");
+const { allItems, thaiTitle } = require("./test-data");
 // ทดสอบระบบส่งแจ้งเตือน: ไม่ลบเครื่องผิดๆ, ระดับ "ทุกข่าว", จำกัด 4 ต่อเครื่องต่อรอบ, บันทึกผลต่อเครื่อง, ช่วงงดแจ้งเตือน: node tools/selftest11.js
 const assert = require("assert");
 const { runOnce } = require("../run");
@@ -13,7 +13,7 @@ function fakeDb() {
 const AI = async (url, opt) => {
   if (!/groq|github|generativelanguage/.test(url)) return { ok: true, text: async () => "<rss><channel></channel></rss>", arrayBuffer: async () => Buffer.from("") };
   const b = JSON.parse(opt.body), input = JSON.parse(b.messages[1].content);
-  return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content: JSON.stringify({ items: input.map(x => ({ i: x.i, relevant: true, categories: x.guessedCategories, level: x.headline.includes("긴급") ? "critical" : "normal", title: { th: "ข่าว " + x.headline, en: "n" }, summary: { th: "สรุป", en: "s" }, body_th: ["ก"] })) }) } }] }) };
+  return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content: JSON.stringify({ items: input.map(x => ({ i: x.i, relevant: true, categories: x.guessedCategories, level: x.headline.includes("긴급") ? "critical" : "normal", title: { th: thaiTitle(x.headline), en: "n" }, summary: { th: "สรุป", en: "s" }, body_th: ["ก"] })) }) } }] }) };
 };
 const item = (id, ko, cats) => ({ id, titleKo: ko, title: { ko }, summary: {}, body: {}, categories: cats, level: "normal", translated: false, attempts: 0, publishedAt: new Date(now - 600e3).toISOString(), addedAt: new Date(now).toISOString(), source: "KBS", sourceUrl: "https://x/" + id, links: [] });
 const H = "a".repeat(64), H2 = "b".repeat(64), H3 = "c".repeat(64), H4 = "d".repeat(64);

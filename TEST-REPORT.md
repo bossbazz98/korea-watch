@@ -20,3 +20,41 @@ The UI tests use mocked Firebase/AI and an actual Chromium browser. They cover t
 - Production Firebase/FCM/AI calls, real push delivery, Apple hardware/browser behaviour, and deployment: NOT VALIDATED.
 
 Do not treat fixture success as proof of production permissions or delivered notifications. Enable Anonymous Authentication, run the rules emulator tests, and use a test Firebase project before deploying to production.
+
+
+## Node.js 25.9.0 compatibility — 2026-11-05 (Asia/Seoul)
+
+- Updated the project engine declaration and Mac setup guard to accept Node 25.9+, while keeping Node 24.15+ support.
+- Verified using the actual Node.js v25.9.0 binary on Linux. Native macOS execution and live Firebase calls are not claimed.
+- Clean `npm ci --offline --no-audit --no-fund` installation passed with the populated package cache and normal integrity checks. npm emitted an EBADENGINE warning for superstatic@10.0.0, whose declared engines list Node 20/22/24. Dependency engine declarations were not altered or suppressed.
+- Firebase CLI started successfully and reported version 15.34.2 under Node 25.9.0.
+- `npm run build:web` and all 12 self-test suites plus 10 regression cases passed under Node 25.9.0, including Chromium UI tests.
+- Added a Node 24 / 25.9.0 CI matrix. Remote CI outcomes are separate from these local test results.
+- Firestore emulator tests and live deployment remain unverified here, as described above.
+
+## Settings/reader UI validation — 2026-11-05 (Asia/Seoul)
+
+- All 12 existing suites and 10 reliability regression cases passed on Node.js 25.9.0.
+- Three audio tests passed, covering five distinct presets, live gain changes, mute, replacing a preview, stopping/disconnecting voices and cancellation while AudioContext resumes. Audio nodes are mocked in these unit tests.
+- Real Chromium UI checks passed at 320×640, 390×844 and 1280×900: theme override/system mode, locale persistence, preserved notification drafts, tone/volume/mute persistence, preview and stop, no horizontal overflow, sticky settings actions, and close-button hit testing with the article image scrolled behind the toolbar.
+- The existing fixture UI suite also saves an authenticated subscription with quiet hours using the redesigned controls.
+- Light/dark and reader screenshots are included under docs/ui for review.
+- Native iOS/Safari hardware, OS-level push audio and live Firebase delivery were not exercised. The selected tones apply only to foreground urgent alerts.
+
+## Follow-up fixes — 2026-11-05 (Asia/Seoul)
+
+- Existing suites were adapted to the shared Thai-field validation: fixtures representing successful translations no longer copy Korean headlines into Thai fields. Explicit invalid-language cases remain rejected.
+- Regression cases exercise an 80-item Korean backlog alongside all 11 other categories, which publish across two worker rounds; another case repairs a Korean summary/body behind a Thai headline without sending a duplicate alert.
+- Subscription unit tests cover preserving lastTestAt/pending requests, cooldown, disabling, and first real registration when local preferences incorrectly said enabled.
+- Chromium fixture tests call the real browser showNotification API successfully on enable, verify a server-test request is written, then edit settings again without clearing the timestamp or pending request. This is not a claim of delivery to the user's physical device.
+- UI checks cover one settings entry point, monochrome selection controls, seven sounds and server refresh on scrolling to the bottom with cooldown and manual retry.
+- Updated Firestore Emulator tests cover save-after-test, preserving pending requests, replay/history-erasure denial, cross-user denial, cooldown expiry and disabling. New rules have not been compiled/executed here: the proxy explicitly denied the official emulator download (CONNECT 403). Run npm run test:rules on the iMac/CI before deployment.
+- Live public status and Actions API diagnosis was attempted but those destinations were also denied by cloud networking. No production credentials, rules, data or notification state were modified.
+- Native device push delivery, deployed rules and live category output remain to be confirmed after rules/Hosting deployment and merging/running the new worker on main.
+
+## CI investigation after PR #4
+
+- GitHub job pages confirm npm install, web build and browser installation succeeded; failure occurred in npm test, before rules tests. Other matrix jobs were canceled by fail-fast. Detailed failing assertion requires authenticated log access and is not inferred from exit code 1.
+- Settings UI tests now select the installed full Chromium executable consistently with selftest8 and local runs, rather than implicitly switching to headless shell on CI. All existing UI assertions remain enabled. Local changed UI tests passed on Chromium 154.
+- CI no longer cancels the sibling Node version on failure. It retains npm output, screenshots and emulator diagnostics, and includes the last 100 npm-test lines in the run summary. Pipeline exit status is preserved with pipefail.
+- Remote CI success and the original assertion remain unconfirmed until the new run finishes / detailed log is available.

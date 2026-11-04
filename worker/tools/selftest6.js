@@ -1,4 +1,4 @@
-const { allItems } = require("./test-data");
+const { allItems, thaiTitle } = require("./test-data");
 // ทดสอบ Groq (ตัวหลัก) + Gemini (สำรอง) + คิวแปลด่วน + แปลหัวข้อก่อน: node tools/selftest6.js
 const assert = require("assert");
 const { translate, translateTitles } = require("../lib/translate");
@@ -19,14 +19,14 @@ function mockAI({ groq = "ok", gemini = "ok" } = {}) {
       if (mode === "nojson" && b.response_format) return { ok: false, status: 400, json: async () => ({ error: { message: "response_format json_object is not supported for this model" } }) };
       const input = JSON.parse(b.messages[1].content);
       const titles = b.messages[0].content.startsWith("Translate Korean news headlines");
-      const items = input.map(x => titles ? { i: x.i, th: "หัวข้อ " + x.headline, en: "T" } : fullItem(x, "groq"));
+      const items = input.map(x => titles ? { i: x.i, th: thaiTitle(x.headline, "หัวข้อ"), en: "T" } : fullItem(x, "groq"));
       return { ok: true, status: 200, json: async () => ({ choices: [{ finish_reason: "stop", message: { content: JSON.stringify({ items }) } }] }) };
     }
     calls.push({ p: "gemini", m: decodeURIComponent(url.split("/models/")[1].split(":")[0]) });
     if (gemini === 503) return { ok: false, status: 503, json: async () => ({ error: { message: "high demand" } }) };
     const input = JSON.parse(b.contents[0].parts[0].text);
     const titles = b.systemInstruction.parts[0].text.startsWith("Translate Korean news headlines");
-    const items = input.map(x => titles ? { i: x.i, th: "หัวข้อ " + x.headline, en: "T" } : fullItem(x, "gemini"));
+    const items = input.map(x => titles ? { i: x.i, th: thaiTitle(x.headline, "หัวข้อ"), en: "T" } : fullItem(x, "gemini"));
     return { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: JSON.stringify({ items }) }] } }] }) };
   };
   return { f, calls };
@@ -64,7 +64,7 @@ const one = [{ titleKo: "북한 미사일", snippet: "", source: "KBS", cats: ["
   // 6) แปลหัวข้อทีละ 40
   m = mockAI();
   const t = await translateTitles(Array.from({ length: 40 }, (_, k) => ({ titleKo: "제목 " + k })), { groqKey: "gk", fetchImpl: m.f, log, waitMs: 0 });
-  assert.strictEqual(t.results.filter(Boolean).length, 40); assert.strictEqual(t.results[7].th, "หัวข้อ 제목 7");
+  assert.strictEqual(t.results.filter(Boolean).length, 40); assert.strictEqual(t.results[7].th, thaiTitle("제목 7", "หัวข้อ"));
 
   // 7) ในรอบจริง: คิวแปลด่วนได้แปลก่อน → แปลหัวข้อทีละ 40 → แปลเต็มที่เหลือ / ล้างคิวที่เสร็จแล้ว
   const data = new Map();

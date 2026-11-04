@@ -51,7 +51,7 @@ const web = async (url, opt = {}) => {
   const ref = p => ({ async get() { const d = data.get(p); return { exists: !!d, data: () => JSON.parse(JSON.stringify(d)) } }, async set(v) { data.set(p, JSON.parse(JSON.stringify(v))) }, async update() { }, async delete() { } });
   const db = { doc: ref, collection: () => ({ where() { return this }, limit() { return this }, async get() { return { empty: true, docs: [] } } }) };
   const now = Date.now();
-  const base = { titleKo: "x", title: { th: "ก", en: "a" }, summary: {}, body: {}, categories: ["war"], level: "normal", translated: true, publishedAt: new Date(now - 6e5).toISOString(), source: "연합뉴스" };
+  const base = { titleKo: "x", title: { th: "ก", en: "a" }, summary: {th:"สรุปข่าว"}, body: {}, categories: ["war"], level: "normal", translated: true, publishedAt: new Date(now - 6e5).toISOString(), source: "연합뉴스" };
   data.set("meta/feed", { v: 8, items: [
     { ...base, id: "g", sourceUrl: GLINK, links: [{ label: "연합뉴스", url: GLINK }] },
     { ...base, id: "b", sourceUrl: "https://broken.example/news", links: [] },

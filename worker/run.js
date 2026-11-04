@@ -13,7 +13,9 @@ const { CAT_KEYS, FEEDS } = require("./feeds");
 const { resolveArticle } = require("./lib/images");
 const { grams, similarity, SAME_KO, SAME_TH } = require("./lib/similar");
 const { Quota } = require("./lib/quota");
-const { persist } = require("./lib/storage");
+const { persist, prepare } = require("./lib/storage");
+const { balancedQueue } = require("./lib/scheduler");
+const { completeThai } = require("../public/news-text");
 
 const CFG = {
   MAX_TRANSLATE: 16,   // ข่าวที่แปลเต็ม (สรุปละเอียด) ต่อรอบ
@@ -55,16 +57,27 @@ const bodyLen = i => ((i.body && i.body.th) || []).join("").length;
 // ข่าวที่แสดงในแอป: แปลเสร็จแล้ว หรือเป็นข่าวสงครามเกาหลี (ขึ้นก่อนแล้วค่อยแปล)
 const shown = i => i.translated || isKorwar(i);
 
-async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken, models = DEFAULT_MODELS, groqModels = GROQ_MODELS, githubModels = GITHUB_MODELS, fetchImpl = fetch, now = Date.now(), log = console, waitMs = 2000, budgetMs = CFG.TIME_BUDGET_MS, imgBudgetMs = 45000, watchEveryMs = CFG.WATCH_EVERY_MS }) {
+async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken, models = DEFAULT_MODELS, groqModels = GROQ_MODELS, githubModels = GITHUB_MODELS, fetchImpl = fetch, now = Date.now(), log = console, waitMs = 2000, budgetMs = CFG.TIME_BUDGET_MS, imgBudgetMs = 45000, watchEveryMs = CFG.WATCH_EVERY_MS, forceAIProbe = false }) {
   const runStart = Date.now(), runDeadline = runStart + budgetMs;
   const feedRef = db.doc("meta/feed"), seenRef = db.doc("meta/seen"), statusRef = db.doc("meta/status"), quotaRef = db.doc("meta/quota");
   const [feedSnap, seenSnap, quotaSnap, pendingSnap] = await Promise.all([feedRef.get(), seenRef.get(), quotaRef.get(), db.doc("meta/pending").get()]);
   let items = [...new Map([...(feedSnap.exists ? (feedSnap.data().items || []) : []), ...(pendingSnap.exists ? (pendingSnap.data().items || []) : [])].map(i => [i.id, i])).values()];
   const seen = seenSnap.exists ? { ...(seenSnap.data().ids || {}) } : {};
   const quota = new Quota(quotaSnap.exists ? quotaSnap.data() : {}, now);
+  if (forceAIProbe) quota.disabled = {}; // Explicit manual runs can retry repaired credentials; daily limits remain intact.
   const stat = { lastRun: iso(now), added: 0, merged: 0, translated: 0, dropped: 0, pushed: 0, feedErrors: [], lastError: null, korwar: 0, emergency: 0 };
   let feedChanged = (feedSnap.exists ? (feedSnap.data().items || []) : []).some(i => !shown(i)), seenChanged = false;
 
+  // Repair previously published records whose Thai fields still contain Korean.
+  for (const item of items) {
+    if (!item.translated || completeThai(item)) continue;
+    item.snippetKo ||= item.summary?.ko || item.summary?.th || '';
+    item.translated = false; item.retranslation = true; item.attempts = 0;
+    item.title = { ko: item.titleKo || '' }; delete item.rich; delete item.lastTry;
+    feedChanged = true;
+  }
+  stat.workerCommit = process.env.GITHUB_SHA || 'local';
+  stat.workerBranch = process.env.GITHUB_REF_NAME || 'local';
   const FEED_V = 8;
   const oldV = feedSnap.exists ? (feedSnap.data().v || 1) : FEED_V;
   if (oldV < FEED_V) {
@@ -144,6 +157,8 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
       const twin = pool.find(p => Math.abs(Date.parse(p.i.publishedAt) - Date.parse(n.publishedAt)) <= win && similarity(p.g, g) >= SAME_KO);
       if (twin) { // ข่าวเดิมเรื่องเดียวกัน: เพิ่มเป็นแหล่งข่าว
         addSource(twin.i, n.source, n.link); (n.alts || []).forEach(a => addSource(twin.i, a.source, a.link));
+        twin.i.categories = [...new Set([...(twin.i.categories || []), ...n.cats])];
+        twin.i.emergency ||= n.emergency;
         if (!twin.i.image && n.image) twin.i.image = n.image;
         stat.merged++; feedChanged = true; continue;
       }
@@ -214,8 +229,9 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
       Object.assign(it, { title: r.title, summary: r.summary, body: r.body, tips: r.tips, categories: r.categories, level: r.level, translated: true });
       if (hadText) { it.rich = true; delete it.needsEnrich } else if (!wasNew) it.enrichTries = (it.enrichTries || 0) + 1;
       delete it.snippetKo; delete it.attempts; delete it.lastTry; delete it.titleTries;
-      if (wasNew) { stat.translated++; if (now - Date.parse(it.publishedAt) < CFG.PUSH_WINDOW_H * 3600e3) toPush.push(it) }
+      if (wasNew) { stat.translated++; if (!it.retranslation && now - Date.parse(it.publishedAt) < CFG.PUSH_WINDOW_H * 3600e3) toPush.push(it) }
       else stat.enriched++;
+      delete it.retranslation;
     });
     feedChanged = true;
   };
@@ -355,9 +371,9 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
     });
 
     // (ค) แปลเต็มข่าวที่เหลือ พร้อมกันหลายช่องทาง (คิวด่วนก่อน แล้วหมวดสำคัญ ข่าวใหม่ก่อน) ตามด้วยเขียนข่าวเก่าที่สั้นใหม่
-    const queue = items.filter(i => due(i) && !tried.has(i.id))
-      .sort((a, b) => (prIds.has(b.id) - prIds.has(a.id)) || (!!b.emergency - !!a.emergency) || rank(a) - rank(b) || b.publishedAt.localeCompare(a.publishedAt))
-      .slice(0, Math.max(0, CFG.MAX_TRANSLATE - tried.size));
+    // Korean Peninsula fast-lane work cannot also consume every normal translation slot.
+    const pool = items.filter(i => due(i) && !tried.has(i.id) && (!isKorwar(i) || korwarDone.size < CFG.KORWAR_PER_RUN));
+    const queue = balancedQueue(pool, Math.max(0, CFG.MAX_TRANSLATE - tried.size), { now, priorityIds: prIds });
     const enrichQ = items.filter(i => enrichDue(i) && !tried.has(i.id))
       .sort((a, b) => (!!b.needsEnrich - !!a.needsEnrich) || rank(a) - rank(b) || b.publishedAt.localeCompare(a.publishedAt))
       .slice(0, CFG.ENRICH_PER_RUN);
@@ -411,8 +427,8 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
   // ตัดข่าวเก่าและคุมขนาดเอกสาร
   const cut = now - CFG.KEEP_DAYS * DAY;
   const before = items.length;
-  items = items.filter(i => (Date.parse(i.publishedAt) || 0) >= cut).sort((a, b) => b.publishedAt.localeCompare(a.publishedAt)).slice(0, CFG.FEED_MAX);
-  while (items.length && Buffer.byteLength(JSON.stringify(items)) > CFG.FEED_MAX_BYTES) items.pop();
+  const retained = prepare(items.filter(i => (Date.parse(i.publishedAt) || 0) >= cut), CFG.FEED_MAX_BYTES, CFG.FEED_MAX);
+  items = [...retained.published, ...retained.pending];
   if (items.length !== before) feedChanged = true;
   for (const [id, t] of Object.entries(seen)) if (now - t > CFG.SEEN_DAYS * DAY) { delete seen[id]; seenChanged = true; }
 
@@ -444,6 +460,8 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
   stat.lastSuccessfulPublishAt = publishedAt;
   stat.lastSuccessfulRunAt = iso(Date.now());
   stat.pending = items.filter(i => !i.translated).length;
+  stat.publishedByCategory = Object.fromEntries(CAT_KEYS.map(key => [key, items.filter(i => i.translated && i.categories?.includes(key)).length]));
+  stat.pendingByCategory = Object.fromEntries(CAT_KEYS.map(key => [key, items.filter(i => !i.translated && i.categories?.includes(key)).length]));
   stat.hidden = items.filter(i => !shown(i)).length;
   stat.total = items.length;
   stat.emergencyLeft = quota.emergencyLeft();
@@ -626,6 +644,7 @@ async function main() {
   const pref = (v, list) => v ? [v, ...list.filter(m => m !== v)] : list;
   await runOnce({
     db: getFirestore(), messaging: getMessaging(), appUrl,
+    forceAIProbe: process.env.GITHUB_EVENT_NAME === 'workflow_dispatch' || process.env.AI_FORCE_PROBE === '1',
     geminiKey: process.env.GEMINI_API_KEY, groqKey: process.env.GROQ_API_KEY, githubToken: process.env.GITHUB_TOKEN,
     models: pref(process.env.GEMINI_MODEL, DEFAULT_MODELS), groqModels: pref(process.env.GROQ_MODEL, GROQ_MODELS), githubModels: pref(process.env.GITHUB_MODEL, GITHUB_MODELS)
   });

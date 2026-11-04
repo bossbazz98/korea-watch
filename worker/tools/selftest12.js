@@ -1,4 +1,4 @@
-const { allItems } = require("./test-data");
+const { allItems, thaiTitle } = require("./test-data");
 // ทดสอบสถานการณ์จริงจากภาพหน้าจอ: ข่าวสงครามเกาหลีค้างหลายข่าว ข่าวเก่าไม่เคยได้คิว GitHub Models 403 Groq 429
 // node tools/selftest12.js
 const assert = require("assert");
@@ -32,8 +32,8 @@ const kw = (k, x = {}) => ({ id: "kw" + k, titleKo: KO[k], title: { ko: KO[k] },
     calls.push({ tag, titles: sys.startsWith("Translate Korean"), n: input.length, art: input.map(x => (x.article || "").length) });
     if (tag.startsWith("github")) return { ok: false, status: 403, headers: hdr({}), json: async () => ({ error: { message: "The 'models' permission is required" } }) };
     if (tag === "groq:openai/gpt-oss-20b" && groq20bHits++ === 0) return { ok: false, status: 429, headers: hdr({ "retry-after": "2" }), json: async () => ({ error: { message: "Rate limit reached for model openai/gpt-oss-20b: tokens per minute" } }) };
-    const items = input.map(x => sys.startsWith("Translate Korean") ? { i: x.i, th: "หัวข้อไทย " + x.headline.slice(0, 6), en: "T" } :
-      { i: x.i, relevant: true, categories: ["korwar"], level: "high", title: { th: "ข่าวไทย " + x.headline.slice(0, 6), en: "t" }, summary: { th: "สรุป", en: "s" }, body_th: ["ก", "ข"] });
+    const items = input.map(x => sys.startsWith("Translate Korean") ? { i: x.i, th: thaiTitle(x.headline, "หัวข้อไทย"), en: "T" } :
+      { i: x.i, relevant: true, categories: ["korwar"], level: "high", title: { th: thaiTitle(x.headline, "ข่าวไทย"), en: "t" }, summary: { th: "สรุป", en: "s" }, body_th: ["ก", "ข"] });
     const content = JSON.stringify({ items });
     await new Promise(r => setTimeout(r, 600));
     return { ok: true, status: 200, headers: hdr({ "x-ratelimit-remaining-tokens": "50000", "x-ratelimit-reset-tokens": "5s" }), json: async () => url.includes("generativelanguage") ? { candidates: [{ content: { parts: [{ text: content }] } }] } : { usage: { total_tokens: 800 }, choices: [{ message: { content } }] } };

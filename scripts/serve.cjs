@@ -1,7 +1,7 @@
 // Static development server: no production writes or dependencies.
 const http=require('http'),fs=require('fs'),path=require('path');
 const root=path.resolve(__dirname,'../public');
-const types={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.json':'application/json','.webmanifest':'application/manifest+json','.png':'image/png'};
+const types={'.css':'text/css; charset=utf-8','.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.json':'application/json','.webmanifest':'application/manifest+json','.png':'image/png'};
 const server=http.createServer((q,s)=>{
   let file;
   try { const pathname=decodeURIComponent(new URL(q.url,'http://localhost').pathname);file=path.resolve(root,'.'+(pathname==='/'?'/index.html':pathname));if(!file.startsWith(root+path.sep)) throw Error(); }
