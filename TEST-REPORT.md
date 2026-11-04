@@ -20,3 +20,14 @@ The UI tests use mocked Firebase/AI and an actual Chromium browser. They cover t
 - Production Firebase/FCM/AI calls, real push delivery, Apple hardware/browser behaviour, and deployment: NOT VALIDATED.
 
 Do not treat fixture success as proof of production permissions or delivered notifications. Enable Anonymous Authentication, run the rules emulator tests, and use a test Firebase project before deploying to production.
+
+
+## Node.js 25.9.0 compatibility — 2026-11-05 (Asia/Seoul)
+
+- Updated the project engine declaration and Mac setup guard to accept Node 25.9+, while keeping Node 24.15+ support.
+- Verified using the actual Node.js v25.9.0 binary on Linux. Native macOS execution and live Firebase calls are not claimed.
+- Clean `npm ci --offline --no-audit --no-fund` installation passed with the populated package cache and normal integrity checks. npm emitted an EBADENGINE warning for superstatic@10.0.0, whose declared engines list Node 20/22/24. Dependency engine declarations were not altered or suppressed.
+- Firebase CLI started successfully and reported version 15.34.2 under Node 25.9.0.
+- `npm run build:web` and all 12 self-test suites plus 10 regression cases passed under Node 25.9.0, including Chromium UI tests.
+- Added a Node 24 / 25.9.0 CI matrix. Remote CI outcomes are separate from these local test results.
+- Firestore emulator tests and live deployment remain unverified here, as described above.

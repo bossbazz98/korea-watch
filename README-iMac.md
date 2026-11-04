@@ -4,7 +4,7 @@
 
 ## 1. เตรียมเครื่อง
 
-- ใช้ Node.js 24 LTS รุ่น 24.15 ขึ้นไป (ทั้ง Apple Silicon และ Intel ใช้ได้ตามที่ Node/Playwright รองรับ)
+- ใช้ Node.js 24 LTS รุ่น 24.15 ขึ้นไป หรือ Node.js 25 รุ่น 25.9 ขึ้นไป (ทั้ง Apple Silicon และ Intel ใช้ได้ตามที่ Node/Playwright รองรับ)
 - หากต้องทดสอบ Firestore rules ให้ติดตั้ง JDK 21 ด้วย
 - ดาวน์โหลด Node จากเว็บไซต์ทางการ หรือใช้เครื่องมือจัดการเวอร์ชันที่มีอยู่
 - แตก ZIP แล้วย้าย Terminal เข้าโฟลเดอร์ `korea-watch`
@@ -27,6 +27,8 @@ npm run test:rules
 ```
 
 `npm test` ต้องมี Chromium จริง หากไม่มีจะรายงานล้มเหลว ไม่ข้ามแล้วอ้างว่าผ่าน ส่วน `npm run test:rules` ใช้ demo project และ emulator บนพอร์ต 8085 ไม่ใช้ฐานข้อมูล production
+
+Node 25: เครื่องมือบางแพ็กเกจที่มากับ Firebase CLI ยังไม่ได้ระบุ Node 25 ใน engines และ npm อาจแสดง EBADENGINE warning แม้โค้ดแอปจะทำงานได้ หากเครื่องตั้ง engine-strict=true การติดตั้งอาจหยุดที่แพ็กเกจนี้ ควรใช้ Node 24 หรือวิเคราะห์ error ก่อน ไม่ต้องแก้ checksum หรือปิดการตรวจ TLS รายงานทดสอบระบุระบบที่ใช้จริงไว้ใน TEST-REPORT.md
 
 ## 2. เปิดหน้าเว็บในเครื่อง
 
