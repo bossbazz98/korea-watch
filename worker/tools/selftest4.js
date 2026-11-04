@@ -1,3 +1,4 @@
+const { allItems } = require("./test-data");
 // ทดสอบการหาภาพข่าวด้วยหน้าเว็บจำลอง: node tools/selftest4.js
 const assert = require("assert");
 const { decodeGoogleNews, findOgImage, resolveArticle } = require("../lib/images");
@@ -60,7 +61,7 @@ const web = async (url, opt = {}) => {
   ] });
   const fetchAll = async (url, opt) => url.includes("news.google.com/rss/search") || url.includes("rss?hl") || url.includes("yonhapnewstv") ? res("<rss><channel></channel></rss>") : web(url, opt);
   const st = await runOnce({ db, messaging: {}, appUrl: "https://x", geminiKey: "", fetchImpl: fetchAll, now, log: { log() {}, warn() {} }, waitMs: 0 });
-  const f = data.get("meta/feed").items, by = id => f.find(i => i.id === id);
+  const f = allItems(data), by = id => f.find(i => i.id === id);
   assert.strictEqual(by("g").image, "https://img.yna.co.kr/photo/AKR1.jpg?a=1&b=2");
   assert.strictEqual(by("g").sourceUrl, REAL); assert.strictEqual(by("g").links[0].url, REAL, "button now opens the real article");
   assert.strictEqual(by("b").imgTries, 1); assert.strictEqual(by("n").imgTries, 3, "no image found → counted");

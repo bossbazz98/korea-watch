@@ -1,25 +1,34 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // ทุกคนอ่านข่าวและสถานะได้ เขียนได้เฉพาะตัวค้นข่าว (ใช้สิทธิ์ผู้ดูแลจึงข้ามกฎนี้)
-    match /meta/feed   { allow read: if true; allow write: if false; }
+    match /meta/feed { allow read: if true; allow write: if false; }
     match /meta/status { allow read: if true; allow write: if false; }
-
-    // แต่ละเครื่องบันทึกการตั้งค่าแจ้งเตือนของตัวเองได้ อ่านหรือลบของคนอื่นไม่ได้
-    match /subscribers/{id} {
-      allow read, delete: if false;
-      allow create, update: if
-        request.resource.data.keys().hasOnly(['token', 'cats', 'level', 'enabled', 'testRequested', 'updatedAt', 'lang'])
-        && request.resource.data.token is string
-        && request.resource.data.token.size() > 20
-        && request.resource.data.token.size() < 4096
-        && request.resource.data.cats is list
-        && request.resource.data.cats.size() <= 20
-        && request.resource.data.level in ['critical', 'high']
-        && request.resource.data.enabled is bool
-        && request.resource.data.testRequested is bool;
+    function owner(id) { return request.auth != null && request.auth.uid == id; }
+    function validSub() {
+      let d = request.resource.data;
+      return d.keys().hasOnly(['token','cats','level','enabled','testRequested','updatedAt','lang','subscriptionVersion','quietOn','quietFrom','quietTo','quietBypass','lastTestAt'])
+        && d.keys().hasAll(['token','cats','level','enabled','testRequested','updatedAt','lang','subscriptionVersion','quietOn','quietFrom','quietTo','quietBypass'])
+        && d.token is string && d.token.size() > 20 && d.token.size() < 4096
+        && d.cats is list && d.cats.size() > 0 && d.cats.size() <= 12
+        && d.cats.hasOnly(['korwar','war','food','disease','thai','korea','oil','fx','wage','foreign','law','president'])
+        && d.level in ['critical','high','all'] && d.lang in ['th','en']
+        && d.enabled is bool && d.testRequested is bool && d.subscriptionVersion == 2
+        && d.quietOn is bool && d.quietBypass is bool
+        && d.quietFrom is int && d.quietFrom >= 0 && d.quietFrom <= 23
+        && d.quietTo is int && d.quietTo >= 0 && d.quietTo <= 23
+        && d.updatedAt == request.time
+        && (!d.testRequested || (d.lastTestAt == request.time));
     }
-
+    match /subscribers/{id} {
+      allow read: if owner(id);
+      allow delete: if false;
+      allow create: if owner(id) && validSub();
+      allow update: if owner(id) && validSub()
+        && (request.resource.data.testRequested || request.resource.data.get('lastTestAt', timestamp.date(1970,1,1)) == resource.data.get('lastTestAt', timestamp.date(1970,1,1)))
+        && (!request.resource.data.testRequested || !('lastTestAt' in resource.data)
+          || request.time >= resource.data.lastTestAt + duration.value(5, 'm'));
+    }
+    match /pushlog/{id} { allow read: if owner(id); allow write: if false; }
     match /{document=**} { allow read, write: if false; }
   }
 }

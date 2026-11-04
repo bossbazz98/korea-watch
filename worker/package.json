@@ -3,19 +3,26 @@
   "private": true,
   "main": "run.js",
   "engines": {
-    "node": ">=22"
+    "node": "^24.15.0 || >=26.0.0"
   },
   "scripts": {
-    "start": "node run.js",
+    "start": "node --require ./tools/load-env.cjs run.js",
     "dry-run": "node tools/dry-run.js",
-    "test": "node tools/selftest.js && node tools/selftest2.js && node tools/selftest3.js && node tools/selftest4.js && node tools/selftest5.js && node tools/selftest6.js && node tools/selftest7.js && node tools/selftest8.js && node tools/selftest9.js && node tools/selftest10.js && node tools/selftest11.js && node tools/selftest12.js",
-    "agent": "node agent.js"
+    "test": "node tools/selftest.js && node tools/selftest2.js && node tools/selftest3.js && node tools/selftest4.js && node tools/selftest5.js && node tools/selftest6.js && node tools/selftest7.js && node tools/selftest8.js && node tools/selftest9.js && node tools/selftest10.js && node tools/selftest11.js && node tools/selftest12.js && node tools/regression.test.js",
+    "agent": "node --require ./tools/load-env.cjs agent.js",
+    "build:web": "node tools/build-web.cjs",
+    "serve": "node ../scripts/serve.cjs",
+    "test:rules": "firebase emulators:exec --only firestore --project demo-korea-watch --config ../firebase.test.json \"node tools/rules-test.js\""
   },
   "dependencies": {
     "fast-xml-parser": "5.11.2",
     "firebase-admin": "14.5.0"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "6.0.0",
+    "esbuild": "0.28.2",
+    "firebase": "13.2.0",
+    "firebase-tools": "15.34.2",
     "playwright": "1.64.1"
   }
 }

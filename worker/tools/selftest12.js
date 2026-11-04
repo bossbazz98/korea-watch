@@ -1,3 +1,4 @@
+const { allItems } = require("./test-data");
 // ทดสอบสถานการณ์จริงจากภาพหน้าจอ: ข่าวสงครามเกาหลีค้างหลายข่าว ข่าวเก่าไม่เคยได้คิว GitHub Models 403 Groq 429
 // node tools/selftest12.js
 const assert = require("assert");
@@ -41,7 +42,7 @@ const kw = (k, x = {}) => ({ id: "kw" + k, titleKo: KO[k], title: { ko: KO[k] },
   const t0 = Date.now();
   const st = await runOnce({ ...base, budgetMs: 200000 });
   const took = Date.now() - t0;
-  const feed = db.data.get("meta/feed").items, by = id => feed.find(i => i.id === id);
+  const feed = allItems(db.data), by = id => feed.find(i => i.id === id);
 
   // (1) หัวข้อของทุกข่าวที่ค้าง แปลในคำขอเดียวตั้งแต่ต้นรอบ
   const firstTitles = calls.find(c => c.titles);
@@ -67,7 +68,7 @@ const kw = (k, x = {}) => ({ id: "kw" + k, titleKo: KO[k], title: { ko: KO[k] },
   calls.length = 0;
   const st2 = await runOnce({ ...base, now: now + 6 * 60e3, budgetMs: 200000 });
   assert.strictEqual(calls.filter(c => c.tag.startsWith("github")).length, 0, "disabled provider skipped in the next round");
-  const feed2 = db.data.get("meta/feed").items;
+  const feed2 = allItems(db.data);
   assert.ok(feed2.filter(i => i.translated).length === 8, "remaining stories translated in the next round");
   console.log(`ผ่านทุกข้อ (ชุดที่ 12: สถานการณ์ข่าวสงครามเกาหลีค้าง) รอบแรกใช้ ${(took / 1000).toFixed(1)} วินาที`);
 })().catch(e => { console.error("ไม่ผ่าน:", e.stack || e.message); process.exit(1); });

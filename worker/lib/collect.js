@@ -11,8 +11,8 @@ const stripTags = s => s.replace(/<[^>]*>/g, " ").replace(/&nbsp;/g, " ").replac
 const norm = s => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
 
 // id เดียวกันสำหรับข่าวหัวเดียวกันจากหลายสำนัก จึงไม่ซ้ำ
-function newsId(title) {
-  return crypto.createHash("sha1").update(norm(title).slice(0, 48)).digest("hex").slice(0, 20);
+function newsId(title, link = "", publishedAt = "") {
+  return crypto.createHash("sha256").update(norm(title) + "|" + link + "|" + String(publishedAt).slice(0, 10)).digest("hex").slice(0, 24);
 }
 
 // ภาพที่แนบมากับ RSS (ถ้ามี): media:content / media:thumbnail / enclosure / <img> ในคำโปรย
@@ -40,7 +40,7 @@ async function getText(url, fetchImpl) {
   try {
     const r = await fetchImpl(url, { signal: ctl.signal, headers: { "User-Agent": "Mozilla/5.0 (KoreaWatch news reader)", Accept: "application/rss+xml,application/xml,text/xml,*/*" } });
     if (!r.ok) throw new Error("HTTP " + r.status);
-    return await r.text();
+    return await require("./http").readText(r);
   } finally { clearTimeout(timer); }
 }
 
@@ -70,7 +70,7 @@ function parseFeed(xml, feed, now) {
     if (!cats.length) continue;
     out.push({
       emergency: cats.includes("korwar") || EMERGENCY_KW.some(w => title.includes(w)),
-      id: newsId(title), titleKo: title, snippet: snippet.slice(0, 600), link, image: rssImage(it, rawDesc),
+      id: newsId(title, link, new Date(publishedAt).toISOString()), titleKo: title, snippet: snippet.slice(0, 600), link, image: rssImage(it, rawDesc),
       source: sourceName || feed.source || "",
       publishedAt: new Date(publishedAt).toISOString(), cats
     });
@@ -111,7 +111,7 @@ async function collect({ fetchImpl = fetch, now = Date.now(), log = console, onl
     for (const n of r.value) {
       const prev = byId.get(n.id);
       if (!prev) byId.set(n.id, n);
-      else prev.cats = [...new Set([...prev.cats, ...n.cats])];
+      else { prev.cats = [...new Set([...prev.cats, ...n.cats])]; prev.alts = [...(prev.alts || []), {source:n.source,link:n.link}]; prev.emergency ||= n.emergency; }
     }
   });
   if (errors.length) log.warn("feed errors", errors);

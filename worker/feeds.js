@@ -26,6 +26,10 @@ const CATS = {
   president: { th: "ประธานาธิบดี", desc: "the South Korean president and presidential office", kw: ["대통령", "대통령실", "청와대"] }
 };
 
+const labels = require("../public/categories");
+if (Object.keys(labels).sort().join() !== Object.keys(CATS).sort().join()) throw new Error("Category catalogue mismatch");
+for (const [key, value] of Object.entries(labels)) Object.assign(CATS[key], value);
+
 // คำบ่งชี้เหตุฉุกเฉิน: ข่าวที่มีคำเหล่านี้ (หรืออยู่หมวดสงครามเกาหลี) ใช้โควตาฉุกเฉินได้
 const EMERGENCY_KW = ["미사일 발사", "탄도미사일", "공습경보", "경계경보", "포격", "교전", "계엄", "핵실험", "위기경보", "감염병 위기", "사재기", "대피", "민방위 경보", "전쟁 발발"];
 

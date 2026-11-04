@@ -18,13 +18,20 @@ const bodyLen = i => ((i.body && i.body.th) || []).join("").length;
 
 async function timedFetch(fetchImpl, url, ms = 7000, opt = {}) {
   const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), ms);
-  try { return await fetchImpl(url, { ...opt, signal: ctl.signal, redirect: "follow", headers: { "User-Agent": "Mozilla/5.0 KoreaWatchAgent", ...(opt.headers || {}) } }) }
+  try {
+    const r = await fetchImpl(url, { ...opt, signal: ctl.signal, redirect: "follow", headers: { "User-Agent": "Mozilla/5.0 KoreaWatchAgent", ...(opt.headers || {}) } });
+    if (r.body?.getReader) {
+      const text = await require("./lib/http").readText(r, 8000000);
+      return { ok:r.ok, status:r.status, headers:r.headers, json:async()=>JSON.parse(text), text:async()=>text };
+    }
+    return r;
+  }
   finally { clearTimeout(t) }
 }
 
 // ───── 1) ตรวจข้อมูลข่าว ─────
 async function auditData({ items, status, now = Date.now(), fetchImpl = fetch, sample = 12 }) {
-  const issues = [], fixes = { requeueImage: [], retranslate: [], enrich: [], remove: [] };
+  const issues = [], fixes = { requeueImage: [], retranslate: [], enrich: [], remove: [], merge: [] };
   const add = (key, severity, what, auto = false) => issues.push({ key, severity, what, auto });
   const recent = items.filter(i => now - Date.parse(i.publishedAt) < 2 * 24 * H);
   const tr = items.filter(i => i.translated);
@@ -76,7 +83,7 @@ async function auditData({ items, status, now = Date.now(), fetchImpl = fetch, s
     const gt = grams(i.title.th), gk = grams(i.titleKo);
     const win = ((i.categories || []).includes("korwar") ? 6 : 24) * H;
     const twin = kept.find(k => Math.abs(Date.parse(k.i.publishedAt) - Date.parse(i.publishedAt)) <= win && (similarity(k.gt, gt) >= SAME_TH || similarity(k.gk, gk) >= SAME_KO));
-    if (twin) fixes.remove.push(i.id); else kept.push({ i, gt, gk });
+    if (twin) { fixes.remove.push(i.id); fixes.merge.push({itemId:i.id,keepId:twin.i.id}); } else kept.push({ i, gt, gk });
   }
   if (fixes.remove.length) add("duplicates", "low", `พบข่าวซ้ำ ${fixes.remove.length} ข่าว รวมเป็นข่าวเดียวแล้ว`, true);
   return { metrics: m, issues, fixes };
@@ -172,7 +179,7 @@ Reply with ONLY JSON: {"issues":[{"key":"short-kebab-id","severity":"high|medium
       return (j.issues || []).filter(i => i && i.what).slice(0, 8).map(i => ({ key: "ai-" + norm(i.key || i.what).slice(0, 30), severity: ["high", "medium", "low"].includes(i.severity) ? i.severity : "low", what: String(i.what).slice(0, 200), byAI: true }));
     } catch (e) { log.warn("vision failed", model, e.message) }
   }
-  return [];
+  return null;
 }
 
 // ───── 4) รายงาน ─────
@@ -199,10 +206,13 @@ function reportBody({ metrics, ui, issues, fixesQueued, runUrl, now }) {
   return lines.join("\n");
 }
 
-async function syncIssue({ token, repo, reportable, body, fetchImpl = fetch, log = console }) {
+async function syncIssue({ token, repo, reportable, body, fetchImpl = fetch, log = console, canClose = true }) {
   if (!token || !repo) return "skipped";
-  const api = (p, method = "GET", data) => timedFetch(fetchImpl, `https://api.github.com/repos/${repo}${p}`, 15000,
+  const api = async (p, method = "GET", data) => { const response = await timedFetch(fetchImpl, `https://api.github.com/repos/${repo}${p}`, 15000,
     { method, headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json", "content-type": "application/json" }, body: data ? JSON.stringify(data) : undefined });
+    if (!response.ok) throw new Error(`GitHub ${method} ${p}: HTTP ${response.status}`);
+    return response;
+  };
   const list = await (await api(`/issues?state=open&labels=agent-report&per_page=10`)).json().catch(() => []);
   const open = Array.isArray(list) ? list.find(i => i.title === ISSUE_TITLE) : null;
   if (reportable.length) {
@@ -213,6 +223,7 @@ async function syncIssue({ token, repo, reportable, body, fetchImpl = fetch, log
     if (fresh.length) await api(`/issues/${open.number}/comments`, "POST", { body: "พบปัญหาใหม่:\n" + fresh.map(i => "- " + i.what).join("\n") }); // คอมเมนต์ = GitHub ส่งอีเมลแจ้ง
     return "updated";
   }
+  if (open && !canClose) return "incomplete";
   if (open) {
     await api(`/issues/${open.number}/comments`, "POST", { body: "✅ ตรวจรอบล่าสุดไม่พบปัญหาแล้ว Agent ปิดรายงานนี้ให้อัตโนมัติ" });
     await api(`/issues/${open.number}`, "PATCH", { state: "closed" });
@@ -222,30 +233,37 @@ async function syncIssue({ token, repo, reportable, body, fetchImpl = fetch, log
 }
 
 async function runAgent({ db, chromium, launchOpts, prepare, appUrl, geminiKey, token, repo, runUrl, fetchImpl = fetch, now = Date.now(), log = console }) {
-  const [feedSnap, statusSnap, healthSnap, fixSnap] = await Promise.all(["meta/feed", "meta/status", "meta/health", "meta/fixes"].map(p => db.doc(p).get()));
-  const items = feedSnap.exists ? (feedSnap.data().items || []) : [];
+  const [feedSnap, statusSnap, healthSnap, fixSnap] = await Promise.all(["meta/feed", "meta/status", "meta/health", "meta/pending"].map(p => db.doc(p).get()));
+  const items = [...(feedSnap.exists ? (feedSnap.data().items || []) : []), ...(fixSnap.exists ? (fixSnap.data().items || []) : [])];
   const data = await auditData({ items, status: statusSnap.exists ? statusSnap.data() : null, now, fetchImpl });
   let ui = null, uiIssues = [], aiIssues = [];
+  const checks = { data: "passed", ui: chromium ? "pending" : "unavailable", vision: "skipped" };
+  if (!chromium) uiIssues.push({key:"browser-unavailable",severity:"medium",what:"Chromium unavailable; UI was not checked"});
   if (chromium) {
     try {
       const u = await auditUI({ appUrl, chromium, launchOpts, prepare });
-      ui = u.metrics; uiIssues = u.issues;
+      ui = u.metrics; uiIssues = u.issues; checks.ui = u.issues.length ? "failed" : "passed";
       aiIssues = await visionReview({ shots: u.shots, apiKey: geminiKey, fetchImpl, log });
-    } catch (e) { uiIssues.push({ key: "ui-agent", severity: "medium", what: `Agent เปิดหน้าแอปไม่สำเร็จ: ${String(e.message || e).slice(0, 150)}` }) }
+      checks.vision = !geminiKey ? "skipped" : aiIssues === null ? "unavailable" : "passed"; aiIssues ||= [];
+    } catch (e) { checks.ui="unavailable"; uiIssues.push({ key: "ui-agent", severity: "medium", what: `Agent เปิดหน้าแอปไม่สำเร็จ: ${String(e.message || e).slice(0, 150)}` }) }
   }
   const issues = [...data.issues, ...uiIssues, ...aiIssues];
   // ส่งงานแก้ข้อมูลให้ตัวค้นข่าว (รวมกับงานที่ยังค้างอยู่ ไม่ซ้ำ)
-  const prev = fixSnap.exists ? fixSnap.data() : {};
-  const merged = {}; let fixesQueued = 0;
-  for (const k of ["requeueImage", "retranslate", "enrich", "remove"]) { merged[k] = [...new Set([...(prev[k] || []), ...data.fixes[k]])]; fixesQueued += data.fixes[k].length }
-  if (fixesQueued) await db.doc("meta/fixes").set({ ...merged, at: new Date(now).toISOString() });
+  let fixesQueued = 0;
+  for (const action of ["requeueImage", "retranslate", "enrich", "remove"]) {
+    for (const itemId of data.fixes[action]) {
+      const id = require("crypto").createHash("sha256").update(action+":"+itemId).digest("hex");
+      const keepId = action === "remove" ? data.fixes.merge.find(m => m.itemId === itemId)?.keepId : null;
+      await db.doc("fixJobs/"+id).set({ action, itemId, ...(keepId ? { keepId } : {}), at: new Date(now).toISOString() }); fixesQueued++;
+    }
+  }
   const prevKeys = new Set(healthSnap.exists ? (healthSnap.data().issues || []).map(i => i.key) : []);
   const reportable = pickReportable(issues, prevKeys);
   const status = reportable.some(i => i.severity === "high") ? "fail" : reportable.length ? "warn" : "ok";
   const body = reportBody({ metrics: data.metrics, ui, issues: reportable, fixesQueued, runUrl, now });
   let gh = "skipped";
-  try { gh = await syncIssue({ token, repo, reportable, body, fetchImpl, log }) } catch (e) { log.warn("github issue failed", e.message) }
-  await db.doc("meta/health").set({ at: new Date(now).toISOString(), status, metrics: data.metrics, ui, issues, reported: reportable.map(i => i.key), fixesQueued, github: gh });
+  try { gh = await syncIssue({ token, repo, reportable, body, fetchImpl, log, canClose: checks.ui === "passed" && checks.vision !== "unavailable" }) } catch (e) { log.warn("github issue failed", e.message) }
+  await db.doc("meta/health").set({ at: new Date(now).toISOString(), status, checks, metrics: data.metrics, ui, issues, reported: reportable.map(i => i.key), fixesQueued, github: gh });
   log.log(`agent: status ${status}, issues ${issues.length} (reported ${reportable.length}), fixes queued ${fixesQueued}, github ${gh}`);
   for (const i of issues) log.log(` - [${i.severity}${i.auto ? ", auto-fixed" : ""}${i.byAI ? ", AI" : ""}] ${i.what}`);
   return { status, issues, reportable, fixesQueued, gh };

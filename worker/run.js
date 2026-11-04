@@ -13,6 +13,7 @@ const { CAT_KEYS, FEEDS } = require("./feeds");
 const { resolveArticle } = require("./lib/images");
 const { grams, similarity, SAME_KO, SAME_TH } = require("./lib/similar");
 const { Quota } = require("./lib/quota");
+const { persist } = require("./lib/storage");
 
 const CFG = {
   MAX_TRANSLATE: 16,   // ข่าวที่แปลเต็ม (สรุปละเอียด) ต่อรอบ
@@ -33,7 +34,7 @@ const CFG = {
   KORWAR_TEXT: 1500,        // ทางด่วนส่งเนื้อข่าวสั้นลง (เร็วขึ้น ไม่ชนเพดานต่อนาที) แล้วเขียนละเอียดภายหลัง
   KEEP_DAYS: 30,       // เก็บข่าวกี่วัน
   FEED_MAX: 250,       // จำนวนข่าวสูงสุดในแอป
-  FEED_MAX_BYTES: 900000, // เอกสาร Firestore ต้องไม่เกิน 1 MB
+  FEED_MAX_BYTES: 750000, // เอกสาร Firestore ต้องไม่เกิน 1 MB
   SEEN_DAYS: 4,        // จำข่าวที่เคยเห็นกี่วัน (กันซ้ำ)
   DEDUPE_H: 48,        // เทียบข่าวซ้ำย้อนหลังกี่ชั่วโมง
   MAX_ATTEMPTS: 4,     // แปลไม่สำเร็จกี่ครั้งแล้วพักไว้
@@ -57,12 +58,12 @@ const shown = i => i.translated || isKorwar(i);
 async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken, models = DEFAULT_MODELS, groqModels = GROQ_MODELS, githubModels = GITHUB_MODELS, fetchImpl = fetch, now = Date.now(), log = console, waitMs = 2000, budgetMs = CFG.TIME_BUDGET_MS, imgBudgetMs = 45000, watchEveryMs = CFG.WATCH_EVERY_MS }) {
   const runStart = Date.now(), runDeadline = runStart + budgetMs;
   const feedRef = db.doc("meta/feed"), seenRef = db.doc("meta/seen"), statusRef = db.doc("meta/status"), quotaRef = db.doc("meta/quota");
-  const [feedSnap, seenSnap, quotaSnap] = await Promise.all([feedRef.get(), seenRef.get(), quotaRef.get()]);
-  let items = feedSnap.exists ? (feedSnap.data().items || []) : [];
+  const [feedSnap, seenSnap, quotaSnap, pendingSnap] = await Promise.all([feedRef.get(), seenRef.get(), quotaRef.get(), db.doc("meta/pending").get()]);
+  let items = [...new Map([...(feedSnap.exists ? (feedSnap.data().items || []) : []), ...(pendingSnap.exists ? (pendingSnap.data().items || []) : [])].map(i => [i.id, i])).values()];
   const seen = seenSnap.exists ? { ...(seenSnap.data().ids || {}) } : {};
   const quota = new Quota(quotaSnap.exists ? quotaSnap.data() : {}, now);
   const stat = { lastRun: iso(now), added: 0, merged: 0, translated: 0, dropped: 0, pushed: 0, feedErrors: [], lastError: null, korwar: 0, emergency: 0 };
-  let feedChanged = false, seenChanged = false;
+  let feedChanged = (feedSnap.exists ? (feedSnap.data().items || []) : []).some(i => !shown(i)), seenChanged = false;
 
   const FEED_V = 8;
   const oldV = feedSnap.exists ? (feedSnap.data().v || 1) : FEED_V;
@@ -79,21 +80,47 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
   }
 
   // บันทึกขึ้นแอป (ทีละครั้ง ไม่ซ้อนกัน) ใช้ทั้งตอนจบรอบ และทันทีที่ข่าวสงครามเกาหลีแปลเสร็จ
+  const toPush = [];
+  let publishedAt = feedSnap.exists ? (feedSnap.data().updatedAt || null) : null;
   let saving = Promise.resolve();
-  const saveFeed = () => (saving = saving.then(() => feedRef.set({ items, updatedAt: iso(Date.now()), v: FEED_V })).catch(e => log.warn("save failed", e.message)));
+  const saveFeed = () => (saving = saving.then(async () => {
+    const stamp=iso(Date.now());
+    await persist(db, structuredClone(items), { updatedAt: stamp, v: FEED_V }, seen, quota.toJSON(), toPush.map(n => ({ news: {id:n.id,title:n.title,summary:n.summary,categories:n.categories,level:n.level}, appUrl, status:"pending", expiresAt:Date.now()+6*3600e3 })));
+    publishedAt=stamp;
+  }));
+  let fixDocs = [];
+  let legacyFix = null;
+  const pushContext = { count: new Map(), subs: null, extra: new Map(), deferSummary: true };
 
   // 0) งานที่ AI Agent ตรวจเจอแล้วสั่งแก้ (Agent ไม่เขียนข้อมูลข่าวเอง เพื่อไม่ให้ชนกับรอบนี้)
   stat.fixes = 0;
   try {
     const fx = await db.doc("meta/fixes").get();
-    if (fx.exists) {
-      const f = fx.data() || {}, by = new Map(items.map(i => [i.id, i]));
+    legacyFix = fx.exists ? fx : null;
+    const jobs = await db.collection("fixJobs").limit(100).get();
+    fixDocs = jobs.docs.filter(d => d.data().action && d.data().itemId);
+    const combined = fx.exists ? { ...fx.data() } : {};
+    for (const d of fixDocs) { const j=d.data(); if (["requeueImage","retranslate","enrich","remove"].includes(j.action)) combined[j.action]=[...(combined[j.action] || []),j.itemId]; }
+    const hasFixes = fx.exists || fixDocs.length;
+    if (hasFixes) {
+      const f = combined, by = new Map(items.map(i => [i.id, i]));
       for (const id of f.requeueImage || []) { const it = by.get(id); if (it) { delete it.image; it.imgTries = 0; delete it.imgLastTry; stat.fixes++ } }
       for (const id of f.retranslate || []) { const it = by.get(id); if (it) { Object.assign(it, { translated: false, attempts: 0, title: { ko: it.titleKo } }); delete it.rich; stat.fixes++ } }
       for (const id of f.enrich || []) { const it = by.get(id); if (it && it.translated) { it.needsEnrich = true; it.enrichTries = 0; stat.fixes++ } }
-      for (const id of f.remove || []) { if (by.has(id)) { items = items.filter(i => i.id !== id); stat.fixes++ } }
+      for (const id of f.remove || []) {
+        if (!by.has(id)) continue;
+        const job=fixDocs.find(d=>d.data().itemId===id && d.data().keepId)?.data();
+        if(job) {
+          const target=by.get(job.keepId), original=by.get(id);
+          if(!target) continue; // Do not delete if the selected survivor no longer exists.
+          const links=[...(target.links||[]),...(original.links||[]),{label:original.source || "Source",url:original.sourceUrl || ""}].filter(l=>l.url);
+          target.links=[...new Map(links.map(l=>[l.url,l])).values()];
+          target.categories=[...new Set([...(target.categories||[]),...(original.categories||[])])];
+        }
+        items = items.filter(i => i.id !== id); stat.fixes++;
+      }
       if (stat.fixes) feedChanged = true;
-      await db.doc("meta/fixes").delete();
+      // Acknowledge only after the feed has been persisted.
     }
   } catch (e) { log.warn("fixes read failed", e.message) }
 
@@ -167,7 +194,6 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
     await Promise.all(Array.from({ length: CFG.IMG_PARALLEL }, worker));
   };
 
-  const toPush = [];
   stat.pushFailed = 0; stat.pushErrors = {};
   const addPush = pr => { stat.pushed += pr.sent; stat.pushFailed += pr.failed; for (const [k, v] of Object.entries(pr.errors || {})) stat.pushErrors[k] = (stat.pushErrors[k] || 0) + v };
   const hasAI = !!(geminiKey || groqKey || githubToken);
@@ -196,9 +222,10 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
   // ข่าวฉุกเฉินที่โควตาปกติหมด: ใช้โควตาสำรองได้วันละ 3 ข่าว
   const withEmergency = async (batch, call) => {
     try { return await call(false) } catch (e) {
-      if (e.reserved && batch.some(i => i.emergency || isKorwar(i)) && quota.emergencyLeft() > 0) {
-        const res = await call(true);
-        quota.useEmergency(); stat.emergency++;
+      const claim = e.reserved && batch.every(i => i.emergency || isKorwar(i)) ? quota.claimEmergency(batch.map(i=>i.id)) : null;
+      if (claim) {
+        let res; try { res=await call(true); } catch(error) { claim.rollback(); throw error; }
+        stat.emergency+=claim.count;
         log.warn(`used emergency quota (${quota.emergencyUsed}/3 today)`);
         return res;
       }
@@ -263,7 +290,10 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
         if (it.translated) { it.rich = false; it.needsEnrich = true } // เนื้อหาย่อจากข่าวสั้น: เขียนให้ละเอียดภายหลัง
         it.lastTry = Date.now();
         await saveFeed();
-        if (toPush.includes(it)) { const pr = await sendNews(db, messaging, [it], appUrl, log).catch(e => ({ sent: 0, failed: 1, errors: { [e.message]: 1 } })); addPush(pr); toPush.splice(toPush.indexOf(it), 1) }
+        if (toPush.includes(it)) {
+          const pr = await sendNews(db, messaging, [it], appUrl, log, pushContext); addPush(pr);
+          await db.doc("notificationEvents/"+it.id).delete(); toPush.splice(toPush.indexOf(it), 1);
+        }
       } catch (e) {
         errs.push("korwar: " + String(e.message || e).slice(0, 160));
         it.lastTry = Date.now();
@@ -386,17 +416,33 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
   if (items.length !== before) feedChanged = true;
   for (const [id, t] of Object.entries(seen)) if (now - t > CFG.SEEN_DAYS * DAY) { delete seen[id]; seenChanged = true; }
 
-  if (feedChanged) await saveFeed();
+  if (feedChanged || fixDocs.length || legacyFix) await saveFeed();
   await saving;
-  if (seenChanged) await seenRef.set({ ids: seen });
-  await quotaRef.set(quota.toJSON());
+  if (!feedChanged && !fixDocs.length && !legacyFix) {
+    if (seenChanged) await seenRef.set({ ids: seen });
+    await quotaRef.set(quota.toJSON());
+  }
+  for (const d of fixDocs) await d.ref.delete(d.updateTime ? { lastUpdateTime: d.updateTime } : {}).catch(e => log.warn("fix acknowledgement deferred", e.message));
+  if (legacyFix) await db.doc("meta/fixes").delete(legacyFix.updateTime ? { lastUpdateTime: legacyFix.updateTime } : {}).catch(e => log.warn("legacy fix acknowledgement deferred", e.message));
 
   // ส่งแจ้งเตือน (ข่าวที่ยังอยู่ในแอปเท่านั้น)
   const liveIds = new Set(items.map(i => i.id));
   const pushList = toPush.filter(i => liveIds.has(i.id));
-  if (pushList.length) addPush(await sendNews(db, messaging, pushList, appUrl, log));
+  const events = await db.collection("notificationEvents").where("status","==","pending").limit(100).get();
+  const readyEvents=[];
+  for (const event of events.docs) {
+    const e=event.data(); if(!e.news) continue;
+    if(e.expiresAt<Date.now() || !liveIds.has(e.news.id)) { await event.ref.delete(); continue; }
+    readyEvents.push(event);
+  }
+  pushContext.deferSummary=false;
+  if (readyEvents.length || pushContext.extra.size) addPush(await sendNews(db,messaging,readyEvents.map(d=>d.data().news),appUrl,log,pushContext));
+  for(const event of readyEvents) await event.ref.delete();
+  addPush(await retryNotifications(db, messaging, log));
   addPush(await sendTests(db, messaging, appUrl, log));
 
+  stat.lastSuccessfulPublishAt = publishedAt;
+  stat.lastSuccessfulRunAt = iso(Date.now());
   stat.pending = items.filter(i => !i.translated).length;
   stat.hidden = items.filter(i => !shown(i)).length;
   stat.total = items.length;
@@ -430,19 +476,69 @@ const BAD_TOKEN = /registration-token-not-registered|invalid-registration-token/
 const sid = s => s.ref && (s.ref.id || String(s.ref.path || "").split("/").pop());
 
 // ส่งแบบหลายเครื่อง คืน { sent, failed, errors: {รหัสข้อผิดพลาด: จำนวน}, perToken: Map(token → ok|รหัส) }
-async function sendMulticast(db, messaging, subs, msg, log) {
+async function sendMulticast(db, messaging, subs, msg, log, retryJob = null) {
   const out = { sent: 0, failed: 0, errors: {}, perToken: new Map() };
   for (let i = 0; i < subs.length; i += 500) {
     const chunk = subs.slice(i, i + 500);
-    const res = await messaging.sendEachForMulticast({ ...msg, tokens: chunk.map(s => s.token) });
+    const crypto = require("crypto");
+    const event = msg.data?.level === "test" ? "test:" + String(chunk[0].lastTestAt?.toMillis?.() || chunk[0].updatedAt?.toMillis?.() || Date.now()) : String(msg.data?.id || msg.notification?.body);
+    const jobId = retryJob?.id || crypto.createHash("sha256").update(event + ":" + chunk.map(s=>sid(s) || s.token).sort().join(",")).digest("hex");
+    const jobRef = db.doc("notificationJobs/" + jobId);
+    const recipients = chunk.map(s => ({ id: sid(s), token: s.token })).filter(s=>s.id);
+    const attempts = (retryJob?.attempts || 0) + 1;
+    const job = { msg, recipients, attempts, status: "pending", nextAttemptAt: Date.now() + Math.min(3600000, 30000 * 2 ** Math.min(attempts,7)), expiresAt: retryJob?.expiresAt || Date.now()+6*3600e3 };
+    const existing=await jobRef.get();
+    if(!retryJob && existing.exists) { // Successful chunks are retained as idempotency receipts.
+      const old=existing.data(); if(old.status === "sent" || old.status === "pending") continue;
+    }
+    await jobRef.set(job); // Durable before contacting FCM.
+    let res;
+    try { res = await messaging.sendEachForMulticast({ ...msg, tokens: chunk.map(s => s.token) }); }
+    catch (e) { e.deliveryPersisted=true; throw e; } // The persisted job will be retried.
+    const retry = [];
+
     out.sent += res.successCount || 0;
     await Promise.all((res.responses || []).map((r, k) => {
       if (r.success) { out.perToken.set(chunk[k].token, "ok"); return null }
       const code = (r.error && (r.error.code || r.error.message)) || "unknown";
+      if (!BAD_TOKEN.test(code) && !/invalid-argument|mismatched-credential/.test(code)) retry.push({ id: sid(chunk[k]), token: chunk[k].token });
       out.failed++; out.errors[code] = (out.errors[code] || 0) + 1; out.perToken.set(chunk[k].token, code);
       log.warn("push to one device failed:", code);
       return BAD_TOKEN.test(code) ? chunk[k].ref.delete().catch(() => {}) : null;
     }));
+    if (retry.length) await jobRef.set({ ...job, recipients: retry });
+    else await jobRef.set({ ...job, recipients: [], status: "sent" });
+  }
+  return out;
+}
+async function retryNotifications(db, messaging, log) {
+  const out={sent:0,failed:0,errors:{}};
+  const expired=await db.collection("notificationJobs").where("expiresAt","<",Date.now()).limit(100).get();
+  for(const d of expired.docs) if(d.data().expiresAt < Date.now()) await d.ref.delete();
+  const snap=await db.collection("notificationJobs").where("status","==","pending").limit(100).get();
+  for(const d of snap.docs) {
+    const j=d.data(); if(!j.recipients || !j.msg) continue;
+    if(j.expiresAt < Date.now()) { await d.ref.delete(); continue; }
+    if(j.nextAttemptAt > Date.now()) continue;
+    const subs=[], deferred=[];
+    let categories=[];try {categories=JSON.parse(j.msg.data?.categories || '[]')} catch {}
+    for(const r of j.recipients) {
+      const ref=db.doc("subscribers/"+r.id), snap=await ref.get();
+      if(!snap.exists) continue;
+      const s=snap.data();
+      if(!s.enabled || s.token!==r.token || s.subscriptionVersion!==2) continue;
+      if(j.msg.data?.level!=="test" && quietBlocks(s,{categories,level:j.msg.data?.level})) deferred.push(r);
+      else subs.push({ref,...s});
+    }
+    if(!subs.length) {
+      if(deferred.length) await d.ref.set({...j,recipients:deferred,nextAttemptAt:Date.now()+300000});
+      else await d.ref.delete();
+      continue;
+    }
+    try { const r=await sendMulticast(db,messaging,subs,j.msg,log,{...j,id:d.id || d.ref.id || String(d.ref.path).split('/').pop()}); out.sent+=r.sent;out.failed+=r.failed;for(const [k,v] of Object.entries(r.errors)) out.errors[k]=(out.errors[k]||0)+v;
+      if(deferred.length) { const saved=await d.ref.get(), state=saved.data();await d.ref.set({...state,status:"pending",recipients:[...(state.status==="pending" ? state.recipients : []),...deferred],nextAttemptAt:Date.now()+300000}); }
+    }
+    catch(e) { log.warn("notification retry deferred",e.message); }
   }
   return out;
 }
@@ -466,12 +562,15 @@ const quietBlocks = (s, n, ms) => inQuiet(s, ms) && !(s.quietBypass !== false &&
 const levelOk = (s, n) => n.level === "critical" || (s.level === "high" && n.level === "high") || s.level === "all";
 const MAX_PER_DEVICE = 4; // ต่อรอบ: เกินนี้รวมเป็นแจ้งเตือนเดียว "มีข่าวใหม่อีก N ข่าว"
 
-async function sendNews(db, messaging, news, appUrl, log) {
+async function sendNews(db, messaging, news, appUrl, log, context = { count: new Map(), subs: null }) {
   const out = { sent: 0, failed: 0, errors: {} };
   const merge = r => { out.sent += r.sent; out.failed += r.failed; for (const [k, v] of Object.entries(r.errors)) out.errors[k] = (out.errors[k] || 0) + v };
-  const snap = await db.collection("subscribers").where("enabled", "==", true).get();
-  const subs = snap.docs.map(d => ({ ref: d.ref, ...d.data() })).filter(s => typeof s.token === "string");
-  const count = new Map(), extra = new Map(), last = new Map();
+  if (!context.subs) {
+    const snap = await db.collection("subscribers").where("enabled", "==", true).where("subscriptionVersion", "==", 2).get();
+    context.subs = snap.docs.map(d => ({ ref: d.ref, ...d.data() })).filter(s => typeof s.token === "string" && s.enabled === true && s.subscriptionVersion === 2);
+  }
+  const subs = context.subs;
+  const count = context.count, extra = context.extra || (context.extra = new Map()), last = new Map();
   for (const n of news) {
     const wanted = subs.filter(s => Array.isArray(s.cats) && s.cats.some(c => (n.categories || []).includes(c)) && levelOk(s, n) && !quietBlocks(s, n));
     const targets = wanted.filter(s => (count.get(s.token) || 0) < MAX_PER_DEVICE);
@@ -482,27 +581,28 @@ async function sendNews(db, messaging, news, appUrl, log) {
     try {
       const r = await sendMulticast(db, messaging, targets, {
         notification: { title: `${tag}: ${n.title.th}`.slice(0, 120), body: (n.summary.th || "").slice(0, 240) },
-        data: { id: String(n.id), level: String(n.level) }, webpush: webpush(appUrl, n.id, n.level)
+        data: { id: String(n.id), level: String(n.level), categories: JSON.stringify(n.categories || []) }, webpush: webpush(appUrl, n.id, n.level)
       }, log);
       merge(r); targets.forEach(s => last.set(s.token, { r: r.perToken.get(s.token), title: n.title.th }));
-    } catch (e) { log.warn("push failed", n.id, e.message); out.failed += targets.length; out.errors[e.code || e.message] = (out.errors[e.code || e.message] || 0) + targets.length }
+    } catch (e) { if (!e.deliveryPersisted) throw e; log.warn("push failed", n.id, e.message); out.failed += targets.length; out.errors[e.code || e.message] = (out.errors[e.code || e.message] || 0) + targets.length }
   }
   // ข่าวที่เกินโควตาต่อเครื่อง: รวมเป็นแจ้งเตือนเดียว
   const byN = new Map();
-  for (const [tok, k] of extra) { if (!byN.has(k)) byN.set(k, []); byN.get(k).push(subs.find(s => s.token === tok)) }
+  for (const [tok, k] of context.deferSummary ? [] : extra) { if (!byN.has(k)) byN.set(k, []); byN.get(k).push(subs.find(s => s.token === tok)) }
   for (const [k, list] of byN) {
-    try { merge(await sendMulticast(db, messaging, list, { notification: { title: "Korea Watch", body: `มีข่าวใหม่อีก ${k} ข่าว แตะเพื่ออ่าน` }, data: { id: "", level: "summary" }, webpush: webpush(appUrl, "", "summary") }, log)) } catch (e) { log.warn("summary push failed", e.message) }
+    try { merge(await sendMulticast(db, messaging, list, { notification: { title: "Korea Watch", body: `มีข่าวใหม่อีก ${k} ข่าว แตะเพื่ออ่าน` }, data: { id: "", level: "summary" }, webpush: webpush(appUrl, "", "summary") }, log)) } catch (e) { if(!e.deliveryPersisted) throw e; log.warn("summary push failed", e.message) }
   }
+  if (!context.deferSummary) extra.clear();
   const per = new Map([...last].map(([t, v]) => [t, v.r]));
   await logPush(db, subs, per, "news", [...last.values()].pop()?.title);
   return out;
 }
 
 async function sendTests(db, messaging, appUrl, log) {
-  const snap = await db.collection("subscribers").where("testRequested", "==", true).limit(50).get();
+  const snap = await db.collection("subscribers").where("testRequested", "==", true).where("subscriptionVersion", "==", 2).limit(50).get();
   const out = { sent: 0, failed: 0, errors: {} };
   if (snap.empty) return out;
-  const subs = snap.docs.map(d => ({ ref: d.ref, ...d.data() })).filter(s => typeof s.token === "string");
+  const subs = snap.docs.map(d => ({ ref: d.ref, ...d.data() })).filter(s => typeof s.token === "string" && s.subscriptionVersion === 2);
   try {
     const r = await sendMulticast(db, messaging, subs, {
       notification: { title: "Korea Watch: ทดสอบแจ้งเตือน", body: "ระบบส่งแจ้งเตือนถึงเครื่องนี้ได้แล้ว ข่าวด่วนจะเด้งแบบนี้" },
@@ -511,7 +611,7 @@ async function sendTests(db, messaging, appUrl, log) {
     Object.assign(out, { sent: r.sent, failed: r.failed, errors: r.errors });
     await logPush(db, subs, r.perToken, "test", "ทดสอบแจ้งเตือน");
   } catch (e) { log.warn("test push failed", e.message); out.failed = subs.length; out.errors[e.code || e.message] = subs.length }
-  await Promise.all(subs.map(s => s.ref.update({ testRequested: false }).catch(() => {})));
+  await Promise.all(subs.map(s => s.ref.update({ testRequested: false }).catch(() => {}))); // Failed deliveries remain in notificationJobs.
   return out;
 }
 
@@ -532,4 +632,4 @@ async function main() {
 }
 
 if (require.main === module) main().catch(e => { console.error(e); process.exit(1) });
-module.exports = { runOnce, CFG, shown, inQuiet };
+module.exports = { runOnce, CFG, shown, inQuiet, sendMulticast, sendNews, retryNotifications };

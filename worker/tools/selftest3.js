@@ -1,3 +1,4 @@
+const { allItems } = require("./test-data");
 // ทดสอบการคุมเวลาและการลองใหม่ของข่าวที่พักไว้: node tools/selftest3.js
 const assert = require("assert");
 const { runOnce } = require("../run");
@@ -36,14 +37,14 @@ const okReply = async (url, opt) => {
   const took = Date.now() - t0;
   assert.ok(took < 30000, "run finished within budget (" + took + "ms)");
   assert.ok(db.data.get("meta/status").lastRun, "status saved even though Gemini hung");
-  assert.ok(db.data.get("meta/feed").items.every(i => i.attempts === 0), "hang is not counted as failure");
+  assert.ok(allItems(db.data).every(i => i.attempts === 0), "hang is not counted as failure");
   assert.match(s1.lastError, /busy|time budget/);
 
   // 2) ข่าวที่พักไว้ (ล้มเหลวครบ 4 ครั้ง) ลองใหม่หลัง 3 ชั่วโมง
   db = fakeDb();
   await db.doc("meta/feed").set({ v: 8, items: [item("old", { attempts: 4, lastTry: now - 4 * 3600e3 }), item("recent", { attempts: 4, lastTry: now - 3600e3 })] });
   const s2 = await runOnce({ db, messaging: msg, appUrl: "https://x", geminiKey: "k", fetchImpl: okReply, now, log, waitMs: 0 });
-  const f = db.data.get("meta/feed").items;
+  const f = allItems(db.data);
   assert.strictEqual(f.find(i => i.id === "old").translated, true, "paused 4h ago → retried and translated");
   assert.strictEqual(f.find(i => i.id === "recent").translated, false, "paused 1h ago → still waiting");
   assert.strictEqual(s2.pending, 1, "pending counts paused items too");

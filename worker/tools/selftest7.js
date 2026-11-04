@@ -1,3 +1,4 @@
+const { allItems } = require("./test-data");
 // ทดสอบ: ดึงเนื้อข่าวจริง, สรุปละเอียด, เขียนข่าวสั้นใหม่, พักรุ่นที่โดน 429, แปลซ้ำทันที, งานจาก Agent: node tools/selftest7.js
 const assert = require("assert");
 const { extractArticleText, findArticleImage, decodePage, resolveArticle } = require("../lib/images");
@@ -64,7 +65,7 @@ const KO = "북한이 31일 오전 동해상으로 단거리 탄도미사일 여
   ] });
   data.set("meta/fixes", { requeueImage: ["fix-img"], remove: ["fix-remove"], enrich: [] });
   const st = await runOnce({ db, messaging: { async sendEachForMulticast(m) { return { successCount: m.tokens.length, responses: [] } } }, appUrl: "https://x", groqKey: "k", fetchImpl, now, log, waitMs: 0 });
-  const fd = data.get("meta/feed").items, by = id => fd.find(i => i.id === id);
+  const fd = allItems(data), by = id => fd.find(i => i.id === id);
   assert.strictEqual(st.fixes, 2); assert.ok(!data.has("meta/fixes"), "agent fixes applied then cleared");
   assert.ok(!by("fix-remove"), "duplicate removed by agent request");
   assert.strictEqual(by("fix-img").image, "https://img.example/p.jpg", "broken image cleared by agent, new image found");

@@ -1,3 +1,4 @@
+const { allItems } = require("./test-data");
 // ทดสอบ: กรองข่าวซ้ำ, ข่าวซ่อนจนแปลเสร็จ, ทางด่วนสงครามเกาหลี (แข่งแปล + เฝ้าฟีด), โควตาฉุกเฉิน, GitHub Models: node tools/selftest9.js
 const assert = require("assert");
 const { runOnce, shown } = require("../run");
@@ -68,7 +69,7 @@ const okItem = (x, by) => ({ i: x.i, relevant: true, categories: x.guessedCatego
     { id: "kw-old", titleKo: "북한, 동해상으로 탄도미사일 발사", title: { th: "เกาหลีเหนือยิงขีปนาวุธ (เมื่อวาน)", en: "x" }, summary: { th: "ส", en: "s" }, body: { th: ["ก".repeat(500)] }, rich: true, image: "https://i/2.jpg",
       categories: ["korwar"], level: "critical", translated: true, publishedAt: new Date(now - 20 * 3600e3).toISOString(), source: "KBS", sourceUrl: "https://kbs/1", links: [{ label: "KBS", url: "https://kbs/1" }] }
   ] });
-  db.data.set("subscribers/a", { token: "tokA", enabled: true, level: "critical", cats: ["korwar"], testRequested: false });
+  db.data.set("subscribers/a", { token: "tokA", subscriptionVersion: 2, enabled: true, level: "critical", cats: ["korwar"], testRequested: false });
   let pollCount = 0;
   const feedFor = { gn_labor: () => rss([{ t: "최저임금 1만1천원 확정", s: "SBS", l: "https://sbs/2", h: 1 }]),                // ข่าวซ้ำกับ exist1
                     gn_korwar: () => rss([{ t: "북한, 동해상으로 탄도미사일 발사", l: "https://sbs/kw-today", h: 0.2 }]), // ซ้ำหัวข้อกับเมื่อวาน แต่ห่าง 20 ชม. → ข่าวใหม่
@@ -93,7 +94,7 @@ const okItem = (x, by) => ({ i: x.i, relevant: true, categories: x.guessedCatego
   const messaging = { async sendEachForMulticast(m) { pushes.push({ t: Date.now(), id: m.data.id, tokens: m.tokens }); return { successCount: m.tokens.length, responses: m.tokens.map(() => ({ success: true })) } } };
   const start = Date.now();
   const st = await runOnce({ db, messaging, appUrl: "https://x", groqKey: "g", githubToken: "t", geminiKey: "k", fetchImpl, now, log, waitMs: 0, budgetMs: 33000, imgBudgetMs: 2000, watchEveryMs: 300 });
-  const feed = db.data.get("meta/feed").items, by = id => feed.find(i => i.id === id);
+  const feed = allItems(db.data), by = id => feed.find(i => i.id === id);
   // ข่าวซ้ำ
   assert.ok(by("exist1").links.some(l => l.label === "SBS"), "duplicate from SBS added as an extra source, no new card");
   assert.ok(!feed.some(i => i.titleKo.startsWith("최저임금 1만1천원 확정")), "no duplicate card");
@@ -126,7 +127,7 @@ const okItem = (x, by) => ({ i: x.i, relevant: true, categories: x.guessedCatego
   const feed2 = { gn_korwar: () => rss([{ t: "북한 장사정포 포격 도발", l: "https://a/kw", h: 0.1 }]), gn_oil_fx: () => rss([{ t: "휘발유 가격 하락세 지속", l: "https://a/oil", h: 0.1 }]) };
   const f2 = async (url, opt) => { const f = FEEDS.find(x => x.url === url); if (f) return { ok: true, text: async () => (feed2[f.id] ? feed2[f.id]() : "<rss><channel></channel></rss>") }; return fetchImpl(url, opt) };
   const st2 = await runOnce({ db: db2, messaging, appUrl: "https://x", groqKey: "g", fetchImpl: f2, now, log, waitMs: 0, budgetMs: 31000, imgBudgetMs: 2000, watchEveryMs: 60000 });
-  const fd2 = db2.data.get("meta/feed").items;
+  const fd2 = allItems(db2.data);
   assert.ok(fd2.find(i => i.titleKo.includes("장사정포")).translated, "Korean-war story translated with emergency quota");
   assert.ok(!fd2.find(i => i.titleKo.includes("휘발유")).translated, "normal story waits (only emergency quota left)");
   assert.ok(st2.emergency >= 1 && db2.data.get("meta/quota").emergencyUsed >= 1, "emergency use counted");

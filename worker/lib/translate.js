@@ -155,12 +155,15 @@ async function runChain(system, user, maxTokens, opts) {
       const left = deadline - Date.now();
       if (left < 5000) { busy.push("time budget"); quotaOnly = false; last = last || "time budget reached"; break; }
       if (signal && signal.aborted) throw new QuotaError("cancelled (another AI answered first)", 499);
+      const settle = quota?.reserve ? quota.reserve(ctag, need, emergency) : null;
+      if (quota?.reserve && !settle) { busy.push(`${ctag} reserved`); break; }
       const r = await callOne(entry, system, user, maxTokens, { groq: groqKey, gemini: apiKey, github: githubToken }, fetchImpl, Math.min(timeoutMs, left - 2000), signal);
       const tag = `${entry.p}:${entry.m}`;
       noteTpm(tpm, tag, r.h);
       // ตัวที่ถูกยกเลิกกลางคันก็ใช้โควตาไปแล้ว: ประมาณจากขนาดคำขอ (ภาษาเกาหลี/ไทย ~2.5 ตัวอักษรต่อ token)
-      if (quota && r.status === 499) quota.record(tag, Math.ceil((system.length + user.length) / 2.5));
-      else if (quota && !/timeout|network/.test(r.msg)) quota.record(tag, r.tokens);
+      const uncertain = r.status === 499 || /timeout|network/.test(r.msg);
+      if (settle) settle(r.tokens || (uncertain ? Math.ceil((system.length+user.length)/2.5) : 0));
+      else if (quota) quota.record(tag,r.tokens || (uncertain ? need : 0));
       if (r.status === 499) throw new QuotaError("cancelled (another AI answered first)", 499);
       // รุ่นนี้ไม่รับพารามิเตอร์เสริม: ลองรุ่นเดิมอีกครั้งแบบพื้นฐาน
       if (r.status === 400 && r.extras && !/api key|api_key|invalid.*key/i.test(r.msg)) { plain.add(tag); log.warn(`${tag} rejected extra params, retrying plain`); continue; }
@@ -202,12 +205,16 @@ async function translate(items, opts) {
   const exclude = new Set(opts.exclude || []);
   for (let round = 0; ; round++) {
     const { text, model, finish } = await runChain(SYSTEM, JSON.stringify(input), 8192, { ...opts, exclude });
-    const { items: arr, partial } = parseItems(text);
+    let parsed;
+    try { parsed = parseItems(text); }
+    catch (e) { if(round >= 2) throw e; exclude.add(model); log.warn(`${model}: invalid JSON, trying next model`); continue; }
+    const { items: arr, partial } = parsed;
     const results = items.map(() => null);
     let bad = 0, judged = 0;
     for (const o of arr) {
       const i = Number(o?.i);
       if (!Number.isInteger(i) || i < 0 || i >= items.length) continue;
+      if (results[i] !== null) continue;
       const cats = (Array.isArray(o.categories) ? o.categories : []).filter(c => CAT_KEYS.includes(c));
       const title = pair(o.title), summary = pair(o.summary);
       // AI ตอบว่างทั้งหัวข้อและหมวด = ไม่เกี่ยวข้อง (ไม่ต้องลองแปลซ้ำ)
@@ -217,7 +224,7 @@ async function translate(items, opts) {
       results[i] = {
         relevant: relevant && cats.length > 0 && !!title.th,
         categories: cats, level: ["critical", "high"].includes(o.level) ? o.level : "normal",
-        title, summary, body: { th: paras(o.body_th ?? o.body?.th) }, tips: { th: paras(o.tips_th).slice(0, 3) }
+        title: {th:title.th.slice(0,300),en:title.en.slice(0,300)}, summary: {th:summary.th.slice(0,1800),en:summary.en.slice(0,1800)}, body: { th: paras(o.body_th ?? o.body?.th).slice(0,8).map(p=>p.slice(0,2200)) }, tips: { th: paras(o.tips_th).slice(0, 3).map(p=>p.slice(0,500)) }
       };
     }
     // ข่าวเกินครึ่งช่องภาษาไทยไม่ใช่ภาษาไทย: ลองชุดเดิมกับรุ่นถัดไปทันที (ไม่ต้องรอรอบหน้า)
@@ -268,8 +275,9 @@ async function race(fn, items, opts, valid, max = 3) {
   const lanes = raceLanes(opts, max);
   if (!lanes.length) { const e = new QuotaError("no AI lane available for race", 429); e.reserved = true; throw e; }
   const ctl = new AbortController();
+  const tasks=lanes.map(t => fn(items, { ...opts, only: new Set([t]), signal: ctl.signal, waitMs: 0 }).then(r => { if (!valid(r)) throw new Error(`${t}: answer not usable`); return r }));
   try {
-    return await Promise.any(lanes.map(t => fn(items, { ...opts, only: new Set([t]), signal: ctl.signal, waitMs: 0 }).then(r => { if (!valid(r)) throw new Error(`${t}: answer not usable`); return r })));
+    const result=await Promise.any(tasks); ctl.abort(); await Promise.allSettled(tasks); return result;
   } catch (e) {
     const errs = e.errors || [e];
     const err = new QuotaError("race failed: " + errs.map(x => String(x.message || x).slice(0, 80)).join(" | ").slice(0, 280), 503);

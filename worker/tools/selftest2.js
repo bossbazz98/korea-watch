@@ -1,3 +1,4 @@
+const { allItems } = require("./test-data");
 // ทดสอบการแปลเป็นชุด, ปิด thinking, กู้คำตอบที่ถูกตัด: node tools/selftest2.js
 const assert = require("assert");
 const { translate, parseItems } = require("../lib/translate");

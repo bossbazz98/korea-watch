@@ -52,20 +52,21 @@ const item = (id, x = {}) => ({ id, titleKo: KO[id] || "기사 " + id, title: { 
   // 4) เปิดหน้าแอปจริงในเบราว์เซอร์ (แอปจริงจาก public/ + Firebase จำลอง)
   let chromium = null;
   try { chromium = require("playwright").chromium } catch (e) { }
-  const exe = process.env.AGENT_CHROMIUM;
-  if (!chromium || !exe) { console.log("ข้ามการทดสอบหน้าแอป (ไม่มี Chromium)"); console.log("ผ่านทุกข้อ (ชุดที่ 8: AI Agent)"); return; }
+  const exe = process.env.AGENT_CHROMIUM || chromium?.executablePath();
+  if (!chromium || !exe || !fs.existsSync(exe)) throw new Error("Chromium required: run npx playwright install chromium");
   const pub = path.join(__dirname, "..", "..", "public");
   const srv = http.createServer((q, s) => { const f = path.join(pub, decodeURIComponent(q.url.split("?")[0]) === "/" ? "index.html" : decodeURIComponent(q.url.split("?")[0])); fs.readFile(f, (e, b) => { if (e) { s.writeHead(404); s.end(); return } s.writeHead(200, { "content-type": f.endsWith(".js") ? "text/javascript" : f.endsWith(".html") ? "text/html" : f.endsWith(".png") ? "image/png" : "application/octet-stream" }); s.end(b) }) }).listen(8799);
   const feedItems = [items[0], items[4], item("noimg"), item("mid", { image: "https://img.ok/3.jpg" })];
   const img = fs.readFileSync(path.join(pub, "icons", "icon-512.png"));
   const STUB = {
     "firebase-app.js": "export const initializeApp=c=>({c});",
-    "firebase-firestore.js": `const D=${JSON.stringify(feedItems)};export const persistentLocalCache=()=>({});export const initializeFirestore=()=>({});export const getFirestore=()=>({});export const doc=(d,...p)=>p.join('/');export const serverTimestamp=()=>'TS';export async function setDoc(){}
+    "firebase-firestore.js": `const D=${JSON.stringify(feedItems)};export const persistentLocalCache=()=>({});export const initializeFirestore=()=>({});export const getFirestore=()=>({});export const doc=(d,...p)=>p.join('/');export const serverTimestamp=()=>'TS';export async function setDoc(ref,value){window.__writes=(window.__writes||[]).concat([{ref,value}]);}export async function getDoc(){return {exists:()=>false};}
 export function onSnapshot(ref,ok){setTimeout(()=>{if(ref==="meta/feed")ok({exists:()=>true,data:()=>({items:D}),metadata:{fromCache:false}});else ok({exists:()=>true,data:()=>({lastRun:new Date().toISOString()})})},30);return()=>{}}`,
-    "firebase-messaging.js": "export const isSupported=async()=>false;"
+    "firebase-messaging.js": "export const isSupported=async()=>true;export const getMessaging=()=>({});export const onMessage=()=>{};export const getToken=async()=>'fixture-token-abcdefghijklmnopqrstuvwxyz';",
+    "firebase-auth.js": "export const getAuth=()=>({authStateReady:async()=>{},currentUser:{uid:'fixture-user'}});export const signInAnonymously=async()=>({user:{uid:'fixture-user'}});"
   };
   const prepare = async ctx => {
-    await ctx.route("https://www.gstatic.com/**", r => r.fulfill({ status: 200, contentType: "text/javascript", body: STUB[r.request().url().split("/").pop()] || "" }));
+    await ctx.route("**/vendor/firebase/**", r => r.fulfill({ status: 200, contentType: "text/javascript", body: STUB[r.request().url().split("/").pop()] || "" }));
     await ctx.route("**/firebase-config.js", r => r.fulfill({ status: 200, contentType: "text/javascript", body: "self.KW_CONFIG={firebase:{apiKey:'AIzaFAKE',projectId:'p'},vapidKey:'B'};" }));
     await ctx.route("https://wsrv.nl/**", r => r.fulfill({ status: 200, contentType: "image/png", body: img }));
     await ctx.route("https://fonts.googleapis.com/**", r => r.fulfill({ status: 200, contentType: "text/css", body: "" }));
@@ -87,6 +88,31 @@ export function onSnapshot(ref,ok){setTimeout(()=>{if(ref==="meta/feed")ok({exis
     assert.ok(h.issues.some(i => i.byAI && i.key.startsWith("ai-")), "AI finding recorded");
     assert.ok(!res.reportable.some(i => i.byAI), "AI finding not reported on first sighting");
     assert.ok(fs.existsSync(path.join(__dirname, "..", "agent-out", "mobile-light-reader.png")), "screenshots saved for GitHub artifact");
+    const browser = await chromium.launch({ executablePath: exe });
+    try {
+      const ctx = await browser.newContext({ permissions: ["notifications"] });
+      await prepare(ctx);
+      const page = await ctx.newPage();
+      await page.goto("http://localhost:8799/");
+      await page.waitForSelector('.card');
+      assert.strictEqual(await page.locator('[data-cat="korwar"]').count(), 1, 'Korean Peninsula category is selectable');
+      await page.locator('#bell').click();
+      await page.locator('#p-on').check();
+      await page.locator('label:has(input[name="lv"][value="all"])').click();
+      await page.locator('#p-quiet').check();
+      await page.locator('#p-from').fill('22');
+      await page.locator('#p-to').fill('7');
+      await page.locator('#p-save').click();
+      await page.waitForFunction(() => window.__writes?.length > 0);
+      const write = await page.evaluate(() => window.__writes.at(-1));
+      assert.strictEqual(write.ref, 'subscribers/fixture-user', 'subscription owned by authenticated UID');
+      assert.strictEqual(write.value.level, 'all');
+      assert.strictEqual(write.value.subscriptionVersion, 2);
+      assert.strictEqual(write.value.quietOn, true);
+      assert.ok(write.value.cats.includes('korwar'));
+      await ctx.close();
+    } finally { await browser.close(); }
+
   } finally { srv.close() }
   console.log("ผ่านทุกข้อ (ชุดที่ 8: AI Agent)");
 })().catch(e => { console.error("ไม่ผ่าน:", e.stack || e.message); process.exit(1); });

@@ -1,0 +1,2 @@
+self.KW_CACHE_VERSION="446b51e3af9f5020";
+self.KW_PRECACHE=["/","/index.html","/app.js","/categories.js","/firebase-config.js","/manifest.webmanifest","/icons/icon-192.png","/icons/badge-72.png","/vendor/firebase/chunk-VKBP5T25.js","/vendor/firebase/firebase-app.js","/vendor/firebase/firebase-auth.js","/vendor/firebase/firebase-firestore.js","/vendor/firebase/firebase-messaging.js","/vendor/firebase/firebase-sw.js"];
