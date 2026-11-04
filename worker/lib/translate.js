@@ -1,6 +1,7 @@
 // แปลและสรุปข่าวด้วย AI หลายเจ้า: Groq (เร็ว โควตาฟรีเยอะ) เป็นตัวหลัก แล้วสำรองด้วย Gemini
 // ถ้าเจ้าไหนยุ่ง/โควตาเต็ม/ตอบช้า จะสลับไปตัวถัดไปเอง และไม่นับเป็นการแปลล้มเหลว
 const { CATS, CAT_KEYS } = require("../feeds");
+const { isThai, completeThai } = require("../../public/news-text");
 
 const SYSTEM = `You are the news editor of "Korea Watch", an app for Thai people living in South Korea.
 You receive Korean news items: headline, an RSS snippet, and often "article" = text taken from the publisher's page. For each item return JSON.
@@ -39,7 +40,7 @@ class QuotaError extends Error { constructor(m, code = 429) { super(m); this.cod
 
 const str = v => (typeof v === "string" ? v.trim() : "");
 // ข้อความภาษาไทยต้องมีตัวอักษรไทยจริง (บางครั้ง AI ใส่ภาษาอังกฤษในช่องภาษาไทย)
-const hasThai = s => /[\u0E00-\u0E7F]/.test(s || "");
+const hasThai = isThai;
 const pair = o => ({ th: str(o?.th), en: str(o?.en) });
 const paras = v => (Array.isArray(v) ? v.map(str).filter(Boolean) : str(v) ? [str(v)] : []);
 
@@ -220,7 +221,7 @@ async function translate(items, opts) {
       // AI ตอบว่างทั้งหัวข้อและหมวด = ไม่เกี่ยวข้อง (ไม่ต้องลองแปลซ้ำ)
       const relevant = o.relevant !== false && !(!title.th && !cats.length);
       judged++;
-      if (relevant && (!hasThai(title.th) || (summary.th && !hasThai(summary.th)))) { bad++; continue; }
+      if (relevant && !completeThai({title, summary, body:{th:paras(o.body_th ?? o.body?.th)}})) { bad++; continue; }
       results[i] = {
         relevant: relevant && cats.length > 0 && !!title.th,
         categories: cats, level: ["critical", "high"].includes(o.level) ? o.level : "normal",

@@ -1,4 +1,4 @@
-const { allItems } = require("./test-data");
+const { allItems, thaiTitle } = require("./test-data");
 // ทดสอบ: กรองข่าวซ้ำ, ข่าวซ่อนจนแปลเสร็จ, ทางด่วนสงครามเกาหลี (แข่งแปล + เฝ้าฟีด), โควตาฉุกเฉิน, GitHub Models: node tools/selftest9.js
 const assert = require("assert");
 const { runOnce, shown } = require("../run");
@@ -15,7 +15,7 @@ function fakeDb() {
 }
 const now = Date.now();
 const rss = items => `<rss><channel>${items.map(i => `<item><title>${i.t}${i.s ? " - " + i.s : ""}</title><link>${i.l}</link><pubDate>${new Date(now - i.h * 3600e3).toUTCString()}</pubDate><description>${i.d || ""}</description>${i.s ? `<source url="x">${i.s}</source>` : ""}</item>`).join("")}</channel></rss>`;
-const okItem = (x, by) => ({ i: x.i, relevant: true, categories: x.guessedCategories || ["korea"], level: x.guessedCategories && x.guessedCategories.includes("korwar") ? "critical" : "normal", title: { th: "ข่าว " + x.headline, en: "n" }, summary: { th: "สรุป", en: "s" }, body_th: ["ก", "ข", "ค", "ง"], tips_th: [] });
+const okItem = (x, by) => ({ i: x.i, relevant: true, categories: x.guessedCategories || ["korea"], level: x.guessedCategories && x.guessedCategories.includes("korwar") ? "critical" : "normal", title: { th: thaiTitle(x.headline), en: "n" }, summary: { th: "สรุป", en: "s" }, body_th: ["ก", "ข", "ค", "ง"], tips_th: [] });
 
 (async () => {
   // ── 1) โควตาฉุกเฉิน ──
@@ -83,7 +83,7 @@ const okItem = (x, by) => ({ i: x.i, relevant: true, categories: x.guessedCatego
       const input = JSON.parse(url.includes("generativelanguage") ? b.contents[0].parts[0].text : b.messages[1].content);
       const titles = sys.startsWith("Translate Korean");
       await sleep(url.includes("github") ? 5 : 60);
-      const content = JSON.stringify({ items: input.map(x => titles ? { i: x.i, th: "หัวข้อ " + x.headline, en: "T" } : okItem(x)) });
+      const content = JSON.stringify({ items: input.map(x => titles ? { i: x.i, th: thaiTitle(x.headline, "หัวข้อ"), en: "T" } : okItem(x)) });
       return { ok: true, status: 200, json: async () => url.includes("generativelanguage") ? { candidates: [{ content: { parts: [{ text: content }] } }] } : { usage: { total_tokens: 500 }, choices: [{ message: { content } }] } };
     }
     const f = FEEDS.find(x => x.url === url);

@@ -1,5 +1,5 @@
 // Locally generated foreground alerts. Background push audio belongs to the OS.
-export const SOUND_PRESETS = ['siren', 'pulse', 'bell', 'chime', 'radar'];
+export const SOUND_PRESETS = ['siren', 'airraid', 'emergency', 'pulse', 'bell', 'chime', 'radar'];
 export class AlertAudio {
   constructor({ createContext = () => new (window.AudioContext || window.webkitAudioContext)() } = {}) {
     this.createContext = createContext;
@@ -47,7 +47,7 @@ export class AlertAudio {
     const master = context.createGain(); this.master = master;
     master.gain.setValueAtTime(0.22 * level * level, start);
     master.connect(context.destination);
-    const note = (offset, seconds, frequency, wave = 'sine', end = frequency, strength = 0.7) => {
+    const note = (offset, seconds, frequency, wave = 'sine', end = frequency, strength = 0.7, sustain = false) => {
       const oscillator = context.createOscillator(), gain = context.createGain();
       const at = start + offset, until = at + Math.min(seconds, length - offset);
       oscillator.type = wave;
@@ -55,6 +55,7 @@ export class AlertAudio {
       oscillator.frequency.linearRampToValueAtTime(end, until);
       gain.gain.setValueAtTime(0.0001, at);
       gain.gain.exponentialRampToValueAtTime(strength, at + Math.min(0.025, (until - at) / 3));
+      if (sustain) gain.gain.setValueAtTime(strength, Math.max(at + 0.03, until - 0.06));
       gain.gain.exponentialRampToValueAtTime(0.0001, until);
       oscillator.connect(gain); gain.connect(master);
       const voice = { oscillator, gain }; this.nodes.add(voice);
@@ -67,6 +68,15 @@ export class AlertAudio {
     };
     if (preset === 'siren') {
       for (let at = 0, i = 0; at < length; at += 0.5, i++) note(at, 0.5, i % 2 ? 880 : 600, 'triangle', i % 2 ? 600 : 880);
+    } else if (preset === 'airraid') {
+      // Civil-defence style wail: long continuous rise and fall, with a low harmonic.
+      for (let at = 0, i = 0; at < length; at += 1.35, i++) {
+        const low = i % 2 ? 930 : 260, high = i % 2 ? 260 : 930;
+        note(at, 1.4, low, 'sawtooth', high, 0.55, true);
+        note(at, 1.4, low / 2, 'triangle', high / 2, 0.3, true);
+      }
+    } else if (preset === 'emergency') {
+      for (let at = 0, i = 0; at < length; at += 0.18, i++) note(at, 0.2, i % 2 ? 980 : 620, 'square', i % 2 ? 620 : 980, 0.38);
     } else if (preset === 'pulse') {
       for (let at = 0; at < length; at += 0.8) { note(at, 0.14, 740); if (at + 0.22 < length) note(at + 0.22, 0.14, 740); }
     } else if (preset === 'bell') {

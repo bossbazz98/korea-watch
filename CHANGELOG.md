@@ -23,3 +23,14 @@ Not a promise of complete semantic deduplication, exactly-once FCM delivery, pro
 - Reader toolbar is outside the image scroll area, keeping the close button visible and clickable.
 - New assets included in offline precache; CSS MIME support in the local/test servers and refreshed hosting cache headers.
 - Chromium coverage at 320, 390 and 1280 pixels; audio lifecycle/volume/cancellation tests.
+
+## Monochrome settings, subscription repair, category fairness and refresh
+
+- Use the main app's neutral ink/surface palette in settings and remove the duplicate bell/settings entry point.
+- Replace full-document subscription overwrites with owned-document transactions preserving lastTestAt and pending tests. Rules distinguish a normal edit from a new test request and keep the cooldown/ownership restrictions.
+- Queue a server test on first enable and call the browser notification API after successful saving; remove the unverified enabled-status banner.
+- Add a long air-raid wail and fast emergency siren (7 presets total).
+- Rotate translation work across categories; bound Korean fast-lane work and protect published topics from an untranslated Korean backlog. Add targeted international searches.
+- Validate Thai summary/body as well as headlines and repair legacy incomplete records without duplicate alerts.
+- Refresh the homepage when scrolling to the bottom, with a 30-second automatic cooldown, manual retry and offline feedback; preserve settings and filters.
+- Add read-only translation diagnostics, publication counts per category and the worker commit/branch.

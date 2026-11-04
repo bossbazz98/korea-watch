@@ -1,7 +1,8 @@
 const fs=require('fs');
 const assert=require('node:assert/strict');
 const {initializeTestEnvironment,assertFails,assertSucceeds}=require('@firebase/rules-unit-testing');
-const {doc,setDoc,getDoc,serverTimestamp,Timestamp}=require('firebase/firestore');
+const client=require('firebase/firestore');
+const {doc,setDoc,getDoc,serverTimestamp,Timestamp,updateDoc}=client;
 (async()=>{
   const env=await initializeTestEnvironment({projectId:'demo-korea-watch',firestore:{rules:fs.readFileSync('../firestore.rules','utf8')}});
   const data=()=>({token:'t'.repeat(120),cats:['korwar'],level:'all',enabled:true,testRequested:false,updatedAt:serverTimestamp(),lang:'th',subscriptionVersion:2,quietOn:true,quietFrom:22,quietTo:7,quietBypass:true});
@@ -24,6 +25,24 @@ const {doc,setDoc,getDoc,serverTimestamp,Timestamp}=require('firebase/firestore'
     await assertSucceeds(getDoc(doc(alice,'pushlog/alice')));
     await assertFails(getDoc(doc(bob,'pushlog/alice')));
     await assertSucceeds(getDoc(doc(anon,'meta/feed')));
-    console.log('Firestore rules: 16 authorization/validation checks passed');
+    const {writeSubscription}=await import('../../public/subscriptions.js');
+    const options={fs:client,db:alice,uid:'alice',token:'t'.repeat(120),language:'th',preferences:{cats:['korwar','oil'],enabled:true,level:'high',quietOn:true,quietFrom:22,quietTo:7}};
+    const before=(await getDoc(doc(alice,'subscribers/alice'))).data().lastTestAt;
+    await assertSucceeds(writeSubscription(options));
+    assert.equal((await getDoc(doc(alice,'subscribers/alice'))).data().lastTestAt.toMillis(),before.toMillis());
+    const pending=await assertSucceeds(writeSubscription({...options,requestTest:true}));
+    assert.equal(pending.testQueued,false);
+    assert.equal(pending.testPending,true);
+    await env.withSecurityRulesDisabled(async c=>updateDoc(doc(c.firestore(),'subscribers/alice'),{testRequested:false}));
+    await assertSucceeds(writeSubscription(options));
+    await assertFails(setDoc(doc(alice,'subscribers/alice'),{...data(),testRequested:true,lastTestAt:before}));
+    await assertFails(setDoc(doc(alice,'subscribers/alice'),data())); // Cannot erase test history.
+    await assertFails(setDoc(doc(bob,'subscribers/alice'),{...data(),lastTestAt:before}));
+    await env.withSecurityRulesDisabled(async c=>updateDoc(doc(c.firestore(),'subscribers/alice'),{lastTestAt:Timestamp.fromMillis(Date.now()-6*60000)}));
+    const next=await assertSucceeds(writeSubscription({...options,requestTest:true}));
+    assert.equal(next.testQueued,true);
+    await assertSucceeds(writeSubscription({...options,preferences:{...options.preferences,enabled:false}}));
+    assert.equal((await getDoc(doc(alice,'subscribers/alice'))).data().testRequested,false);
+    console.log('Firestore rules: authorization, cooldown, and save-after-test lifecycle checks passed');
   } finally {await env.cleanup();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

@@ -17,16 +17,24 @@ service cloud.firestore {
         && d.quietFrom is int && d.quietFrom >= 0 && d.quietFrom <= 23
         && d.quietTo is int && d.quietTo >= 0 && d.quietTo <= 23
         && d.updatedAt == request.time
-        && (!d.testRequested || (d.lastTestAt == request.time));
+        && (!('lastTestAt' in d) || d.lastTestAt is timestamp)
+        && (!d.testRequested || 'lastTestAt' in d);
+    }
+    function testTime(data) { return data.get('lastTestAt', timestamp.date(1970,1,1)); }
+    function validTestUpdate() {
+      let d = request.resource.data;
+      let old = resource.data;
+      let unchanged = testTime(d) == testTime(old);
+      return (unchanged && (!d.testRequested || old.get('testRequested', false)))
+        || (d.testRequested && testTime(d) == request.time
+          && request.time >= testTime(old) + duration.value(5, 'm'));
     }
     match /subscribers/{id} {
       allow read: if owner(id);
       allow delete: if false;
-      allow create: if owner(id) && validSub();
-      allow update: if owner(id) && validSub()
-        && (request.resource.data.testRequested || request.resource.data.get('lastTestAt', timestamp.date(1970,1,1)) == resource.data.get('lastTestAt', timestamp.date(1970,1,1)))
-        && (!request.resource.data.testRequested || !('lastTestAt' in resource.data)
-          || request.time >= resource.data.lastTestAt + duration.value(5, 'm'));
+      allow create: if owner(id) && validSub()
+        && (!('lastTestAt' in request.resource.data) || request.resource.data.lastTestAt == request.time);
+      allow update: if owner(id) && validSub() && validTestUpdate();
     }
     match /pushlog/{id} { allow read: if owner(id); allow write: if false; }
     match /{document=**} { allow read, write: if false; }

@@ -11,7 +11,7 @@ const CATS = {
                kw: ["북한", "北 ", "北,", "北미사일", "北 미사일", "北 도발", "北 핵", "北군", "대북", "북측", "탄도미사일", "남북", "군사분계선", "비무장지대", "DMZ", "휴전선", "합참", "합동참모본부", "북한군", "핵실험", "북핵", "연평도", "공습경보", "민방위 훈련", "김정은", "김여정", "한미연합", "을지"] },
   war:       { th: "สงครามทั่วโลก", desc: "wars and security crises elsewhere in the world (Ukraine-Russia, Middle East, Taiwan Strait etc.), NOT the Korean Peninsula",
                kw: ["전쟁", "공습", "교전", "휴전", "우크라이나", "러시아군", "이스라엘", "가자", "이란", "중동", "하마스", "헤즈볼라", "대만해협", "분쟁", "나토", "NATO"] },
-  disease:   { th: "โรคติดต่อ/ไวรัส", desc: "infectious diseases, viruses and outbreaks in Korea",
+  disease:   { th: "โรคติดต่อ/ไวรัส", desc: "infectious diseases and outbreaks in Korea, plus major international outbreaks relevant to health or travel in Korea",
                kw: ["감염병", "전염병", "바이러스", "확진", "독감", "인플루엔자", "코로나", "질병관리청", "유행", "엠폭스", "결핵", "홍역", "조류인플루엔자", "백신", "팬데믹"] },
   food:      { th: "อาหาร/กักตุน", desc: "food supply, panic buying, shortages of daily goods",
                kw: ["사재기", "품귀", "생필품", "품절", "식량", "쌀값", "라면", "장보기", "물가 급등", "공급 부족", "비축"] },
@@ -46,6 +46,12 @@ const FEEDS = [
   { id: "gn_oil_fx",    hint: null,        take: 10, url: gn("국제유가 OR 휘발유 가격 OR 원달러 환율") },
   { id: "gn_labor",     hint: null,        take: 10, url: gn("최저임금 OR 외국인 노동자 OR 고용허가제 OR 근로기준법") },
   { id: "gn_president", hint: "president", take: 6,  url: gn("대통령실 OR 대통령 발표") },
+  // Separate international/category searches so the Korean Peninsula feed cannot dominate collection.
+  { id: "gn_war_global", hint: "war", take: 12, url: gn("러시아 우크라이나 전쟁 OR 중동 분쟁 OR 이스라엘 가자 OR 대만 해협") },
+  { id: "gn_health_global", hint: "disease", take: 8, url: gn("세계보건기구 감염병 OR 해외 바이러스 확산 OR 국제 감염병 비상") },
+  { id: "gn_food_global", hint: "food", take: 8, url: gn("세계 식량 공급 부족 OR 국제 곡물 가격 급등 OR 생필품 품귀") },
+  { id: "gn_oil_global", hint: "oil", take: 8, url: gn("국제유가 OR OPEC 원유 공급 OR 세계 에너지 가격") },
+  { id: "gn_fx_global", hint: "fx", take: 8, url: gn("원달러 환율 OR 달러 강세 OR 바트 환율") },
   // ฟีดตรงของสำนักข่าว: ได้ลิงก์จริง (ไม่ต้องถอดลิงก์ Google) และหลายเจ้าแนบภาพ/คำโปรยมาในฟีด
   // เก็บเฉพาะข่าวที่ตรงคำค้นของหมวดใดหมวดหนึ่ง ฟีดไหนใช้ไม่ได้จะถูกข้ามอัตโนมัติ
   // หมายเหตุ: ฟีด RSS ของสำนักข่าวอนุญาตให้ใช้ส่วนบุคคล/ไม่แสวงหากำไร

@@ -1,4 +1,4 @@
-const { allItems } = require("./test-data");
+const { allItems, thaiTitle } = require("./test-data");
 // ทดสอบ: ดึงเนื้อข่าวจริง, สรุปละเอียด, เขียนข่าวสั้นใหม่, พักรุ่นที่โดน 429, แปลซ้ำทันที, งานจาก Agent: node tools/selftest7.js
 const assert = require("assert");
 const { extractArticleText, findArticleImage, decodePage, resolveArticle } = require("../lib/images");
@@ -51,17 +51,17 @@ const KO = "북한이 31일 오전 동해상으로 단거리 탄도미사일 여
       groqCalls.push({ m: b.model, n: input.length, art: input.map(x => (x.article || "").length) });
       if (mode === "rate" && b.model === "openai/gpt-oss-120b") return { ok: false, status: 429, json: async () => ({ error: { message: "Rate limit reached: tokens per minute" } }) };
       const titles = b.messages[0].content.startsWith("Translate Korean");
-      return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content: JSON.stringify({ items: input.map(x => titles ? { i: x.i, th: "หัวข้อ", en: "T" } : { i: x.i, relevant: true, categories: x.guessedCategories && x.guessedCategories.length ? x.guessedCategories : ["war"], level: "high", title: { th: "ข่าวละเอียด " + x.headline, en: "t" }, summary: { th: "สรุปสองถึงสามประโยค", en: "s" }, body_th: ["ย่อ1", "ย่อ2", "ย่อ3", "ย่อ4", "ย่อ5"], tips_th: ["ข้อควรรู้"] }) }) } }] }) };
+      return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content: JSON.stringify({ items: input.map(x => titles ? { i: x.i, th: "หัวข้อ", en: "T" } : { i: x.i, relevant: true, categories: x.guessedCategories && x.guessedCategories.length ? x.guessedCategories : ["war"], level: "high", title: { th: thaiTitle(x.headline, "ข่าวละเอียด"), en: "t" }, summary: { th: "สรุปสองถึงสามประโยค", en: "s" }, body_th: ["ย่อ1", "ย่อ2", "ย่อ3", "ย่อ4", "ย่อ5"], tips_th: ["ข้อควรรู้"] }) }) } }] }) };
     }
     return { ok: true, text: async () => "<rss><channel></channel></rss>", arrayBuffer: async () => Buffer.from("") };
   };
-  const base = { titleKo: "북한 미사일", snippetKo: "", summary: {}, body: {}, categories: ["war"], level: "normal", links: [{ label: "x", url: "" }], source: "연합뉴스" };
+  const base = { titleKo: "북한 미사일", snippetKo: "", summary: {th:"สรุปข่าว"}, body: {}, categories: ["war"], level: "normal", links: [{ label: "x", url: "" }], source: "연합뉴스" };
   data.set("meta/feed", { v: 8, items: [
     { ...base, id: "new1", titleKo: "북한 탄도미사일 동해 발사", title: { ko: "북한" }, translated: false, publishedAt: iso(0.5), sourceUrl: "https://news.example/new1-img" },
     { ...base, id: "old-short", titleKo: "국제유가 급등 주유소 가격 상승", categories: ["oil"], title: { th: "สั้น", en: "s" }, summary: { th: "ส", en: "s" }, body: { th: ["สั้นมาก"] }, translated: true, publishedAt: iso(5), sourceUrl: "https://news.example/old" },
     { ...base, id: "old-notext", titleKo: "최저임금 결정 노사 협상", categories: ["wage"], title: { th: "สั้น2", en: "s" }, summary: { th: "ส", en: "s" }, body: { th: ["สั้น"] }, translated: true, publishedAt: iso(6), sourceUrl: "https://news.example/noText", image: "https://img/x.jpg" },
-    { ...base, id: "fix-img", titleKo: "질병관리청 독감 주의보", categories: ["disease"], title: { th: "ภาพเสีย", en: "x" }, translated: true, rich: true, body: { th: ["x".repeat(500)] }, publishedAt: iso(7), sourceUrl: "https://news.example/fix-img", image: "https://broken/1.jpg" },
-    { ...base, id: "fix-remove", titleKo: "외국인 노동자 고용허가", categories: ["foreign"], title: { th: "ซ้ำ", en: "x" }, translated: true, rich: true, body: { th: ["x".repeat(500)] }, publishedAt: iso(8), sourceUrl: "https://news.example/x", image: "https://i/1.jpg" }
+    { ...base, id: "fix-img", titleKo: "질병관리청 독감 주의보", categories: ["disease"], title: { th: "ภาพเสีย", en: "x" }, translated: true, rich: true, body: { th: ["ก".repeat(500)] }, publishedAt: iso(7), sourceUrl: "https://news.example/fix-img", image: "https://broken/1.jpg" },
+    { ...base, id: "fix-remove", titleKo: "외국인 노동자 고용허가", categories: ["foreign"], title: { th: "ซ้ำ", en: "x" }, translated: true, rich: true, body: { th: ["ก".repeat(500)] }, publishedAt: iso(8), sourceUrl: "https://news.example/x", image: "https://i/1.jpg" }
   ] });
   data.set("meta/fixes", { requeueImage: ["fix-img"], remove: ["fix-remove"], enrich: [] });
   const st = await runOnce({ db, messaging: { async sendEachForMulticast(m) { return { successCount: m.tokens.length, responses: [] } } }, appUrl: "https://x", groqKey: "k", fetchImpl, now, log, waitMs: 0 });

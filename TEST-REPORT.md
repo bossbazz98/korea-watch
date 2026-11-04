@@ -40,3 +40,14 @@ Do not treat fixture success as proof of production permissions or delivered not
 - The existing fixture UI suite also saves an authenticated subscription with quiet hours using the redesigned controls.
 - Light/dark and reader screenshots are included under docs/ui for review.
 - Native iOS/Safari hardware, OS-level push audio and live Firebase delivery were not exercised. The selected tones apply only to foreground urgent alerts.
+
+## Follow-up fixes — 2026-11-05 (Asia/Seoul)
+
+- Existing suites were adapted to the shared Thai-field validation: fixtures representing successful translations no longer copy Korean headlines into Thai fields. Explicit invalid-language cases remain rejected.
+- Regression cases exercise an 80-item Korean backlog alongside all 11 other categories, which publish across two worker rounds; another case repairs a Korean summary/body behind a Thai headline without sending a duplicate alert.
+- Subscription unit tests cover preserving lastTestAt/pending requests, cooldown, disabling, and first real registration when local preferences incorrectly said enabled.
+- Chromium fixture tests call the real browser showNotification API successfully on enable, verify a server-test request is written, then edit settings again without clearing the timestamp or pending request. This is not a claim of delivery to the user's physical device.
+- UI checks cover one settings entry point, monochrome selection controls, seven sounds and server refresh on scrolling to the bottom with cooldown and manual retry.
+- Updated Firestore Emulator tests cover save-after-test, preserving pending requests, replay/history-erasure denial, cross-user denial, cooldown expiry and disabling. New rules have not been compiled/executed here: the proxy explicitly denied the official emulator download (CONNECT 403). Run npm run test:rules on the iMac/CI before deployment.
+- Live public status and Actions API diagnosis was attempted but those destinations were also denied by cloud networking. No production credentials, rules, data or notification state were modified.
+- Native device push delivery, deployed rules and live category output remain to be confirmed after rules/Hosting deployment and merging/running the new worker on main.

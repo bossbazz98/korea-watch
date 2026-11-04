@@ -11,7 +11,7 @@ function fakeContext() {
   };
   return { context, calls };
 }
-test('all five presets produce different bounded foreground sounds', async () => {
+test('all seven presets produce different bounded foreground sounds', async () => {
   const signatures = new Set();
   for (const preset of SOUND_PRESETS) {
     const { context, calls } = fakeContext(), audio = new AlertAudio({ createContext: () => context });
@@ -26,7 +26,7 @@ test('all five presets produce different bounded foreground sounds', async () =>
     } finally { audio.stop(); }
     assert(calls.oscillators.every(o => o.disconnected));
   }
-  assert.equal(signatures.size, 5);
+  assert.equal(signatures.size, 7);
 });
 test('repeated preview stops previous oscillators and mute creates no new sound', async () => {
   const { context, calls } = fakeContext(), audio = new AlertAudio({ createContext: () => context });

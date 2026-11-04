@@ -9,7 +9,7 @@ const port = 8798, origin = `http://127.0.0.1:${port}`;
 const fixture = [{ id: 'reader', translated: true, categories: ['korwar'], level: 'normal', publishedAt: new Date().toISOString(), source: 'Korea Watch', image: `${origin}/icons/icon-512.png`, title: { th: 'ข่าวทดสอบสำหรับตรวจหน้าอ่านข่าว', en: 'A story to test the article reader' }, summary: { th: 'สรุปข่าวสำหรับทดสอบภาพและปุ่มปิด', en: 'A summary for checking image and close-button behaviour.' }, body: { th: Array(10).fill('เนื้อข่าวภาษาไทยเพื่อทดสอบการเลื่อนอ่าน และยืนยันว่ารูปภาพไม่ทับปุ่มปิดข่าว '.repeat(6)), en: Array(10).fill('Article text for scrolling through the reader and checking the close button. '.repeat(7)) } }];
 const scripts = {
   'firebase-app.js': 'export const initializeApp=c=>({c});',
-  'firebase-firestore.js': `export const persistentLocalCache=()=>({}),initializeFirestore=()=>({}),getFirestore=()=>({}),doc=(d,...p)=>p.join('/'),serverTimestamp=()=>'TS';export async function setDoc(){throw Error('Unexpected subscription write')}export async function getDoc(){return {exists:()=>false}};export function onSnapshot(ref,ok){setTimeout(()=>ok({exists:()=>true,data:()=>ref==='meta/feed'?{items:${JSON.stringify(fixture)}}:{lastRun:new Date().toISOString()},metadata:{fromCache:false}}),10);return()=>{}}`,
+  'firebase-firestore.js': `export const persistentLocalCache=()=>({}),initializeFirestore=()=>({}),getFirestore=()=>({}),doc=(d,...p)=>p.join('/'),serverTimestamp=()=>'TS';export async function setDoc(){throw Error('Unexpected subscription write')}export async function getDoc(){return {exists:()=>false}};export async function getDocFromServer(ref){window.__refreshReads=(window.__refreshReads||0)+1;return {exists:()=>true,data:()=>ref==='meta/feed'?{items:${JSON.stringify(fixture)}}:{lastRun:new Date().toISOString()},metadata:{fromCache:false}};}export function onSnapshot(ref,ok){setTimeout(()=>ok({exists:()=>true,data:()=>ref==='meta/feed'?{items:${JSON.stringify(fixture)}}:{lastRun:new Date().toISOString()},metadata:{fromCache:false}}),10);return()=>{}}`,
   'firebase-messaging.js': 'export const isSupported=async()=>false;'
 };
 const server = http.createServer((request, response) => {
@@ -39,8 +39,33 @@ const server = http.createServer((request, response) => {
       try {
         await page.goto(origin); await page.waitForSelector('.card');
         assert.equal(await page.locator('.tools #l-th').count(), 0, 'language moved out of header');
+        assert.equal(await page.locator('#bell').count(), 0, 'no duplicate settings shortcut');
+        assert.equal(await page.locator('#settings').count(), 1);
+        await page.evaluate(() => scrollTo(0, document.documentElement.scrollHeight));
+        await page.waitForFunction(() => window.__refreshReads === 2);
+        assert.match(await page.locator('#refresh-status').textContent(), /อัปเดตข่าวล่าสุดแล้ว/);
+        await page.evaluate(() => { scrollTo(0, 0); });
+        await page.waitForTimeout(40);
+        await page.evaluate(() => scrollTo(0, document.documentElement.scrollHeight));
+        await page.waitForTimeout(80);
+        assert.equal(await page.evaluate(() => window.__refreshReads), 2, 'bottom refresh is rate limited');
+        await page.locator('#refresh-news').click();
+        await page.waitForFunction(() => window.__refreshReads === 4);
+        await context.setOffline(true);
+        await page.locator('#refresh-news').click();
+        assert.match(await page.locator('#refresh-status').textContent(), /อัปเดตข่าวไม่ได้/);
+        assert.equal(await page.evaluate(() => window.__refreshReads), 4);
+        await context.setOffline(false);
+        await page.locator('#refresh-news').click();
+        await page.waitForFunction(() => window.__refreshReads === 6);
+
+        await page.evaluate(() => scrollTo(0, 0));
+
         await page.locator('#settings').click();
+        assert(await page.locator('#p-state').isHidden(), 'no unverified subscription success banner');
         assert.equal(await page.locator('.settings-card').count(), 4);
+        assert.equal(await page.locator('#p-tone option').count(), 7);
+        assert.equal(await page.locator('.section-icon').first().evaluate(el => getComputedStyle(el).color), 'rgb(43, 51, 60)', 'settings use the same monochrome ink as the main app');
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, 'no horizontal overflow');
         assert.equal(await page.locator('#panel').evaluate(el => el.scrollWidth > el.clientWidth), false);
         await page.screenshot({ path: path.join(out, `settings-${scenario.name}-light.png`) });

@@ -60,7 +60,8 @@ const item = (id, x = {}) => ({ id, titleKo: KO[id] || "기사 " + id, title: { 
   const img = fs.readFileSync(path.join(pub, "icons", "icon-512.png"));
   const STUB = {
     "firebase-app.js": "export const initializeApp=c=>({c});",
-    "firebase-firestore.js": `const D=${JSON.stringify(feedItems)};export const persistentLocalCache=()=>({});export const initializeFirestore=()=>({});export const getFirestore=()=>({});export const doc=(d,...p)=>p.join('/');export const serverTimestamp=()=>'TS';export async function setDoc(ref,value){window.__writes=(window.__writes||[]).concat([{ref,value}]);}export async function getDoc(){return {exists:()=>false};}
+    "firebase-firestore.js": `const D=${JSON.stringify(feedItems)};export const persistentLocalCache=()=>({});export const initializeFirestore=()=>({});export const getFirestore=()=>({});export const doc=(d,...p)=>p.join('/');export const serverTimestamp=()=>'TS';export async function setDoc(ref,value){window.__writes=(window.__writes||[]).concat([{ref,value}]);}export async function getDoc(){return {exists:()=>false};}export async function runTransaction(db,fn){window.__subDocs ||= {};return fn({get:async ref=>({exists:()=>!!window.__subDocs[ref],data:()=>window.__subDocs[ref]}),set:(ref,value)=>{window.__subDocs[ref]=value;window.__writes=(window.__writes||[]).concat([{ref,value}]);}});}
+export async function getDocFromServer(ref){window.__refreshReads=(window.__refreshReads||0)+1;return {exists:()=>true,data:()=>ref==='meta/feed'?{items:D}:{lastRun:new Date().toISOString()},metadata:{fromCache:false}};}
 export function onSnapshot(ref,ok){setTimeout(()=>{if(ref==="meta/feed")ok({exists:()=>true,data:()=>({items:D}),metadata:{fromCache:false}});else ok({exists:()=>true,data:()=>({lastRun:new Date().toISOString()})})},30);return()=>{}}`,
     "firebase-messaging.js": "export const isSupported=async()=>true;export const getMessaging=()=>({});export const onMessage=()=>{};export const getToken=async()=>'fixture-token-abcdefghijklmnopqrstuvwxyz';",
     "firebase-auth.js": "export const getAuth=()=>({authStateReady:async()=>{},currentUser:{uid:'fixture-user'}});export const signInAnonymously=async()=>({user:{uid:'fixture-user'}});"
@@ -68,6 +69,7 @@ export function onSnapshot(ref,ok){setTimeout(()=>{if(ref==="meta/feed")ok({exis
   const prepare = async ctx => {
     await ctx.route("**/vendor/firebase/**", r => r.fulfill({ status: 200, contentType: "text/javascript", body: STUB[r.request().url().split("/").pop()] || "" }));
     await ctx.route("**/firebase-config.js", r => r.fulfill({ status: 200, contentType: "text/javascript", body: "self.KW_CONFIG={firebase:{apiKey:'AIzaFAKE',projectId:'p'},vapidKey:'B'};" }));
+    await ctx.route("https://img.ok/**", r => r.fulfill({ status: 200, contentType: "image/png", body: img }));
     await ctx.route("https://wsrv.nl/**", r => r.fulfill({ status: 200, contentType: "image/png", body: img }));
     await ctx.route("https://fonts.googleapis.com/**", r => r.fulfill({ status: 200, contentType: "text/css", body: "" }));
   };
@@ -92,11 +94,18 @@ export function onSnapshot(ref,ok){setTimeout(()=>{if(ref==="meta/feed")ok({exis
     try {
       const ctx = await browser.newContext({ permissions: ["notifications"] });
       await prepare(ctx);
+      await ctx.addInitScript(() => {
+        const original = ServiceWorkerRegistration.prototype.showNotification;
+        ServiceWorkerRegistration.prototype.showNotification = async function(...args) {
+          await original.apply(this, args);
+          window.__localNotifications = (window.__localNotifications || 0) + 1;
+        };
+      });
       const page = await ctx.newPage();
       await page.goto("http://localhost:8799/");
       await page.waitForSelector('.card');
       assert.strictEqual(await page.locator('[data-cat="korwar"]').count(), 1, 'Korean Peninsula category is selectable');
-      await page.locator('#bell').click();
+      await page.locator('#settings').click();
       await page.locator('label:has(#p-on)').click();
       assert.strictEqual(await page.locator('#p-on').isChecked(), true);
       await page.locator('label:has(input[name="lv"][value="all"])').click();
@@ -111,6 +120,18 @@ export function onSnapshot(ref,ok){setTimeout(()=>{if(ref==="meta/feed")ok({exis
       assert.strictEqual(write.value.subscriptionVersion, 2);
       assert.strictEqual(write.value.quietOn, true);
       assert.ok(write.value.cats.includes('korwar'));
+      assert.strictEqual(write.value.testRequested, true, 'enabling queues a real server test');
+      await page.waitForFunction(() => window.__localNotifications === 1);
+      await page.locator('#settings').click();
+      assert(await page.locator('#p-state').isHidden());
+      await page.locator('#p-from').selectOption('23');
+      await page.locator('#p-save').click();
+      await page.waitForFunction(() => window.__writes.length === 2);
+      const after = await page.evaluate(() => window.__writes.at(-1));
+      assert.strictEqual(after.value.lastTestAt, write.value.lastTestAt, 'normal edits retain test history');
+      assert.strictEqual(after.value.testRequested, true, 'normal edits do not erase the pending test');
+      assert.strictEqual(await page.evaluate(() => window.__localNotifications), 1, 'normal edits do not fire another local test');
+
       await ctx.close();
     } finally { await browser.close(); }
 

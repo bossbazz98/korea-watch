@@ -69,3 +69,39 @@ test('retry respects quiet hours without dropping the pending recipient',async()
 test('emergency budget counts distinct stories, not title/body calls, and reserves before awaiting',()=>{
  const q=new Quota();const a=q.claimEmergency(['a','b']);assert.equal(a.count,2);assert.equal(q.claimEmergency(['c','d']),null);assert.equal(q.claimEmergency(['a']).count,0);a.rollback();assert.equal(q.emergencyLeft(),3);assert.equal(q.claimEmergency(['c','d','e']).count,3);assert.equal(q.claimEmergency(['f']),null);
 });
+function translatedNewsFetch() {
+ return async (url,options={})=>{
+  if(String(url).includes('api.groq.com')) {
+   const payload=JSON.parse(options.body),input=JSON.parse(payload.messages[1].content),titles=payload.messages[0].content.startsWith('Translate Korean');
+   const results=input.map(x=>{
+    const hash=require('crypto').createHash('sha256').update(x.headline).digest('hex').slice(0,24);
+    return titles?{i:x.i,th:'หัวข้อไทย '+hash,en:'Headline '+hash}:{i:x.i,relevant:true,categories:x.guessedCategories,level:'normal',title:{th:'ข่าวแปล '+hash,en:'News '+hash},summary:{th:'สรุปเนื้อข่าวภาษาไทย',en:'Translated summary'},body_th:['เนื้อข่าวภาษาไทย '.repeat(40)]};
+   });
+   return {ok:true,status:200,json:async()=>({usage:{total_tokens:500},choices:[{message:{content:JSON.stringify({items:results})}}]})};
+  }
+  if(String(url).includes('rss')||String(url).includes('feed')) return {ok:true,text:async()=>'<rss><channel/></rss>'};
+  return {ok:true,status:200,headers:{get:()=> 'text/html'},arrayBuffer:async()=>Buffer.from('<article><p>'+'국제 뉴스 기사 내용과 사실을 확인합니다. '.repeat(60)+'</p></article>')};
+ };
+}
+test('a large Korean backlog cannot consume all translation slots; other categories publish across runs',async()=>{
+ const db=dbFake(),now=Date.now(),categories=['war','disease','food','thai','korea','oil','fx','wage','foreign','law','president'];
+ const item=(id,category)=>({id,titleKo:'기사 '+id,title:{ko:'기사 '+id},summary:{ko:'한국어 요약'},body:{},translated:false,attempts:0,categories:[category],level:'normal',publishedAt:new Date(now-600000).toISOString(),addedAt:new Date(now-600000).toISOString(),source:'Fixture',sourceUrl:'https://example.test/'+id,links:[]});
+ db.data.set('meta/feed',{v:8,items:[...Array.from({length:80},(_,i)=>item('kw'+i,'korwar')),...categories.map((category,i)=>item('other'+i,category))]});
+ const options={db,messaging:{},appUrl:'https://example.test',groqKey:'fixture',fetchImpl:translatedNewsFetch(),log,waitMs:0,budgetMs:60000,imgBudgetMs:2000,watchEveryMs:120000};
+ const first=await runOnce({...options,now});
+ assert.equal(first.korwar,6);
+ assert(categories.filter(category=>first.publishedByCategory[category]>0).length>=9);
+ const second=await runOnce({...options,now:now+300000});
+ for(const category of categories) assert(second.publishedByCategory[category]>0,category);
+});
+test('legacy Thai headline with Korean body is requeued and repaired without a duplicate alert',async()=>{
+ const db=dbFake(),now=Date.now();
+ const old={...story('legacy'),title:{th:'หัวข้อแปลแล้ว'},summary:{th:'한국어 요약 뉴스'},body:{th:['한국어 기사 본문']},titleKo:'원문 뉴스',sourceUrl:'https://example.test/legacy',source:'Fixture',links:[]};
+ db.data.set('meta/feed',{v:8,items:[old]});
+ await runOnce({db,messaging:{},appUrl:'https://example.test',fetchImpl:translatedNewsFetch(),log,now,budgetMs:1000,imgBudgetMs:0});
+ assert.equal(db.data.get('meta/pending').items[0].translated,false);
+ assert.equal(db.data.get('meta/pending').items[0].retranslation,true);
+ let sent=0;
+ await runOnce({db,messaging:{async sendEachForMulticast(){sent++;return {successCount:0,responses:[]}}},appUrl:'https://example.test',groqKey:'fixture',fetchImpl:translatedNewsFetch(),log,now,budgetMs:60000,imgBudgetMs:2000,waitMs:0});
+ assert(require('../../public/news-text').completeThai(db.data.get('meta/feed').items[0]));assert.equal(sent,0);
+});

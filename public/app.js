@@ -1,4 +1,5 @@
 import { AlertAudio, SOUND_PRESETS } from "./audio.js";
+import { writeSubscription } from "./subscriptions.js";
 // Korea Watch: หน้าแอป (อ่านข่าวจาก Firestore, ตั้งค่าแจ้งเตือน, ติดตั้งแอป)
 const SDK = "/vendor/firebase/";
 const CFG = self.KW_CONFIG || {};
@@ -46,22 +47,22 @@ const T = {
 };
 
 Object.assign(T.th, {
-  settings: 'ตั้งค่า', settingsIntro: 'ปรับให้เป็นแบบที่คุณชอบ', devicePrefs: 'ภาษา ธีม และเสียง บันทึกให้อัตโนมัติบนเครื่องนี้',
+  categoryPending: count => `กำลังเตรียมข่าวหมวดนี้ ${count} ข่าว`, refresh: 'อัปเดตข่าว', refreshing: 'กำลังอัปเดตข่าว…', refreshed: 'อัปเดตข่าวล่าสุดแล้ว', refreshHint: 'เลื่อนลงถึงท้ายหน้าเพื่ออัปเดตข่าว', refreshFailed: 'อัปเดตข่าวไม่ได้ โปรดตรวจการเชื่อมต่อแล้วลองอีกครั้ง', translationPending: 'กำลังแปลข่าวเป็นภาษาไทย', testPending: 'มีคำขอทดสอบจากระบบรอส่งอยู่แล้ว', testCooldown: 'ส่งทดสอบจากเครื่องแล้ว กรุณารอ 5 นาทีก่อนขอทดสอบจากระบบอีกครั้ง', localTestFailed: 'บันทึกแล้ว แต่แสดงแจ้งเตือนทดสอบบนเครื่องไม่ได้', settings: 'ตั้งค่า', settingsIntro: 'ปรับให้เป็นแบบที่คุณชอบ', devicePrefs: 'ภาษา ธีม และเสียง บันทึกให้อัตโนมัติบนเครื่องนี้',
   appearance: 'หน้าตาและภาษา', appearanceHint: 'อ่านข่าวได้สบาย ในสไตล์ของคุณ', language: 'ภาษาที่แสดง', theme: 'รูปแบบหน้าจอ',
   theme_system: 'ตามระบบ', theme_light: 'สว่าง', theme_dark: 'มืด', soundTitle: 'เสียงเตือนในแอป', soundHint: 'ใช้กับข่าวด่วนมากขณะเปิดแอป',
   soundType: 'เลือกเสียง', preview: 'ทดลองฟัง', stopSound: 'หยุดเสียง', volume: 'ระดับเสียง',
-  tone_siren: 'ไซเรน · สลับเสียง', tone_pulse: 'แจ้งเตือน · สองจังหวะ', tone_bell: 'ระฆัง · นุ่มนวล', tone_chime: 'กระดิ่ง · สามโน้ต', tone_radar: 'เรดาร์ · ไล่ระดับ',
+  tone_siren: 'ไซเรน · สลับเสียง', tone_airraid: 'หวอฉุกเฉิน · ขึ้นลงยาว', tone_emergency: 'ฉุกเฉิน · ไซเรนเร็ว', tone_pulse: 'แจ้งเตือน · สองจังหวะ', tone_bell: 'ระฆัง · นุ่มนวล', tone_chime: 'กระดิ่ง · สามโน้ต', tone_radar: 'เรดาร์ · ไล่ระดับ',
   backgroundSound: 'เสียงเมื่อปิดแอปใช้การตั้งค่าของอุปกรณ์ แถบนี้ปรับเฉพาะเสียงในแอป',
   notifications: 'การแจ้งเตือนข่าว', allNews: 'ทุกข่าวในหมวดที่เลือก', criticalHint: 'เฉพาะเหตุการณ์ที่ต้องรู้ทันที', highHint: 'รวมข่าวสำคัญที่ควรติดตาม', allHint: 'รับทุกข่าวใหม่ในหมวดที่คุณสนใจ',
   quietTitle: 'เวลาพัก', quietHint: 'งดแจ้งเตือนตามเวลาเกาหลี (KST)', quietFrom: 'เริ่มพัก', quietTo: 'กลับมาแจ้ง',
   quietBypass: 'ยกเว้นข่าวสงครามเกาหลีระดับด่วนมาก', saveAlerts: 'บันทึกการแจ้งเตือน', audioError: 'ยังเล่นเสียงไม่ได้ ลองแตะทดลองฟังอีกครั้ง'
 });
 Object.assign(T.en, {
-  settings: 'Settings', settingsIntro: 'Make Korea Watch feel like yours.', devicePrefs: 'Language, theme and sound save automatically on this device',
+  categoryPending: count => `${count} stories in this topic are being prepared`, refresh: 'Refresh news', refreshing: 'Refreshing news…', refreshed: 'News is up to date', refreshHint: 'Scroll to the bottom to refresh news', refreshFailed: 'Could not refresh. Check your connection and try again.', translationPending: 'English translation is pending', testPending: 'A server test is already queued.', testCooldown: 'Local test sent. Wait 5 minutes before requesting another server test.', localTestFailed: 'Saved, but the local notification could not be displayed.', settings: 'Settings', settingsIntro: 'Make Korea Watch feel like yours.', devicePrefs: 'Language, theme and sound save automatically on this device',
   appearance: 'Appearance & language', appearanceHint: 'A comfortable way to read, day or night.', language: 'Display language', theme: 'Appearance',
   theme_system: 'System', theme_light: 'Light', theme_dark: 'Dark', soundTitle: 'In-app alert sound', soundHint: 'For urgent news while the app is open',
   soundType: 'Choose a sound', preview: 'Preview', stopSound: 'Stop sound', volume: 'Volume',
-  tone_siren: 'Siren · alternating', tone_pulse: 'Alert · double pulse', tone_bell: 'Bell · gentle', tone_chime: 'Chime · three notes', tone_radar: 'Radar · sweep',
+  tone_siren: 'Siren · alternating', tone_airraid: 'Air-raid siren · long wail', tone_emergency: 'Emergency · rapid siren', tone_pulse: 'Alert · double pulse', tone_bell: 'Bell · gentle', tone_chime: 'Chime · three notes', tone_radar: 'Radar · sweep',
   backgroundSound: 'Background push sounds follow your device settings. These controls affect in-app audio only.',
   notifications: 'News notifications', allNews: 'All selected news', criticalHint: 'Only events that need immediate attention', highHint: 'Include important developments', allHint: 'Every new story in your selected topics',
   quietTitle: 'Quiet hours', quietHint: 'Pause notifications using Korean time (KST)', quietFrom: 'From', quietTo: 'Until',
@@ -88,8 +89,8 @@ const store = { get(k, d) { try { const v = localStorage.getItem(k); return v ==
 let lang = store.get("kw.lang", "th"), sound = store.get("kw.sound", true), cat = "all";
 let themeMode = store.get('kw.theme', 'system');
 if (!['system', 'light', 'dark'].includes(themeMode)) themeMode = 'system';
-let tone = store.get('kw.alertTone', 'siren');
-if (!SOUND_PRESETS.includes(tone)) tone = 'siren';
+let tone = store.get('kw.alertTone', 'airraid');
+if (!SOUND_PRESETS.includes(tone)) tone = 'airraid';
 const savedVolume = store.get('kw.volume', 0.45);
 let volume = typeof savedVolume === 'number' && Number.isFinite(savedVolume) ? Math.max(0, Math.min(1, savedVolume)) : 0.45;
 const alertAudio = new AlertAudio();
@@ -118,7 +119,7 @@ const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 const isStandalone = () => matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
 
-const L = o => o ? (typeof o === "string" ? o : (o[lang] || o.th || o.en || o.ko || "")) : "";
+const L = value => globalThis.KW_NEWS_TEXT.pick(value, lang) || t("translationPending");
 const t = k => T[lang][k];
 function ago(ms) { const s = (Date.now() - ms) / 1000; if (s < 90) return t("now"); if (s < 3600) return Math.round(s / 60) + " " + t("m"); if (s < 86400) return Math.round(s / 3600) + " " + t("h"); return Math.round(s / 86400) + " " + t("d") }
 function kst(ms) { try { return new Intl.DateTimeFormat(lang === "th" ? "th-TH" : "en-GB", { timeZone: "Asia/Seoul", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(ms)) + " " + t("kst") } catch (e) { return new Date(ms).toLocaleString() } }
@@ -140,13 +141,16 @@ function picture(n, hero = false) {
 }
 function srcLine(n) { return `<div class="meta"><span>${esc(n.source || "")}</span><span>${ago(ts(n))}</span></div>` }
 function setHTML(el, html) { if (el._h === html) return; const sl = el.scrollLeft; el.innerHTML = html; el._h = html; el.scrollLeft = sl }
-function emptyMsg(def) { return notReady ? t("setup") : def }
+function emptyMsg(def) {
+  if (notReady) return t('setup');
+  const waiting = cat === 'all' ? status?.hidden : status?.pendingByCategory?.[cat];
+  return waiting > 0 ? t('categoryPending')(waiting) : def;
+}
 
 function renderStatic() {
   document.documentElement.lang = lang;
+  renderRefreshState();
   $("settings").setAttribute("aria-label", t("settings")); $("settings-l").textContent = t("settings");
-  const on = push.enabled && "Notification" in window && Notification.permission === "granted";
-  $("bell").setAttribute("aria-pressed", String(on)); $("bell-l").textContent = on ? t("bellOn") : t("bell"); $("bell").setAttribute("aria-label", t("nH"));
   $("install").hidden = isStandalone(); $("install-l").textContent = t("install"); $("install").setAttribute("aria-label", t("install"));
   $("t-bk").textContent = t("bk"); $("t-bksub").textContent = t("bksub");
   $("t-topics").textContent = t("topics"); $("t-all").textContent = t("all"); $("t-30").textContent = t("d30"); $("t-foot").textContent = t("foot"); $("strip-k").textContent = t("urgent");
@@ -212,8 +216,7 @@ function closeSheet() {
 }
 function openItem(id) {
   const n = items.find(x => x.id === id); if (!n) return false;
-  const body = n.body && typeof n.body === "object" && !Array.isArray(n.body) ? L(n.body) : n.body;
-  const paras = (Array.isArray(body) ? body : String(body || "").split(/\n\n+/)).map(String).filter(Boolean);
+  const paras = globalThis.KW_NEWS_TEXT.body(n.body, lang);
   const links = (n.links && n.links.length ? n.links : (n.sourceUrl ? [{ label: n.source, url: n.sourceUrl }] : [])).map(l => ({ label: l.label, url: safeUrl(l.url) })).filter(l => l.url);
   showSheet(`<div class="bar"><div class="meta">${badges(n)}</div><button class="btn" id="close">${t("close")}</button></div>
     <h2 id="article-title">${esc(L(n.title))}</h2>
@@ -301,27 +304,25 @@ async function getToken() {
   const reg = await getSw(); await navigator.serviceWorker.ready;
   return m.getToken(messaging, { vapidKey: CFG.vapidKey, serviceWorkerRegistration: reg });
 }
-// บันทึกการตั้งค่าแจ้งเตือนของเครื่องนี้ลงฐานข้อมูล (id = SHA-256 ของ token)
-async function subId(token) {
-  const h = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
-  return [...new Uint8Array(h)].map(b => b.toString(16).padStart(2, "0")).join("");
-}
-let authUser = null;
+// Anonymous Authentication owns one subscription document per browser profile.
 async function subscriptionId() {
-  if (!authUser) {
-    const a = await import(SDK + "firebase-auth.js");
-    const auth = a.getAuth(fb.app);
-    await auth.authStateReady();
-    authUser = auth.currentUser || (await a.signInAnonymously(auth)).user;
-  }
-  return authUser.uid;
+  const module = await import(SDK + 'firebase-auth.js');
+  const auth = module.getAuth(fb.app);
+  await auth.authStateReady();
+  const user = auth.currentUser || (await module.signInAnonymously(auth)).user;
+  return user.uid;
 }
-async function saveSub(token, p, extra = {}) {
-  const { fs, db } = fb;
-  await fs.setDoc(fs.doc(db, "subscribers", await subscriptionId()), {
-    token, cats: p.cats, level: ["all", "high"].includes(p.level) ? p.level : "critical", enabled: !!p.enabled,
-    testRequested: false, lang, subscriptionVersion: 2, quietOn: !!p.quietOn, quietFrom: Number(p.quietFrom ?? 22), quietTo: Number(p.quietTo ?? 7), quietBypass: p.quietBypass !== false, updatedAt: fs.serverTimestamp(), ...extra
+async function saveSub(token, preferences, extra = {}) {
+  const uid = await subscriptionId();
+  return writeSubscription({ fs: fb.fs, db: fb.db, uid, token, preferences, language: lang, requestTest: extra.testRequested === true });
+}
+async function confirmNotifications() {
+  const registration = await getSw();
+  if (!registration?.showNotification) throw new Error('Local notification unavailable');
+  await registration.showNotification('Korea Watch', {
+    body: t('testLocal'), icon: '/icons/icon-192.png', badge: '/icons/badge-72.png', tag: 'subscription-confirmation'
   });
+  await playAlert(3);
 }
 function pushState() {
   if (notReady) return ["warn", t("setup")];
@@ -363,7 +364,7 @@ function openSettings(keepDraft = false) {
     </section>
     <section class="settings-card" aria-labelledby="notifications-title">
       <div class="section-heading"><span class="section-icon">${uiIcon('bell')}</span><div><h3 id="notifications-title">${t('notifications')}</h3><p>${t('nOnS')}</p></div>${toggle('p-on', draft.enabled, t('nOn'), blocked)}</div>
-      <div class="state ${cls}" id="p-state" role="status"><span class="status-dot"></span>${esc(msg)}</div>
+      <div class="state ${cls}" id="p-state" role="status" ${blocked ? '' : 'hidden'}>${blocked ? esc(msg) : ''}</div>
       <fieldset id="p-opts" ${blocked ? 'disabled' : ''}><legend>${t('nLevel')}</legend><div class="level-choices">${[['critical', 'nCrit', 'criticalHint'], ['high', 'nHigh', 'highHint'], ['all', 'allNews', 'allHint']].map(([value, label, hint]) => `<label><input type="radio" name="lv" value="${value}" ${draft.level === value ? 'checked' : ''}><span class="radio-indicator"></span><span><b>${t(label)}</b><small>${t(hint)}</small></span></label>`).join('')}</div></fieldset>
       <fieldset ${blocked ? 'disabled' : ''}><legend>${t('nCats')}<span class="selection-count" id="category-count">${draft.cats.length}/${Object.keys(CATS).length}</span></legend><div class="topic-choices">${Object.keys(CATS).map(key => `<label><input type="checkbox" name="pc" value="${key}" ${draft.cats.includes(key) ? 'checked' : ''}><span class="topic-check">${uiIcon('check')}</span><span>${CATS[key][lang]}</span></label>`).join('')}</div></fieldset>
     </section>
@@ -382,18 +383,16 @@ function openSettings(keepDraft = false) {
   $('p-sound').onchange = () => { sound = $('p-sound').checked; store.set('kw.sound', sound); $('sound-options').disabled = !sound; alertAudio.stop(); if (sound) unlock(); };
   $('p-tone').onchange = () => { tone = $('p-tone').value; store.set('kw.alertTone', tone); alertAudio.stop(); };
   $('p-volume').oninput = () => { volume = Number($('p-volume').value) / 100; store.set('kw.volume', volume); $('volume-value').textContent = `${Math.round(volume * 100)}%`; $('p-volume').style.setProperty('--volume', `${Math.round(volume * 100)}%`); alertAudio.setVolume(volume); };
-  $('p-preview').onclick = () => playAlert(1.8);
+  $('p-preview').onclick = () => playAlert(tone === 'airraid' ? 4.2 : 2.4);
   $('p-stop').onclick = () => alertAudio.stop();
   $('p-save').onclick = savePush;
-  // Reading a delivery log must not create an anonymous account just by opening settings.
-  if (fb && push.enabled) subscriptionId().then(id => fb.fs.getDoc(fb.fs.doc(fb.db, 'pushlog', id))).then(snapshot => { const el = $('push-result'); if (el && snapshot.exists()) { const value = snapshot.data(); el.textContent = `${value.ok ? '✓' : '✗'} ${value.at || ''}: ${value.error || value.title || ''}`; } }).catch(() => {});
   $('p-test').onclick = async () => {
     const button = $('p-test'); button.disabled = true;
     try {
-      const token = store.get('kw.token', '') || await getToken(), registration = await getSw();
-      if (registration?.showNotification) await registration.showNotification('Korea Watch', { body: t('testLocal') + '. ' + t('testLocalB'), icon: '/icons/icon-192.png', badge: '/icons/badge-72.png', tag: 'local-test' }).catch(() => {});
-      await saveSub(token, push, { testRequested: true, lastTestAt: fb.fs.serverTimestamp() });
-      toast(t('tested'));
+      const token = await getToken();
+      const result = await saveSub(token, push, { testRequested: true });
+      await confirmNotifications();
+      toast(result.testQueued ? t('tested') : result.testPending ? t('testPending') : t('testCooldown'));
     } catch (error) { toast(t('errSave') + (error.message || error)); }
     button.disabled = false;
   };
@@ -420,10 +419,16 @@ async function savePush() {
     const quietFrom = Number($("p-from").value), quietTo = Number($("p-to").value);
     if (![quietFrom, quietTo].every(h => Number.isInteger(h) && h >= 0 && h <= 23)) throw new Error("Hours must be 0–23");
     const next = { enabled, level, cats: picked.length ? picked : push.cats, quietOn: $("p-quiet").checked, quietFrom, quietTo, quietBypass: $("p-bypass").checked };
-    if (token) await saveSub(token, next);
+    const wasEnabled = push.enabled;
+    const result = token ? await saveSub(token, next, { testRequested: enabled && !wasEnabled }) : null;
     push = next;
     store.set("kw.push", push); if (token) store.set("kw.token", token);
-    toast(enabled ? t("saved") : t("savedOff")); closeSheet(); render();
+    closeSheet(); render();
+    let confirmed = true;
+    if (enabled && (!wasEnabled || result?.enabledNow)) {
+      try { await confirmNotifications(); } catch { confirmed = false; }
+    }
+    toast(!confirmed ? t('localTestFailed') : result?.testQueued ? t('tested') : enabled ? t('saved') : t('savedOff'));
   } catch (e) {
     toast(t("errSave") + (e.message || e));
     btn.disabled = false; btn.textContent = t("saveAlerts");
@@ -442,8 +447,49 @@ async function refreshToken() {
     }
   } catch (e) { console.warn("token refresh", e) }
 }
-$("bell").onclick = () => { openSettings(); $("notifications-title").closest(".settings-card").scrollIntoView({ block: "start" }); };
 $("settings").onclick = () => openSettings();
+
+let refreshingNews = false, refreshMessage = 'refreshHint', lastAutoRefresh = 0;
+function renderRefreshState() {
+  if (!$('refresh-news')) return;
+  $('refresh-news').disabled = refreshingNews;
+  $('refresh-news').setAttribute('aria-busy', String(refreshingNews));
+  $('refresh-news').closest('section').setAttribute('aria-label', t('refresh'));
+  $('refresh-label').textContent = t(refreshingNews ? 'refreshing' : 'refresh');
+  $('refresh-status').textContent = t(refreshingNews ? 'refreshing' : refreshMessage);
+}
+function applyFeedSnapshot(snapshot) {
+  const list = snapshot.exists() ? snapshot.data().items : [];
+  items = Array.isArray(list) ? list.filter(item => item?.id).map(item => ({ ...item, translated: item.translated === true && globalThis.KW_NEWS_TEXT.completeThai(item) })) : [];
+  loaded = true; render(); openDeepLink();
+  if (!snapshot.metadata?.fromCache) checkAlerts();
+}
+async function refreshNews(reason = 'manual') {
+  if (refreshingNews || (reason === 'scroll' && Date.now() - lastAutoRefresh < 30000)) return;
+  lastAutoRefresh = Date.now();
+  refreshingNews = true; renderRefreshState();
+  try {
+    if (!fb || navigator.onLine === false) throw new Error('News connection unavailable');
+    const [feedResult, statusResult] = await Promise.allSettled([
+      fb.fs.getDocFromServer(fb.fs.doc(fb.db, 'meta/feed')),
+      fb.fs.getDocFromServer(fb.fs.doc(fb.db, 'meta/status'))
+    ]);
+    if (feedResult.status === 'rejected') throw feedResult.reason;
+    if (statusResult.status === 'fulfilled') status = statusResult.value.exists() ? statusResult.value.data() : null;
+    applyFeedSnapshot(feedResult.value); refreshMessage = 'refreshed';
+  } catch (error) { console.warn('refresh news', error.code || error.message); refreshMessage = 'refreshFailed'; }
+  finally { refreshingNews = false; renderRefreshState(); }
+}
+let previousScrollY = scrollY, bottomRefreshArmed = true;
+addEventListener('scroll', () => {
+  const current = scrollY, distance = document.documentElement.scrollHeight - innerHeight - current;
+  if (distance > 160) bottomRefreshArmed = true;
+  if (current > previousScrollY && distance <= 60 && bottomRefreshArmed && $('sheet').hidden && !document.hidden) {
+    bottomRefreshArmed = false; refreshNews('scroll');
+  }
+  previousScrollY = current;
+}, { passive: true });
+$('refresh-news').onclick = () => refreshNews();
 
 /* data */
 function openDeepLink() { if (deepId && openItem(deepId)) { deepId = null; history.replaceState(null, "", location.pathname) } }
@@ -459,10 +505,8 @@ async function boot() {
     fb = { app, fs, db };
     // Live listeners incur reads when feed/status documents change.
     fs.onSnapshot(fs.doc(db, "meta/feed"), snap => {
-      const list = snap.exists() ? snap.data().items : [];
-      items = Array.isArray(list) ? list.filter(n => n && n.id) : [];
       if (!snap.metadata.fromCache) clearTimeout(timer);
-      loaded = true; render(); openDeepLink(); if (!snap.metadata.fromCache) checkAlerts();
+      applyFeedSnapshot(snap);
     }, err => { console.error(err); clearTimeout(timer); loaded = true; toast(t("slow")); render() });
     fs.onSnapshot(fs.doc(db, "meta/status"), s => { status = s.exists() ? s.data() : null; render() }, () => { });
     refreshToken();
