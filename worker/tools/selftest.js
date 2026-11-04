@@ -1,3 +1,4 @@
+const { allItems } = require("./test-data");
 // ทดสอบทั้งระบบโดยไม่ต่ออินเทอร์เน็ตและไม่ใช้ฐานข้อมูลจริง: npm test
 const assert = require("assert");
 const { runOnce } = require("../run");
@@ -66,15 +67,15 @@ const log = { log() {}, warn() {} };
 
 (async () => {
   const db = fakeDb(), msg = fakeMessaging();
-  await db.doc("subscribers/a").set({ token: "tokA", enabled: true, level: "critical", cats: ["war"], testRequested: true });
-  await db.doc("subscribers/b").set({ token: "tokB", enabled: true, level: "high", cats: ["disease", "war"], testRequested: false });
-  await db.doc("subscribers/c").set({ token: "dead", enabled: true, level: "high", cats: ["disease"], testRequested: false });
-  await db.doc("subscribers/d").set({ token: "tokD", enabled: false, level: "high", cats: ["war"], testRequested: false });
+  await db.doc("subscribers/a").set({ token: "tokA", subscriptionVersion: 2, enabled: true, level: "critical", cats: ["war"], testRequested: true });
+  await db.doc("subscribers/b").set({ token: "tokB", subscriptionVersion: 2, enabled: true, level: "high", cats: ["disease", "war"], testRequested: false });
+  await db.doc("subscribers/c").set({ token: "dead", subscriptionVersion: 2, enabled: true, level: "high", cats: ["disease"], testRequested: false });
+  await db.doc("subscribers/d").set({ token: "tokD", subscriptionVersion: 2, enabled: false, level: "high", cats: ["war"], testRequested: false });
   const base = { db, messaging: msg, appUrl: "https://kw.web.app", geminiKey: "k", fetchImpl, log, waitMs: 0 };
 
   // รอบ 1: แปลได้ ส่งแจ้งเตือนตามหมวดและระดับ
   let s = await runOnce({ ...base, now });
-  let feed = db.data.get("meta/feed").items;
+  let feed = allItems(db.data);
   assert.strictEqual(s.added, 3); assert.strictEqual(s.translated, 2); assert.strictEqual(s.dropped, 1);
   assert.strictEqual(feed.length, 2, "irrelevant Thai travel item dropped");
   assert.ok(feed.every(i => i.translated && i.title.th && !i.snippetKo && i.body.th.length));
@@ -96,7 +97,7 @@ const log = { log() {}, warn() {} };
   feeds.gn_food = rss([{ t: "라면 사재기 확산, 마트 품절", s: "KBS", d: d(0.5) }]);
   geminiMode = "quota";
   s = await runOnce({ ...base, now: now + 600e3 });
-  feed = db.data.get("meta/feed").items;
+  feed = allItems(db.data);
   const ramen = feed.find(i => i.titleKo.includes("라면"));
   assert.ok(ramen && ramen.translated === false && ramen.title.ko, "shown untranslated");
   assert.strictEqual(ramen.attempts, 0, "quota does not count as a failed attempt");
@@ -106,7 +107,7 @@ const log = { log() {}, warn() {} };
   // ระบบยุ่ง (503) ทุกรุ่น: ไม่นับเป็นความล้มเหลว
   geminiMode = "busy";
   for (let k = 0; k < 5; k++) await runOnce({ ...base, now: now + 620e3 + k });
-  const ramenBusy = db.data.get("meta/feed").items.find(i => i.id === ramen.id);
+  const ramenBusy = allItems(db.data).find(i => i.id === ramen.id);
   assert.strictEqual(ramenBusy.attempts, 0, "503 five times still not counted");
   assert.match(db.data.get("meta/status").lastError, /busy/);
 
@@ -116,7 +117,7 @@ const log = { log() {}, warn() {} };
   await runOnce({ ...base, now: now + 700e3 });
   assert.deepStrictEqual(modelsTried.slice(0, 2), ["gemini-flash-lite-latest", "gemini-2.5-flash-lite"], "503 → next model");
   assert.strictEqual(db.data.get("meta/status").lastError, null, "translated with second model");
-  assert.ok(!db.data.get("meta/feed").items.some(i => i.id === ramen.id), "ramen handled by fallback model");
+  assert.ok(!allItems(db.data).some(i => i.id === ramen.id), "ramen handled by fallback model");
 
   feeds.gn_war = rss([{ t: "북한, 순항미사일 추가 발사", s: "KBS", d: d(0.1) }]);
   geminiMode = "fallback"; modelsTried = [];
@@ -128,28 +129,28 @@ const log = { log() {}, warn() {} };
   // ล้างตัวนับเก่าครั้งเดียว (feed เวอร์ชันก่อน)
   const f = db.data.get("meta/feed"); f.items.push({ ...f.items[0], id: "old1", translated: false, attempts: 3 }); delete f.v;
   geminiMode = "busy"; await runOnce({ ...base, now: now + 950e3 });
-  assert.strictEqual(db.data.get("meta/feed").items.find(i => i.id === "old1").attempts, 0, "old counters reset once");
+  assert.strictEqual(allItems(db.data).find(i => i.id === "old1").attempts, 0, "old counters reset once");
   assert.strictEqual(db.data.get("meta/feed").v, 8);
   geminiMode = "ok";
 
   // แปลเป็นชุดละ 5: 12 ข่าว = 3 ชุด ชุดที่เสีย 1 ชุดไม่ทำให้ชุดอื่นเสีย
   const distinct = ["키이우 정전 협상 재개", "가자지구 구호품 반입 확대", "이란 핵시설 사찰 논의", "대만해협 해상 순찰 강화", "흑해 곡물 수송로 위협", "시리아 국경 난민 증가", "홍해 상선 우회 항로", "레바논 남부 주민 대피", "나토 정상회의 공동성명", "러시아 국경 병력 이동", "예멘 항구 봉쇄 장기화", "수단 내전 사상자 집계"];
   feeds = { gn_war: rss(distinct.map((t, k) => ({ t: (k === 6 ? "BAD " : "") + t + " 우크라이나 전쟁", s: "KBS", d: d(0.01 * (k + 1)) }))) };
-  { const f2 = db.data.get("meta/feed"); f2.items = f2.items.filter(i => i.translated); }
+  { const f2 = db.data.get("meta/feed"); f2.items = f2.items.filter(i => i.translated); db.data.set("meta/pending", {items:[]}); }
   geminiMode = "batchBad"; batchSizes = [];
   s = await runOnce({ ...base, now: now + 960e3 });
-  assert.deepStrictEqual(batchSizes, [2, 2, 2, 2, 2, 2], "hidden stories: no title-only pass, straight to full batches of 2");
+  assert.deepStrictEqual(batchSizes, [2, 2, 2, 2, 2, 2, 2, 2], "batches of 2; malformed JSON retries two alternate models");
   assert.strictEqual(s.titled, 0, "titles-first is only for stories shown before translation (Korean war)");
   assert.strictEqual(s.translated, 10, "five good batches translated, the bad batch of 2 skipped");
   assert.strictEqual(s.batches, "5/6");
-  const bad = db.data.get("meta/feed").items.filter(i => i.titleKo.includes("우크라이나") && !i.translated);
+  const bad = allItems(db.data).filter(i => i.titleKo.includes("우크라이나") && !i.translated);
   assert.strictEqual(bad.length, 2); assert.ok(bad.every(i => i.attempts === 1), "only the bad batch counted");
   geminiMode = "ok";
 
   // รอบ 4: 31 วันต่อมา ข่าวเก่าถูกลบ
   feeds = {};
   s = await runOnce({ ...base, now: now + 31 * 864e5 });
-  assert.strictEqual(db.data.get("meta/feed").items.length, 0, "old news pruned");
+  assert.strictEqual(allItems(db.data).length, 0, "old news pruned");
   assert.strictEqual(Object.keys(db.data.get("meta/seen").ids).length, 0, "seen list pruned");
 
   console.log("ผ่านทุกข้อ");

@@ -1,22 +1,10 @@
 // Korea Watch: หน้าแอป (อ่านข่าวจาก Firestore, ตั้งค่าแจ้งเตือน, ติดตั้งแอป)
-const SDK = "https://www.gstatic.com/firebasejs/12.19.0/";
+const SDK = "/vendor/firebase/";
 const CFG = self.KW_CONFIG || {};
 const DAY = 864e5, KEEP = 30 * DAY;
-const CATS = {
-  war: { th: "สงคราม/ความมั่นคง", en: "War & security" },
-  food: { th: "อาหาร/กักตุน", en: "Food & stockpiling" },
-  disease: { th: "โรคติดต่อ/ไวรัส", en: "Disease & viruses" },
-  thai: { th: "คนไทยในเกาหลี", en: "Thais in Korea" },
-  korea: { th: "ข่าวในเกาหลี", en: "Korea news" },
-  oil: { th: "น้ำมัน", en: "Oil & fuel" },
-  fx: { th: "ค่าเงิน", en: "Currency" },
-  wage: { th: "ค่าแรงขั้นต่ำ", en: "Minimum wage" },
-  foreign: { th: "แรงงานต่างชาติ", en: "Foreign workers" },
-  law: { th: "กฎหมายแรงงาน", en: "Labor law" },
-  president: { th: "ประธานาธิบดี", en: "President" }
-};
-const BK_CATS = ["war", "food", "disease"], BK_MAX = 10;
-const DEFAULT_PUSH = { enabled: false, level: "critical", cats: ["war", "food", "disease", "thai"] };
+const CATS = globalThis.KW_CATEGORIES;
+const BK_CATS = ["korwar", "war", "food", "disease"], BK_MAX = 10;
+const DEFAULT_PUSH = { enabled: false, level: "critical", cats: ["korwar", "war", "food", "disease", "thai"] };
 const T = {
   th: { bk: "ข่าวด่วนล่าสุด", bksub: "สงคราม กักตุน โรคติดต่อ/ไวรัส", bknone: "ยังไม่มีข่าวด่วนในหมวดสงคราม กักตุน หรือโรคติดต่อภายใน 30 วัน",
     topics: "หมวดข่าว", all: "ข่าวทั้งหมด", d30: "ปัดดูหมวดเพิ่ม", allcat: "ทั้งหมด", bell: "แจ้งเตือน", bellOn: "แจ้งเตือนเปิด", install: "ติดตั้ง",
@@ -24,7 +12,7 @@ const T = {
     close: "ปิด", ack: "รับทราบ", read: "อ่านข่าวนี้", alertK: "แจ้งเตือนข่าวด่วน", count: n => n + " ข่าว", upd: t => "อัปเดต " + t, loading: "กำลังโหลดข่าว…",
     none: "ยังไม่มีข่าวในหมวดนี้ภายใน 30 วัน", setup: "ยังไม่ได้ตั้งค่า Firebase: ใส่ค่าในไฟล์ firebase-config.js ตามคู่มือ", slow: "เชื่อมต่อฐานข้อมูลข่าวไม่ได้ ลองดึงหน้าจอลงเพื่อโหลดใหม่",
     offline: "ออฟไลน์อยู่ กำลังแสดงข่าวที่โหลดไว้ล่าสุด", aiNote: "สรุปและแปลโดย AI อาจคลาดเคลื่อน ตรวจสอบกับข่าวต้นฉบับเสมอ",
-    foot: "ค้นข่าวอัตโนมัติทุกประมาณ 5 นาทีจากสำนักข่าวเกาหลี เช่น KBS, MBC, SBS, YTN, 연합뉴스, JTBC แล้วสรุปและแปลเป็นภาษาไทยด้วย AI เก็บข่าวไว้ 30 วัน กดลิงก์ต้นฉบับเพื่อตรวจสอบเสมอ",
+    foot: "ค้นข่าวอัตโนมัติทุกประมาณ 5 นาทีจากสำนักข่าวเกาหลี เช่น KBS, MBC, SBS, YTN, 연합뉴스, JTBC แล้วสรุปและแปลเป็นภาษาไทยด้วย AI เก็บข่าวได้สูงสุด 30 วัน ภายใต้ขีดจำกัดจำนวนและขนาดข้อมูล กดลิงก์ต้นฉบับเพื่อตรวจสอบเสมอ",
     now: "เมื่อสักครู่", m: "นาทีที่แล้ว", h: "ชม.ที่แล้ว", d: "วันที่แล้ว", kst: "เวลาเกาหลี",
     nH: "ตั้งค่าแจ้งเตือน", nOn: "รับแจ้งเตือนข่าวด่วน", nOnS: "เด้งเข้ามือถือแม้ปิดแอปอยู่", nLevel: "ระดับข่าวที่จะแจ้ง", nCrit: "ด่วนมากเท่านั้น", nHigh: "ด่วนมาก + สำคัญ",
     nCats: "หมวดที่จะแจ้ง", nSound: "เสียงไซเรนขณะเปิดแอป", nSoundS: "ดังเมื่อมีข่าวด่วนมากระหว่างที่เปิดแอปอยู่", save: "บันทึก", saving: "กำลังบันทึก…", test: "ส่งแจ้งเตือนทดสอบ",
@@ -42,7 +30,7 @@ const T = {
     close: "Close", ack: "Got it", read: "Read this story", alertK: "Breaking alert", count: n => n + " stories", upd: t => "Updated " + t, loading: "Loading news…",
     none: "No stories in this topic in the last 30 days", setup: "Firebase isn't set up yet: fill in firebase-config.js as described in the guide", slow: "Can't reach the news database. Pull down to reload.",
     offline: "You're offline. Showing the last loaded news.", aiNote: "Summarised and translated by AI and may contain errors. Always check the original.",
-    foot: "News is gathered about every 5 minutes from Korean outlets such as KBS, MBC, SBS, YTN, Yonhap and JTBC, then summarised and translated by AI. Stories are kept for 30 days. Always check the original link.",
+    foot: "News is gathered about every 5 minutes from Korean outlets such as KBS, MBC, SBS, YTN, Yonhap and JTBC, then summarised and translated by AI. Stories are kept for up to 30 days within feed size limits. Always check the original link.",
     now: "just now", m: "min ago", h: "h ago", d: "d ago", kst: "KST",
     nH: "Alert settings", nOn: "Breaking news alerts", nOnS: "Arrive on your phone even when the app is closed", nLevel: "Alert me about", nCrit: "Urgent only", nHigh: "Urgent + important",
     nCats: "Topics", nSound: "Siren while the app is open", nSoundS: "Plays for urgent news while you have the app open", save: "Save", saving: "Saving…", test: "Send a test alert",
@@ -61,6 +49,9 @@ const store = { get(k, d) { try { const v = localStorage.getItem(k); return v ==
 
 let lang = store.get("kw.lang", "th"), sound = store.get("kw.sound", true), cat = "all";
 let push = Object.assign({}, DEFAULT_PUSH, store.get("kw.push", {}));
+push.cats = Array.isArray(push.cats) ? push.cats.filter(c => CATS[c]) : [...DEFAULT_PUSH.cats];
+if (store.get("kw.schema", 0) < 2) { push.cats = [...new Set([...(push.cats || []), ...(push.cats?.includes("war") ? ["korwar"] : [])])]; store.set("kw.push", push); store.set("kw.schema", 2); }
+if (!["th", "en"].includes(lang)) lang = "th";
 let items = [], status = null, loaded = false, audioCtx = null, notReady = false;
 let fb = null; // { app, fs, db }
 let deepId = new URLSearchParams(location.search).get("id");
@@ -86,7 +77,11 @@ function badges(n) {
   if (n.translated === false) b += `<span class="badge">${t("pending")}</span>`;
   if (isNew(n)) b += `<span class="badge new">${t("isnew")}</span>`; cats(n).forEach(c => { if (CATS[c]) b += `<span class="badge">${CATS[c][lang]}</span>` }); return b
 }
-function visible() { const cut = Date.now() - KEEP; return items.filter(n => ts(n) >= cut).sort((a, b) => ts(b) - ts(a)) }
+function visible() { const cut = Date.now() - KEEP; return items.filter(n => ts(n) >= cut && (n.translated === true || cats(n).includes("korwar"))).sort((a, b) => ts(b) - ts(a)) }
+function picture(n, hero = false) {
+  const u = safeUrl(n.image); if (!u) return hero ? '<div class="hero"><div class="cap">Korea Watch</div></div>' : '';
+  return `<div class="${hero ? 'hero' : 'thumb'}"><img src="${esc(u)}" alt="" loading="${hero ? 'eager' : 'lazy'}" decoding="async" referrerpolicy="no-referrer">${hero ? '<div class="cap">' + esc(n.source || '') + '</div>' : ''}</div>`;
+}
 function srcLine(n) { return `<div class="meta"><span>${esc(n.source || "")}</span><span>${ago(ts(n))}</span></div>` }
 function setHTML(el, html) { if (el._h === html) return; const sl = el.scrollLeft; el.innerHTML = html; el._h = html; el.scrollLeft = sl }
 function emptyMsg(def) { return notReady ? t("setup") : def }
@@ -104,11 +99,11 @@ function renderStatic() {
 function render() {
   renderStatic();
   const all = visible();
-  $("updated").textContent = status && status.lastRun ? t("upd")(ago(Date.parse(status.lastRun))) : (loaded ? t("count")(all.length) : t("loading"));
+  $("updated").textContent = status && (status.lastSuccessfulPublishAt || status.lastRun) ? t("upd")(ago(Date.parse(status.lastSuccessfulPublishAt || status.lastRun))) : (loaded ? t("count")(all.length) : t("loading"));
   const u = all.find(n => n.level === "critical" && Date.now() - ts(n) < 3 * DAY);
   $("strip").hidden = !u; if (u) { $("strip-t").textContent = L(u.title); $("strip-t").dataset.id = u.id }
   const bk = all.filter(n => cats(n).some(c => BK_CATS.includes(c))).slice(0, BK_MAX);
-  setHTML($("bk"), bk.length ? bk.map(n => `<button class="bkc ${lvl(n)}" data-id="${esc(n.id)}"><div class="meta">${badges(n)}</div><h3>${esc(L(n.title))}</h3><p>${esc(L(n.summary))}</p>${srcLine(n)}</button>`).join("")
+  setHTML($("bk"), bk.length ? bk.map(n => `<button class="bkc ${lvl(n)}" data-id="${esc(n.id)}">${picture(n)}<div class="meta">${badges(n)}</div><h3>${esc(L(n.title))}</h3><p>${esc(L(n.summary))}</p>${srcLine(n)}</button>`).join("")
     : `<div class="empty">${loaded ? emptyMsg(t("bknone")) : t("loading")}</div>`);
   setHTML($("dots"), bk.length > 1 ? bk.map(() => "<span></span>").join("") : "");
   updDots(); updHint();
@@ -118,7 +113,7 @@ function render() {
   const tl = $("tiles"); tl.style.setProperty("--cols", Math.ceil((Object.keys(CATS).length + 1) / 2)); setHTML(tl, tiles);
   const list = cat === "all" ? all : all.filter(n => cats(n).includes(cat));
   $("t-filter").textContent = cat === "all" ? (loaded ? t("count")(all.length) : "") : CATS[cat][lang];
-  setHTML($("grid"), list.length ? list.map(n => `<button class="card ${lvl(n)}" data-id="${esc(n.id)}"><div class="meta">${badges(n)}</div><h3>${esc(L(n.title))}</h3><p>${esc(L(n.summary))}</p>${srcLine(n)}</button>`).join("")
+  setHTML($("grid"), list.length ? list.map(n => `<button class="card ${lvl(n)}" data-id="${esc(n.id)}">${picture(n)}<div class="meta">${badges(n)}</div><h3>${esc(L(n.title))}</h3><p>${esc(L(n.summary))}</p>${srcLine(n)}</button>`).join("")
     : (loaded ? `<div class="empty">${emptyMsg(t("none"))}</div>` : ""));
 }
 
@@ -139,8 +134,8 @@ addEventListener("online", render); addEventListener("offline", render);
 
 /* sheets */
 let lastFocus = null;
-function showSheet(html) { lastFocus = document.activeElement; $("panel").innerHTML = html; $("sheet").hidden = false; const c = $("close"); c.onclick = closeSheet; c.focus() }
-function closeSheet() { $("sheet").hidden = true; try { lastFocus && lastFocus.focus && lastFocus.focus() } catch (e) { } }
+function showSheet(html) { lastFocus = document.activeElement; $("panel").innerHTML = html; $("sheet").hidden = false; document.body.style.overflow = "hidden"; const c = $("close"); c.onclick = closeSheet; c.focus() }
+function closeSheet() { $("sheet").hidden = true; document.body.style.overflow = ""; try { lastFocus && lastFocus.focus && lastFocus.focus() } catch (e) { } }
 function openItem(id) {
   const n = items.find(x => x.id === id); if (!n) return false;
   const body = n.body && typeof n.body === "object" && !Array.isArray(n.body) ? L(n.body) : n.body;
@@ -149,6 +144,7 @@ function openItem(id) {
   showSheet(`<div class="bar"><div class="meta">${badges(n)}</div><button class="btn" id="close">${t("close")}</button></div>
     <h2>${esc(L(n.title))}</h2>
     <div class="meta"><span>${esc(n.source || "")}</span><span>${kst(ts(n))}</span></div>
+    ${picture(n, true)}
     <div class="sum"><div class="k">${t("summary")}</div><p>${esc(L(n.summary))}</p></div>
     ${paras.length ? `<div class="body"><div class="k">${t("full")}</div>${paras.map(p => `<p>${esc(p)}</p>`).join("")}</div>` : ""}
     <div class="src"><div class="k">${t("source")}</div>
@@ -158,7 +154,7 @@ function openItem(id) {
   return true;
 }
 $("sheet").addEventListener("click", e => { if (e.target === $("sheet")) closeSheet() });
-document.addEventListener("keydown", e => { if (e.key === "Escape") { if (!$("alert").hidden) $("alert").hidden = true; else if (!$("sheet").hidden) closeSheet() } });
+document.addEventListener("keydown", e => { if (e.key === "Tab" && !$("sheet").hidden) { const f = [...$("panel").querySelectorAll('button:not(:disabled),a,input:not(:disabled)')]; if (f.length && e.shiftKey && document.activeElement === f[0]) { e.preventDefault(); f.at(-1).focus(); } else if (f.length && !e.shiftKey && document.activeElement === f.at(-1)) { e.preventDefault(); f[0].focus(); } } if (e.key === "Escape") { if (!$("alert").hidden) $("alert").hidden = true; else if (!$("sheet").hidden) closeSheet() } });
 document.addEventListener("click", e => {
   if (e.target.closest("#panel,#alert-box")) return;
   const c = e.target.closest("[data-id]"); if (c) { openItem(c.dataset.id); return }
@@ -240,11 +236,21 @@ async function subId(token) {
   const h = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
   return [...new Uint8Array(h)].map(b => b.toString(16).padStart(2, "0")).join("");
 }
+let authUser = null;
+async function subscriptionId() {
+  if (!authUser) {
+    const a = await import(SDK + "firebase-auth.js");
+    const auth = a.getAuth(fb.app);
+    await auth.authStateReady();
+    authUser = auth.currentUser || (await a.signInAnonymously(auth)).user;
+  }
+  return authUser.uid;
+}
 async function saveSub(token, p, extra = {}) {
   const { fs, db } = fb;
-  await fs.setDoc(fs.doc(db, "subscribers", await subId(token)), {
-    token, cats: p.cats, level: p.level === "high" ? "high" : "critical", enabled: !!p.enabled,
-    testRequested: false, lang, updatedAt: fs.serverTimestamp(), ...extra
+  await fs.setDoc(fs.doc(db, "subscribers", await subscriptionId()), {
+    token, cats: p.cats, level: ["all", "high"].includes(p.level) ? p.level : "critical", enabled: !!p.enabled,
+    testRequested: false, lang, subscriptionVersion: 2, quietOn: !!p.quietOn, quietFrom: Number(p.quietFrom ?? 22), quietTo: Number(p.quietTo ?? 7), quietBypass: p.quietBypass !== false, updatedAt: fs.serverTimestamp(), ...extra
   });
 }
 function pushState() {
@@ -265,22 +271,28 @@ function openSettings() {
     </div>
     <fieldset id="p-opts" ${blocked ? "disabled" : ""}>
       <legend>${t("nLevel")}</legend>
-      <div class="seg"><label><input type="radio" name="lv" value="critical" ${push.level !== "high" ? "checked" : ""}>${t("nCrit")}</label><label><input type="radio" name="lv" value="high" ${push.level === "high" ? "checked" : ""}>${t("nHigh")}</label></div>
+      <div class="seg"><label><input type="radio" name="lv" value="critical" ${push.level === "critical" ? "checked" : ""}>${t("nCrit")}</label><label><input type="radio" name="lv" value="high" ${push.level === "high" ? "checked" : ""}>${t("nHigh")}</label><label><input type="radio" name="lv" value="all" ${push.level === "all" ? "checked" : ""}>${lang === "th" ? "ทุกข่าวในหมวดที่เลือก" : "All selected news"}</label></div>
     </fieldset>
     <fieldset ${blocked ? "disabled" : ""}>
       <legend>${t("nCats")}</legend>
       <div class="chips">${Object.keys(CATS).map(k => `<label><input type="checkbox" name="pc" value="${k}" ${push.cats.includes(k) ? "checked" : ""}>${CATS[k][lang]}</label>`).join("")}</div>
     </fieldset>
+    <fieldset><legend>${lang === "th" ? "ช่วงงดแจ้งเตือน (เวลาเกาหลี)" : "Quiet hours (KST)"}</legend>
+    <label><input type="checkbox" id="p-quiet" ${push.quietOn ? 'checked' : ''}> ${lang === "th" ? "เปิดช่วงงดแจ้งเตือน" : "Enable quiet hours"}</label>
+    <div><input type="number" min="0" max="23" id="p-from" aria-label="Quiet start hour" value="${Number(push.quietFrom ?? 22)}"> → <input type="number" min="0" max="23" id="p-to" aria-label="Quiet end hour" value="${Number(push.quietTo ?? 7)}"></div>
+    <label><input type="checkbox" id="p-bypass" ${push.quietBypass !== false ? 'checked' : ''}> ${lang === "th" ? "อนุญาตข่าวสงครามเกาหลีด่วนมาก" : "Allow critical Korean Peninsula alerts"}</label></fieldset>
+    <p id="push-result" role="status"></p>
     <div class="row"><button class="btn primary" id="p-save">${t("save")}</button><button class="btn" id="p-test" ${push.enabled && !blocked ? "" : "disabled"}>${t("test")}</button></div>`);
   $("p-sound").onchange = e => { sound = e.target.checked; store.set("kw.sound", sound); if (sound) { unlock(); siren(0.8) } };
   $("p-save").onclick = savePush;
+  if (fb) subscriptionId().then(id => fb.fs.getDoc(fb.fs.doc(fb.db, "pushlog", id))).then(s => { const el = $("push-result"); if (el && s.exists()) { const d = s.data(); el.textContent = `${d.ok ? '✓' : '✗'} ${d.at || ''}: ${d.error || d.title || ''}`; } }).catch(() => {});
   $("p-test").onclick = async () => {
     const b = $("p-test"); b.disabled = true;
     try {
       const token = store.get("kw.token", "") || await getToken();
       const reg = await getSw();
       try { if (reg && reg.showNotification) await reg.showNotification("Korea Watch", { body: t("testLocal") + ". " + t("testLocalB"), icon: "/icons/icon-192.png", badge: "/icons/badge-72.png", tag: "local-test" }) } catch (e) { console.warn("local test", e) }
-      await saveSub(token, push, { testRequested: true });
+      await saveSub(token, push, { testRequested: true, lastTestAt: fb.fs.serverTimestamp() });
       toast(t("tested"));
     } catch (e) { toast(t("errSave") + (e.message || e)) }
     b.disabled = false;
@@ -300,7 +312,9 @@ async function savePush() {
     }
     let token = store.get("kw.token", "");
     if (enabled) token = await getToken();
-    const next = { enabled, level, cats: picked.length ? picked : push.cats };
+    const quietFrom = Number($("p-from").value), quietTo = Number($("p-to").value);
+    if (![quietFrom, quietTo].every(h => Number.isInteger(h) && h >= 0 && h <= 23)) throw new Error("Hours must be 0–23");
+    const next = { enabled, level, cats: picked.length ? picked : push.cats, quietOn: $("p-quiet").checked, quietFrom, quietTo, quietBypass: $("p-bypass").checked };
     if (token) await saveSub(token, next);
     push = next;
     store.set("kw.push", push); if (token) store.set("kw.token", token);
@@ -318,7 +332,7 @@ async function refreshToken() {
     const old = store.get("kw.token", "");
     if (token && token !== old) {
       await saveSub(token, push);
-      if (old) await saveSub(old, { ...push, enabled: false }).catch(() => { });
+      // The authenticated document is updated in place when FCM rotates the token.
       store.set("kw.token", token);
     }
   } catch (e) { console.warn("token refresh", e) }
@@ -337,7 +351,7 @@ async function boot() {
     const app = initializeApp(c);
     let db; try { db = fs.initializeFirestore(app, { localCache: fs.persistentLocalCache() }) } catch (e) { db = fs.getFirestore(app) }
     fb = { app, fs, db };
-    // ข่าวทั้งหมดอยู่ในเอกสารเดียว: เปิดแอป 1 ครั้ง = อ่านฐานข้อมูล 1 ครั้ง
+    // Live listeners incur reads when feed/status documents change.
     fs.onSnapshot(fs.doc(db, "meta/feed"), snap => {
       const list = snap.exists() ? snap.data().items : [];
       items = Array.isArray(list) ? list.filter(n => n && n.id) : [];

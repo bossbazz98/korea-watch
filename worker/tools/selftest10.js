@@ -1,3 +1,4 @@
+const { allItems } = require("./test-data");
 // ทดสอบการแก้รอบนี้: แข่งแปลประหยัดโควตา, นับโควตาตัวที่ถูกยกเลิก, ทางด่วนลองใหม่ทุก 10 นาที + สำรองด้วยวิธีปกติ,
 // คำค้นสงครามเกาหลีแคบลง, ช่วงงดแจ้งเตือน, Agent เตือนข่าวสงครามเกาหลีค้าง: node tools/selftest10.js
 const assert = require("assert");
@@ -57,7 +58,7 @@ const now = Date.now();
     return { ok: true, status: 200, json: async () => url.includes("generativelanguage") ? { candidates: [{ content: { parts: [{ text: content }] } }] } : { usage: { total_tokens: 400 }, choices: [{ message: { content } }] } };
   };
   const st = await runOnce({ db, messaging: { async sendEachForMulticast(m) { return { successCount: 0, responses: [] } } }, appUrl: "https://x", ...keys, groqKey: "g", fetchImpl: f4, now, log, waitMs: 0, budgetMs: 31000, imgBudgetMs: 2000, watchEveryMs: 60000 });
-  const it = data.get("meta/feed").items.find(i => i.id === "kw1");
+  const it = allItems(data).find(i => i.id === "kw1");
   assert.ok(it.translated && it.title.th.includes("คิมโยจอง"), "paused Korean-war story retried after 10 min and translated via the normal chain");
   assert.ok(seen.includes("groq:openai/gpt-oss-120b"), "fallback used the normal chain");
   assert.ok(/korwar \d+%|quota /.test(JSON.stringify(st.quotaUsed)) || Object.keys(st.quotaUsed).length > 0, "quota usage reported");

@@ -21,7 +21,7 @@ async function get(url, fetchImpl, timeoutMs, opt = {}) {
   try {
     const r = await fetchImpl(url, { redirect: "follow", ...opt, signal: ctl.signal, headers: { "User-Agent": UA, "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.6", ...(opt.headers || {}) } });
     if (!r.ok) throw new Error("HTTP " + r.status);
-    const buf = Buffer.from(await r.arrayBuffer()).subarray(0, 1500000);
+    const buf = await require("./http").readBytes(r);
     const ct = r.headers && typeof r.headers.get === "function" ? r.headers.get("content-type") : "";
     return { text: decodePage(buf, ct), url: r.url || url };
   } finally { clearTimeout(timer); }
@@ -41,12 +41,14 @@ async function decodeGoogleNews(link, { fetchImpl = fetch, timeoutMs = 8000 } = 
   const id = googleArticleId(link);
   if (!id) return link;
   let sg = null, ts = null;
+  const deadline = Date.now() + timeoutMs;
+  const left = () => { const ms=deadline-Date.now(); if(ms<=0) throw new Error("article deadline exceeded"); return ms; };
   // ระบุภาษาเกาหลี/ภูมิภาคเกาหลี และส่งคุกกี้ยินยอม เพื่อลดโอกาสได้หน้าขอความยินยอมแทนหน้าข่าว
   const qs = "?hl=ko&gl=KR&ceid=KR:ko";
   const headers = { Cookie: "CONSENT=YES+cb; SOCS=CAI" };
   for (const page of [`https://news.google.com/articles/${id}${qs}`, `https://news.google.com/rss/articles/${id}${qs}`, `https://news.google.com/articles/${id}`]) {
     try {
-      const { text } = await get(page, fetchImpl, timeoutMs, { headers });
+      const { text } = await get(page, fetchImpl, left(), { headers });
       sg = (text.match(/data-n-a-sg="([^"]+)"/) || [])[1];
       ts = (text.match(/data-n-a-ts="([^"]+)"/) || [])[1];
       if (sg && ts) break;
@@ -55,7 +57,7 @@ async function decodeGoogleNews(link, { fetchImpl = fetch, timeoutMs = 8000 } = 
   if (!sg || !ts) throw new Error("google params not found");
   const inner = `["garturlreq",[["X","X",["X","X"],null,null,1,1,"KR:ko",null,1,null,null,null,null,null,0,1],"X","X",1,[1,1,1],1,1,null,0,0,null,0],"${id}",${Number(ts)},"${sg}"]`;
   const body = "f.req=" + encodeURIComponent(JSON.stringify([[["Fbv4je", inner, null, "generic"]]]));
-  const { text } = await get("https://news.google.com/_/DotsSplashUi/data/batchexecute", fetchImpl, timeoutMs,
+  const { text } = await get("https://news.google.com/_/DotsSplashUi/data/batchexecute", fetchImpl, left(),
     { method: "POST", body, headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8", ...headers } });
   const part = text.split("\n\n")[1];
   if (!part) throw new Error("google decode: unexpected reply");
@@ -152,8 +154,10 @@ function extractArticleText(html) {
 // คืน { url: ลิงก์จริง, image, text: เนื้อข่าวสำหรับให้ AI สรุป, description: คำโปรยของสำนักข่าว }
 async function resolveArticle(link, { fetchImpl = fetch, timeoutMs = 8000 } = {}) {
   let url = link;
+  const deadline=Date.now()+timeoutMs;
   if (googleArticleId(link)) url = await decodeGoogleNews(link, { fetchImpl, timeoutMs });
-  const page = await get(url, fetchImpl, timeoutMs);
+  if(Date.now()>=deadline) throw new Error("article deadline exceeded");
+  const page = await get(url, fetchImpl, deadline-Date.now());
   const finalUrl = page.url && !googleArticleId(page.url) ? page.url : url;
   const meta = metaMap(page.text);
   const description = decodeHtml(meta["og:description"] || meta["description"] || "").slice(0, 600);

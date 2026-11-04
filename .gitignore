@@ -1,0 +1,13 @@
+node_modules/
+worker/agent-out/
+.env
+.env.*
+!.env.example
+*.log
+.firebase/
+service-account*.json
+*service-account*.json
+firebase-debug.*
+firestore-debug.*
+.DS_Store
+artifacts/

@@ -1,3 +1,4 @@
+const { allItems } = require("./test-data");
 // ทดสอบ Groq (ตัวหลัก) + Gemini (สำรอง) + คิวแปลด่วน + แปลหัวข้อก่อน: node tools/selftest6.js
 const assert = require("assert");
 const { translate, translateTitles } = require("../lib/translate");
@@ -79,7 +80,7 @@ const one = [{ titleKo: "북한 미사일", snippet: "", source: "KBS", cats: ["
   const st = await runOnce({ db, messaging: {}, appUrl: "https://x", geminiKey: "g", groqKey: "gk", fetchImpl: m.f, now, log, waitMs: 0 });
   const ai = m.calls;
   assert.ok(ai[0].sys.startsWith("You are the news edi"), "first AI call is the full translation of the priority item");
-  const feed = data.get("meta/feed").items, by = id => feed.find(i => i.id === id);
+  const feed = allItems(data), by = id => feed.find(i => i.id === id);
   assert.strictEqual(by("lawOld").translated, true, "priority item translated even though it is old and low-rank");
   assert.strictEqual(st.priority, 1);
   assert.strictEqual(ai.filter(c => c.sys.startsWith("Translate Korean")).length, 0, "hidden (non-Korean-war) stories skip the title-only pass");

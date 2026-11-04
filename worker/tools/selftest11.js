@@ -1,3 +1,4 @@
+const { allItems } = require("./test-data");
 // ทดสอบระบบส่งแจ้งเตือน: ไม่ลบเครื่องผิดๆ, ระดับ "ทุกข่าว", จำกัด 4 ต่อเครื่องต่อรอบ, บันทึกผลต่อเครื่อง, ช่วงงดแจ้งเตือน: node tools/selftest11.js
 const assert = require("assert");
 const { runOnce } = require("../run");
@@ -21,10 +22,10 @@ const H = "a".repeat(64), H2 = "b".repeat(64), H3 = "c".repeat(64), H4 = "d".rep
   const db = fakeDb();
   const titles = ["유가 상승 지속", "환율 급등 우려", "휘발유값 최고", "원화 약세 계속", "경유 가격 인상", "주유소 대기 행렬", "긴급 유류 수급 점검"];
   db.data.set("meta/feed", { v: 8, items: titles.map((t, k) => item("o" + k, t, ["oil"])) });
-  db.data.set(`subscribers/${H}`, { token: "ALL", enabled: true, level: "all", cats: ["oil"], testRequested: true });
-  db.data.set(`subscribers/${H2}`, { token: "CRIT", enabled: true, level: "critical", cats: ["oil"], testRequested: false });
-  db.data.set(`subscribers/${H3}`, { token: "BADMSG", enabled: true, level: "all", cats: ["oil"], testRequested: false });
-  db.data.set(`subscribers/${H4}`, { token: "QUIET", enabled: true, level: "all", cats: ["oil"], testRequested: false, quietOn: true, quietFrom: 0, quietTo: 23 });
+  db.data.set(`subscribers/${H}`, { token: "ALL", subscriptionVersion: 2, enabled: true, level: "all", cats: ["oil"], testRequested: true });
+  db.data.set(`subscribers/${H2}`, { token: "CRIT", subscriptionVersion: 2, enabled: true, level: "critical", cats: ["oil"], testRequested: false });
+  db.data.set(`subscribers/${H3}`, { token: "BADMSG", subscriptionVersion: 2, enabled: true, level: "all", cats: ["oil"], testRequested: false });
+  db.data.set(`subscribers/${H4}`, { token: "QUIET", subscriptionVersion: 2, enabled: true, level: "all", cats: ["oil"], testRequested: false, quietOn: true, quietFrom: 0, quietTo: 23 });
   const sent = [];
   const messaging = { async sendEachForMulticast(m) { sent.push(m); return { successCount: m.tokens.filter(t => t !== "BADMSG").length, responses: m.tokens.map(t => t === "BADMSG" ? { success: false, error: { code: "messaging/invalid-argument" } } : { success: true }) } } };
   const st = await runOnce({ db, messaging, appUrl: "https://app", groqKey: "g", fetchImpl: AI, now, log, waitMs: 0, budgetMs: 31000, imgBudgetMs: 2000, watchEveryMs: 60000 });
@@ -44,7 +45,7 @@ const H = "a".repeat(64), H2 = "b".repeat(64), H3 = "c".repeat(64), H4 = "d".rep
   // เครื่องที่ token เลิกใช้จริง ถูกลบ
   const db2 = fakeDb();
   db2.data.set("meta/feed", { v: 8, items: [item("x1", "긴급 유류 수급 점검", ["oil"])] });
-  db2.data.set(`subscribers/${H}`, { token: "GONE", enabled: true, level: "all", cats: ["oil"], testRequested: false });
+  db2.data.set(`subscribers/${H}`, { token: "GONE", subscriptionVersion: 2, enabled: true, level: "all", cats: ["oil"], testRequested: false });
   await runOnce({ db: db2, messaging: { async sendEachForMulticast(m) { return { successCount: 0, responses: m.tokens.map(() => ({ success: false, error: { code: "messaging/registration-token-not-registered" } })) } } }, appUrl: "https://app", groqKey: "g", fetchImpl: AI, now, log, waitMs: 0, budgetMs: 31000, imgBudgetMs: 2000, watchEveryMs: 60000 });
   assert.ok(!db2.data.has(`subscribers/${H}`), "really expired token removed");
   console.log("ผ่านทุกข้อ (ชุดที่ 11: ระบบส่งแจ้งเตือน)");

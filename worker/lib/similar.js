@@ -7,6 +7,7 @@ function grams(title) {
   const g = new Set();
   for (let i = 0; i < s.length - 1; i++) g.add(s.slice(i, i + 2));
   // ภาษาไทยใช้ตัวอักษรมากกว่าเกาหลีเพื่อความหมายเท่ากัน (สระ/วรรณยุกต์แยกตัว) จึงต้องยาวกว่าถึงจะใช้กฎ "ครอบ"
+  g.numbers = (s.match(/\d+(?:[.,]\d+)*/g) || []).sort().join("|");
   g.minContain = /[\u0E00-\u0E7F]/.test(s) ? 16 : 8;
   return g;
 }
@@ -14,6 +15,7 @@ function grams(title) {
 // คืนค่า 0..1 (ใช้ทั้งอัตราซ้อนทับรวม และอัตราที่หัวข้อสั้นถูกครอบในหัวข้อยาว)
 function similarity(a, b) {
   const A = a instanceof Set ? a : grams(a), B = b instanceof Set ? b : grams(b);
+  if (A.numbers !== undefined && B.numbers !== undefined && A.numbers !== B.numbers) return 0;
   if (A.size < 4 || B.size < 4) return 0;
   let inter = 0;
   for (const x of A) if (B.has(x)) inter++;
