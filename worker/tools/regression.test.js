@@ -12,6 +12,23 @@ function dbFake() {
 }
 const story=(id,translated=true)=>({id,titleKo:'제목 '+id,title:{th:'ข่าว '+id},summary:{th:'สรุป'},body:{th:['เนื้อหา']},categories:['oil'],level:'high',translated,publishedAt:new Date().toISOString()});
 const log={warn(){},log(){}};
+test('empty HTTP 200 completion falls back to another model without losing quota accounting',async()=>{
+ const {translateTitles}=require('../lib/translate');
+ for(const empty of ['', '   ']) {
+  const calls=[],quota=new Quota();
+  const result=await translateTitles([{titleKo:'국제 뉴스'}],{
+   githubToken:'test',githubModels:['empty-model','working-model'],quota,log,waitMs:0,
+   fetchImpl:async(url,options)=>{
+    const model=JSON.parse(options.body).model;calls.push(model);
+    return{ok:true,status:200,json:async()=>({choices:[{message:{content:model==='empty-model'?empty:JSON.stringify({items:[{i:0,th:'ข่าวต่างประเทศ',en:'World news'}]})},finish_reason:'stop'}],usage:{total_tokens:12}})};
+   }
+  });
+  assert.deepEqual(calls,['empty-model','working-model']);
+  assert.equal(result.results[0].th,'ข่าวต่างประเทศ');
+  assert.equal(quota.used['github:empty-model'].requests,1);
+  assert.equal(quota.used['github:working-model'].requests,1);
+ }
+});
 test('public feed excludes pending; every save bounds document bytes',async()=>{
  const db=dbFake(),items=[story('published'),story('private',false),...Array.from({length:30},(_,i)=>({...story('large'+i),body:{th:['ก'.repeat(20000)]}}))];
  await persist(db,items,{v:8},{a:1},{used:{}});
