@@ -185,7 +185,15 @@ async function runChain(system, user, maxTokens, opts) {
         if (quota && quota.disable) quota.disable(entry.p, `${r.status}${hint}`); // พัก 6 ชั่วโมง ไม่ลองซ้ำทุกรอบ
         break;
       }
-      if (!r.ok || !r.text) throw new Error(`${tag} ${r.status}: ${r.msg || "request failed"}`.slice(0, 280));
+      // A successful HTTP response can still contain no usable completion.
+      // Keep trying other models instead of failing every news batch here.
+      if (r.ok && (typeof r.text !== "string" || !r.text.trim())) {
+        last = `${tag} empty completion (${r.finish || "unknown finish reason"})`;
+        log.warn(last + ", trying next model");
+        quotaOnly = false; reservedOnly = false;
+        break;
+      }
+      if (!r.ok) throw new Error(`${tag} ${r.status}: ${r.msg || "request failed"}`.slice(0, 280));
       return { text: r.text, model: tag, finish: r.finish };
     }
   }
