@@ -16,7 +16,7 @@
   };
   const completeThai = item => {
     const paragraphs = Array.isArray(item.body?.th) ? item.body.th : typeof item.body?.th === 'string' ? [item.body.th] : [];
-    return isThai(item.title?.th) && isThai(item.summary?.th) && paragraphs.every(isThai);
+    return isThai(item.title?.th) && isThai(item.summary?.th) && paragraphs.length > 0 && paragraphs.every(isThai);
   };
   const api = { isThai, isEnglish, pick, body, completeThai };
   if (typeof module !== 'undefined') module.exports = api;

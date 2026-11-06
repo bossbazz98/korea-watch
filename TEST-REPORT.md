@@ -58,3 +58,19 @@ Do not treat fixture success as proof of production permissions or delivered not
 - Settings UI tests now select the installed full Chromium executable consistently with selftest8 and local runs, rather than implicitly switching to headless shell on CI. All existing UI assertions remain enabled. Local changed UI tests passed on Chromium 154.
 - CI no longer cancels the sibling Node version on failure. It retains npm output, screenshots and emulator diagnostics, and includes the last 100 npm-test lines in the run summary. Pipeline exit status is preserved with pipefail.
 - Remote CI success and the original assertion remain unconfirmed until the new run finishes / detailed log is available.
+
+## Incident policy and publication follow-up — 2026-11-07 (Asia/Seoul)
+
+Baseline: main 92fc161c2c21ac51ad3e0937718622942721d881. Diagnostic commit 17b94f9 is already an ancestor of main (PR #7).
+
+User-supplied read-only production diagnostics at 2026-11-06T17:04:22.954Z show food=0 published/14 pending, foreign=1 published/16 pending, no disabled AI providers, Groq minute-quota errors, Gemini 503/timeouts and an incomplete model-unavailability message. This establishes provider pressure, not permanent inability of the foreign category to publish. The old worker spends title/racing requests on all Korean Peninsula coverage before normal categories; the new policy reserves those requests for the five incident classes. Category reassignment and empty structured responses are additional reproduced failure paths, not asserted as the sole historical production cause.
+
+Validation on Linux, Node 24.22.1, JDK 21 and system Chromium 156:
+
+- Full `AGENT_CHROMIUM=/usr/bin/chromium npm test` passed: 12 existing self-test scripts; 16 reliability/publication regressions; audio, subscriptions and scheduler suites; three browser viewport scenarios; 10 incident-policy and translation-recovery cases. Browser assertions compare settings heading/description font sizes to actual home elements and check layout/persistence.
+- A reproduction with 40 ordinary Korean Peninsula stories, two-day-old food/foreign pending articles and a simulated per-minute 429 verifies that food/foreign lead the normal requests and persist as translated items in meta/feed even when the AI returns only korea. Ordinary Korean stories make no fast-lane/title requests.
+- Policy cases cover all five event classes, North Korean missile/rocket variants, mine victim identity, drills/plans/denials/anniversaries, non-Korean/spoofed publishers, Google RSS provenance, nonincident high/all subscribers and invalid old retry jobs. Notification reliability tests still exercise receipts, partial retries, quiet hours and the shared per-device cap with qualified incident fixtures.
+- AI tests cover empty JSON arrays/objects, incomplete Thai/body fields, missing batch entries, preservation of successful partial entries through fallback failure, explicit editorial rejection, retired-model fallback, complete error reporting, and minute-quota cooldown expiry.
+- `npm run build:web` passed and includes news-policy.js in the 19-file offline shell. All 19 precache URLs returned HTTP 200 with bytes matching the final files; `git diff --check` passed. Generated SDK dependency bundles are unchanged.
+
+Live Firebase reads from this cloud remain blocked by its outbound proxy (CONNECT 403 for firestore.googleapis.com); the production diagnosis above was supplied by the user. No production data, Firebase configuration, credentials, rules, push or deployment were changed. Firestore rules are unchanged; emulator validation remains blocked by storage.googleapis.com as documented earlier. Actual publication with live AI and physical-device push must be checked after the user merges/runs the worker and deploys Hosting. This branch is not merged automatically.

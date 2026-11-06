@@ -65,6 +65,14 @@ const server = http.createServer((request, response) => {
         await page.evaluate(() => scrollTo(0, 0));
 
         await page.locator('#settings').click();
+        assert.equal(await page.locator('.settings-heading .eyebrow').count(), 0, 'settings has no duplicate brand');
+        const fonts = await page.evaluate(() => {
+          const size = selector => getComputedStyle(document.querySelector(selector)).fontSize;
+          return [size('.settings-heading h2'), size('.sec-h h2'), size('.section-heading h3'), size('.card h3'), size('.section-heading p'), size('.card p')];
+        });
+        assert.equal(fonts[0], fonts[1], 'settings title matches home section title');
+        assert.equal(fonts[2], fonts[3], 'settings section heading matches home card heading');
+        assert.equal(fonts[4], fonts[5], 'settings description matches home summary');
         assert(await page.locator('#p-state').isHidden(), 'no unverified subscription success banner');
         assert.equal(await page.locator('.settings-card').count(), 4);
         assert.equal(await page.locator('#p-tone option').count(), 7);

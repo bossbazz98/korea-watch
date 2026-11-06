@@ -32,7 +32,7 @@ function fakeMessaging() {
 
 const now = Date.parse("2026-10-31T09:00:00Z");
 const d = h => new Date(now - h * 3600e3).toUTCString();
-const rss = items => `<rss><channel>${items.map(i => `<item><title>${i.t} - ${i.s}</title><link>https://news.google.com/a/${encodeURIComponent(i.t)}</link><pubDate>${i.d}</pubDate><source url="x">${i.s}</source></item>`).join("")}</channel></rss>`;
+const rss = items => `<rss><channel>${items.map(i => `<item><title>${i.t} - ${i.s}</title><link>https://news.google.com/a/${encodeURIComponent(i.t)}</link><pubDate>${i.d}</pubDate><source url="https://www.yna.co.kr">${i.s}</source></item>`).join("")}</channel></rss>`;
 let feeds = {
   gn_war: rss([{ t: "북한, 동해상으로 탄도미사일 발사", s: "연합뉴스", d: d(1) }]),
   gn_disease: rss([{ t: "질병관리청, 독감 유행주의보 발령", s: "YTN", d: d(2) }]),
@@ -83,8 +83,8 @@ const log = { log() {}, warn() {} };
   assert.deepStrictEqual(warMsg.tokens.sort(), ["tokA", "tokB"], "critical war → A (critical/war) + B (high/war), not disabled D");
   assert.ok(warMsg.webpush.fcmOptions.link.startsWith("https://kw.web.app/?id="));
   const fluMsg = msg.sent.find(m => m.data.id === feed.find(i => i.level === "high").id);
-  assert.deepStrictEqual(fluMsg.tokens.sort(), ["dead", "tokB"], "high flu → only subscribers who chose 'high'");
-  assert.ok(!db.data.has("subscribers/c"), "dead token removed");
+  assert.strictEqual(fluMsg, undefined, "disease news never sends push, including high/all subscriptions");
+  assert.ok(db.data.has("subscribers/c"), "a subscriber excluded from news is not contacted or removed");
   assert.ok(msg.sent.some(m => m.data.level === "test" && m.tokens.includes("tokA")), "test push sent");
   assert.strictEqual(db.data.get("subscribers/a").testRequested, false, "test flag reset");
 
@@ -130,7 +130,7 @@ const log = { log() {}, warn() {} };
   const f = db.data.get("meta/feed"); f.items.push({ ...f.items[0], id: "old1", translated: false, attempts: 3 }); delete f.v;
   geminiMode = "busy"; await runOnce({ ...base, now: now + 950e3 });
   assert.strictEqual(allItems(db.data).find(i => i.id === "old1").attempts, 0, "old counters reset once");
-  assert.strictEqual(db.data.get("meta/feed").v, 8);
+  assert.strictEqual(db.data.get("meta/feed").v, 9);
   geminiMode = "ok";
 
   // แปลเป็นชุดละ 5: 12 ข่าว = 3 ชุด ชุดที่เสีย 1 ชุดไม่ทำให้ชุดอื่นเสีย
