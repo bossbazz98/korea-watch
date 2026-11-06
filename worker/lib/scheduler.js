@@ -1,14 +1,19 @@
 const { CAT_KEYS } = require('../feeds');
 const isKorwar = item => (item.categories || []).includes('korwar');
 // Round-robin categories rotate across five-minute runs; emergency/reader work keeps a bounded lead.
-function balancedQueue(items, limit, { now = Date.now(), priorityIds = new Set(), categoryKeys = CAT_KEYS } = {}) {
-  const pool = [...items].sort((a, b) => String(b.publishedAt).localeCompare(String(a.publishedAt)));
+function balancedQueue(items, limit, { now = Date.now(), priorityIds = new Set(), categoryKeys = CAT_KEYS, publishedCounts = null } = {}) {
+  // Retry the least recently attempted item first; new arrivals cannot perpetually
+  // push an older candidate out of the category's slot.
+  const pool = [...items].sort((a, b) => (a.lastTry || 0) - (b.lastTry || 0) || String(b.publishedAt).localeCompare(String(a.publishedAt)));
   const selected = [], ids = new Set();
   const take = item => { if (!item || selected.length >= limit || ids.has(item.id)) return; ids.add(item.id); selected.push(item); };
   pool.filter(item => priorityIds.has(item.id)).slice(0, Math.min(2, limit)).forEach(take);
   pool.filter(item => item.emergency && !isKorwar(item)).slice(0, Math.min(2, Math.max(0, limit - selected.length))).forEach(take);
   const shift = Math.floor(now / 300000) % Math.max(1, categoryKeys.length);
   const order = [...categoryKeys.slice(shift), ...categoryKeys.slice(0, shift)];
+  // Wall-clock rotation alone offers no guarantee when only the first batches
+  // fit the run budget. Put categories with no published articles first.
+  if (publishedCounts) order.sort((a, b) => (publishedCounts[a] || 0) - (publishedCounts[b] || 0));
   while (selected.length < limit) {
     const before = selected.length;
     for (const key of order) take(pool.find(item => !ids.has(item.id) && (item.categories || []).includes(key)));

@@ -373,7 +373,8 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
     // (ค) แปลเต็มข่าวที่เหลือ พร้อมกันหลายช่องทาง (คิวด่วนก่อน แล้วหมวดสำคัญ ข่าวใหม่ก่อน) ตามด้วยเขียนข่าวเก่าที่สั้นใหม่
     // Korean Peninsula fast-lane work cannot also consume every normal translation slot.
     const pool = items.filter(i => due(i) && !tried.has(i.id) && (!isKorwar(i) || korwarDone.size < CFG.KORWAR_PER_RUN));
-    const queue = balancedQueue(pool, Math.max(0, CFG.MAX_TRANSLATE - tried.size), { now, priorityIds: prIds });
+    const publishedCounts = Object.fromEntries(CAT_KEYS.map(key => [key, items.filter(i => i.translated && i.categories?.includes(key)).length]));
+    const queue = balancedQueue(pool, Math.max(0, CFG.MAX_TRANSLATE - tried.size), { now, priorityIds: prIds, publishedCounts });
     const enrichQ = items.filter(i => enrichDue(i) && !tried.has(i.id))
       .sort((a, b) => (!!b.needsEnrich - !!a.needsEnrich) || rank(a) - rank(b) || b.publishedAt.localeCompare(a.publishedAt))
       .slice(0, CFG.ENRICH_PER_RUN);
