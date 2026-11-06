@@ -66,6 +66,17 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
   const quota = new Quota(quotaSnap.exists ? quotaSnap.data() : {}, now);
   if (forceAIProbe) quota.disabled = {}; // Explicit manual runs can retry repaired credentials; daily limits remain intact.
   const stat = { lastRun: iso(now), added: 0, merged: 0, translated: 0, dropped: 0, pushed: 0, feedErrors: [], lastError: null, korwar: 0, emergency: 0 };
+  stat.translationByCategory = Object.fromEntries(CAT_KEYS.map(key => [key, { attempted: 0, completed: 0, rejected: 0, incomplete: 0, failed: 0, movedTo: {} }]));
+  const audit = (item, outcome, targetCategories = []) => {
+    if (item.translated) return; // Enrichment of published articles is not new publication.
+    for (const key of new Set(item.categories || [])) {
+      const row = stat.translationByCategory[key]; if (!row) continue;
+      row[outcome]++;
+      if (outcome === 'completed' && !targetCategories.includes(key)) {
+        for (const target of new Set(targetCategories)) row.movedTo[target] = (row.movedTo[target] || 0) + 1;
+      }
+    }
+  };
   let feedChanged = (feedSnap.exists ? (feedSnap.data().items || []) : []).some(i => !shown(i)), seenChanged = false;
 
   // Repair previously published records whose Thai fields still contain Korean.
@@ -224,8 +235,9 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
     used.add(model + (partial ? " (partial)" : ""));
     batch.forEach((it, k) => {
       const r = results[k], wasNew = !it.translated, hadText = (article.get(it.id) || "").length > 300;
-      if (!r) { if (wasNew) { it.attempts = (it.attempts || 0) + 1; it.lastTry = now } else it.enrichTries = (it.enrichTries || 0) + 1; return; }
-      if (!r.relevant) { if (wasNew) drop.add(it.id); else it.enrichTries = 9; return; } // ข่าวเก่าไม่ลบทิ้งเพราะการเขียนใหม่
+      if (!r) { audit(it, 'incomplete'); if (wasNew) { it.attempts = (it.attempts || 0) + 1; it.lastTry = now } else it.enrichTries = (it.enrichTries || 0) + 1; return; }
+      if (!r.relevant) { audit(it, 'rejected'); if (wasNew) drop.add(it.id); else it.enrichTries = 9; return; } // ข่าวเก่าไม่ลบทิ้งเพราะการเขียนใหม่
+      audit(it, 'completed', r.categories);
       Object.assign(it, { title: r.title, summary: r.summary, body: r.body, tips: r.tips, categories: r.categories, level: r.level, translated: true });
       if (hadText) { it.rich = true; delete it.needsEnrich } else if (!wasNew) it.enrichTries = (it.enrichTries || 0) + 1;
       delete it.snippetKo; delete it.attempts; delete it.lastTry; delete it.titleTries;
@@ -249,12 +261,14 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
     }
   };
   const fullBatch = async (batch, rotate = 0) => {
+    batch.forEach(it => audit(it, 'attempted'));
     await openPages(batch); // เนื้อข่าวจริงก่อนแปล
     total++; batch.forEach(i => tried.add(i.id));
     try {
       const { results, model, partial } = await withEmergency(batch, emergency => translate(batch.map(i => inputOf(i)), { ...aiOpts, deadline, rotate, emergency }));
       ok++; apply(batch, results, model, partial);
     } catch (e) {
+      batch.forEach(it => audit(it, 'failed'));
       errs.push(String(e.message || e).slice(0, 200));
       log.warn("translate batch failed", e.message);
       if (e.transient) { if (!e.reserved) stopAI = true; return; } // ทุกรุ่นยุ่ง/โควตาเต็ม: ไม่นับ รอรอบหน้า
@@ -292,6 +306,7 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
     for (const it of q) {
       if (!hasAI || until - Date.now() < 10000) return;
       korwarDone.add(it.id); tried.add(it.id);
+      audit(it, 'attempted');
       try {
         await openPages([it]);
         const itemUntil = Math.min(until, Date.now() + CFG.KORWAR_ITEM_MS + 5000);
@@ -311,6 +326,7 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
           await db.doc("notificationEvents/"+it.id).delete(); toPush.splice(toPush.indexOf(it), 1);
         }
       } catch (e) {
+        audit(it, 'failed');
         errs.push("korwar: " + String(e.message || e).slice(0, 160));
         it.lastTry = Date.now();
         if (!e.transient) it.attempts = (it.attempts || 0) + 1;
@@ -463,6 +479,7 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
   stat.pending = items.filter(i => !i.translated).length;
   stat.publishedByCategory = Object.fromEntries(CAT_KEYS.map(key => [key, items.filter(i => i.translated && i.categories?.includes(key)).length]));
   stat.pendingByCategory = Object.fromEntries(CAT_KEYS.map(key => [key, items.filter(i => !i.translated && i.categories?.includes(key)).length]));
+  stat.retryDelayedByCategory = Object.fromEntries(CAT_KEYS.map(key => [key, items.filter(i => !i.translated && i.categories?.includes(key) && !due(i)).length]));
   stat.hidden = items.filter(i => !shown(i)).length;
   stat.total = items.length;
   stat.emergencyLeft = quota.emergencyLeft();
@@ -471,6 +488,8 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
   stat.korwarWaiting = items.filter(i => isKorwar(i) && !i.translated).length;
   stat.disabled = Object.fromEntries(Object.entries(quota.disabled || {}).map(([p, v]) => [p, v.reason]));
   await statusRef.set(stat);
+  log.log('translation by input category: ' + JSON.stringify(stat.translationByCategory));
+  log.log('pending in retry cooldown by category: ' + JSON.stringify(stat.retryDelayedByCategory));
   log.log(`added ${stat.added}, merged ${stat.merged}, translated ${stat.translated}, korwar fast ${stat.korwar}, dropped ${stat.dropped}, pushed ${stat.pushed}, pending ${stat.pending}` +
     `, titled ${stat.titled || 0}` + (stat.priority ? `, priority ${stat.priority}` : "") + (stat.enriched ? `, enriched ${stat.enriched}` : "") + (stat.fixes ? `, agent fixes ${stat.fixes}` : "") +
     (stat.pushFailed ? `, push failed ${stat.pushFailed} (${Object.entries(stat.pushErrors).map(([k, v]) => k + "×" + v).join(" ")})` : "") +

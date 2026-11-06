@@ -21,5 +21,7 @@ async function read(document) {
   const [status, feed] = await Promise.all([read('status'), read('feed')]);
   const { completeThai } = require('../../public/news-text');
   const items = feed.items || [];
+  console.log('Per-category translation outcomes:', JSON.stringify(status.translationByCategory || 'Not available: worker needs the diagnostics update', null, 2));
+  console.log('Pending retry cooldown:', JSON.stringify(status.retryDelayedByCategory || 'Not reported by this worker version', null, 2));
   console.log(JSON.stringify({ project, workerCommit: status.workerCommit || 'not reported by this worker version', workerBranch: status.workerBranch || 'unknown', lastRun: status.lastRun, lastSuccessfulPublishAt: status.lastSuccessfulPublishAt, ageMinutes: status.lastRun ? Math.round((Date.now() - Date.parse(status.lastRun)) / 60000) : null, published: items.length, completeThai: items.filter(completeThai).length, pending: status.pending, hidden: status.hidden, byCategory: status.publishedByCategory, pendingByCategory: status.pendingByCategory, aiDisabled: status.disabled, quotaUsed: status.quotaUsed, lastError: status.lastError, feedErrors: status.feedErrors }, null, 2));
 })().catch(error => { console.error('Read-only diagnosis failed:', error.message); process.exitCode = 1; });
