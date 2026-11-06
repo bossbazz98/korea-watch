@@ -34,3 +34,12 @@ Not a promise of complete semantic deduplication, exactly-once FCM delivery, pro
 - Validate Thai summary/body as well as headlines and repair legacy incomplete records without duplicate alerts.
 - Refresh the homepage when scrolling to the bottom, with a 30-second automatic cooldown, manual retry and offline feedback; preserve settings and filters.
 - Add read-only translation diagnostics, publication counts per category and the worker commit/branch.
+
+## Incident alerts and category publication — 2026-11-07
+
+- Critical level, emergency translation quota and news push are limited to confirmed North Korean attacks on South Korea, North Korean missile/rocket launches or tests, attacks on South Korea, missiles falling near South Korea, and South Korean soldiers stepping on antipersonnel mines. A shared policy checks original Korean headlines and approved South Korean publisher domains; threats, drills and historical/uncertain reports do not qualify. Google News publisher provenance is retained. New RSS articles from other publishers are excluded.
+- Recheck persisted levels, notification outbox and delivery retries. Unverifiable legacy queued news is discarded; explicit device tests remain available. Existing high/all subscriptions cannot bypass the news policy. Settings offer urgent-only news delivery.
+- General Korean Peninsula coverage uses the balanced normal translation queue instead of spending title/race requests first. Feed v9 clears old failed-attempt cooldowns once. Already translated food/foreign-worker stories with explicit source-text evidence regain those topics without repeating notifications.
+- Retry structured empty/missing AI entries using another model, preserve good partial results, require nonempty Thai body text, and preserve food/foreign-worker labels supported by original headline/snippet. Explicit irrelevant results remain rejected.
+- Remember unavailable models within a worker run and expose per-model errors separately from the truncated lastError summary. No new credentials, model IDs or Firebase configuration are introduced.
+- Remove the settings brand eyebrow; match home section titles (20px), card headings (19px) and description text (16px). Include the shared policy in the offline shell.

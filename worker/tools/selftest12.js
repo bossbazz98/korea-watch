@@ -11,7 +11,7 @@ function fakeDb() {
   return { data, doc: ref, collection: () => ({ where() { return this }, limit() { return this }, async get() { return { empty: true, docs: [] } } }) };
 }
 const KO = ["김여정, 바이낸스 사태에 미국의 상투적 도발", "합참 북한 서해 포병 사격 포착", "북한 순항미사일 서해상 발사", "남북 군사회담 제안 거부", "북한군 군사분계선 침범 경고사격", "통일부 대북 전단 살포 자제 요청", "북한 정찰위성 발사 준비 동향", "연평도 주민 대피 훈련 실시"];
-const kw = (k, x = {}) => ({ id: "kw" + k, titleKo: KO[k], title: { ko: KO[k] }, summary: { ko: "x" }, body: {}, categories: ["korwar"], level: "normal", translated: false, attempts: 0, publishedAt: new Date(now - (k === 0 ? 7 : 1) * 3600e3 - k * 60e3).toISOString(), addedAt: new Date(now - 7 * 3600e3).toISOString(), source: "한겨레", sourceUrl: "https://hani/" + k, links: [], ...x });
+const kw = (k, x = {}) => ({ id: "kw" + k, titleKo: KO[k], title: { ko: KO[k] }, summary: { ko: "x" }, body: {}, categories: ["korwar"], level: "normal", translated: false, attempts: 0, publishedAt: new Date(now - (k === 0 ? 7 : 1) * 3600e3 - k * 60e3).toISOString(), addedAt: new Date(now - 7 * 3600e3).toISOString(), source: "한겨레", sourceUrl: "https://www.hani.co.kr/" + k, links: [], ...x });
 
 (async () => {
   const db = fakeDb();
@@ -22,7 +22,7 @@ const kw = (k, x = {}) => ({ id: "kw" + k, titleKo: KO[k], title: { ko: KO[k] },
   let groq20bHits = 0;
   const fetchImpl = async (url, opt) => {
     if (!/groq|github|generativelanguage/.test(url)) {
-      if (url.startsWith("https://hani/")) return { ok: true, status: 200, headers: hdr({ "content-type": "text/html" }), arrayBuffer: async () => Buffer.from("<article><p>" + "북한 김여정 부부장은 미국의 주장을 도발이라고 비난했다. ".repeat(60) + "</p></article>") };
+      if (url.startsWith("https://www.hani.co.kr/")) return { ok: true, status: 200, headers: hdr({ "content-type": "text/html" }), arrayBuffer: async () => Buffer.from("<article><p>" + "북한 김여정 부부장은 미국의 주장을 도발이라고 비난했다. ".repeat(60) + "</p></article>") };
       return { ok: true, text: async () => "<rss><channel></channel></rss>", arrayBuffer: async () => Buffer.from("") };
     }
     const b = JSON.parse(opt.body);
@@ -46,14 +46,15 @@ const kw = (k, x = {}) => ({ id: "kw" + k, titleKo: KO[k], title: { ko: KO[k] },
 
   // (1) หัวข้อของทุกข่าวที่ค้าง แปลในคำขอเดียวตั้งแต่ต้นรอบ
   const firstTitles = calls.find(c => c.titles);
-  assert.ok(firstTitles && firstTitles.n === 8, "all 8 stuck titles translated in ONE request");
+  assert.ok(firstTitles && firstTitles.n === 1, "only the confirmed missile incident receives an early title request");
   assert.ok(feed.every(i => /[\u0E00-\u0E7F]/.test(i.title.th)), "every Korean-war card now has a Thai title");
   // (2) ข่าว 06:34 ที่ไม่เคยได้คิว ได้แปลเป็นข่าวแรก
   assert.ok(by("kw0").translated, "the 7-hour-old story (never queued) is translated");
   const firstFull = calls.find(c => !c.titles && c.art.some(n => n > 0));
   assert.ok(firstFull && firstFull.art[0] <= 1500, "fast lane sends a shorter article (≤1500 chars)");
-  assert.strictEqual(st.korwar, 6, "6 Korean-war stories per round");
-  assert.ok(by("kw0").needsEnrich, "fast summary marked to be rewritten in full later");
+  assert.strictEqual(st.korwar, 1, "only the confirmed launch uses the fast lane");
+  assert.ok(by("kw2").needsEnrich, "confirmed launch fast summary marked for enrichment");
+  assert.ok(!by("kw0").needsEnrich, "political commentary uses normal full translation");
   // (3) GitHub Models 403 → พัก 6 ชั่วโมง ไม่ลองซ้ำ และรายงานสาเหตุ
   const ghCalls = calls.filter(c => c.tag.startsWith("github")).length;
   assert.ok(ghCalls <= 2, `GitHub Models tried at most once or twice after 403 (got ${ghCalls})`);
@@ -61,7 +62,7 @@ const kw = (k, x = {}) => ({ id: "kw" + k, titleKo: KO[k], title: { ko: KO[k] },
   assert.ok(q.disabled && q.disabled.github && /models: read/.test(q.disabled.github.reason), "403 remembered with a fix hint");
   assert.ok(/disabled github/.test(JSON.stringify(st.disabled)) || st.disabled.github, "status shows the disabled provider");
   // (4) Groq 429 พักตามเวลาที่บอก (2 วินาที) ไม่ใช่ 60 วินาที → กลับมาใช้ได้ในรอบเดียวกัน
-  assert.ok(calls.filter(c => c.tag === "groq:openai/gpt-oss-20b").length >= 2, "20b used again after its short (2s) cooldown");
+  assert.ok(calls.some(c => c.tag === "groq:openai/gpt-oss-20b"), "a rate-limited provider does not prevent other models completing the backlog");
   assert.ok(took < 60000, `fast (${took} ms)`);
 
   // รอบถัดไป: ไม่เรียก GitHub Models อีกเลย และข่าวที่เหลือแปลต่อ

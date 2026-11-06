@@ -13,7 +13,7 @@ const CATS = {
                kw: ["전쟁", "공습", "교전", "휴전", "우크라이나", "러시아군", "이스라엘", "가자", "이란", "중동", "하마스", "헤즈볼라", "대만해협", "분쟁", "나토", "NATO"] },
   disease:   { th: "โรคติดต่อ/ไวรัส", desc: "infectious diseases and outbreaks in Korea, plus major international outbreaks relevant to health or travel in Korea",
                kw: ["감염병", "전염병", "바이러스", "확진", "독감", "인플루엔자", "코로나", "질병관리청", "유행", "엠폭스", "결핵", "홍역", "조류인플루엔자", "백신", "팬데믹"] },
-  food:      { th: "อาหาร/กักตุน", desc: "food supply, panic buying, shortages of daily goods",
+  food:      { th: "อาหาร/กักตุน", desc: "food supply and staple-food prices (rice, grain, groceries), food insecurity, stockpiling, panic buying, shortages of daily goods",
                kw: ["사재기", "품귀", "생필품", "품절", "식량", "쌀값", "라면", "장보기", "물가 급등", "공급 부족", "비축"] },
   thai:      { th: "คนไทยในเกาหลี", desc: "Thai nationals in Korea, AND immigration enforcement, arrests/crackdowns on foreigners, deportation, detention, racism or discrimination against foreigners in Korea",
                kw: ["태국인", "태국 국적", "태국 노동자", "태국 출신", "주한 태국", "태국대사관", "태국", "출입국", "출입국관리", "불법체류", "강제퇴거", "외국인 보호소", "외국인보호소", "외국인 검거", "외국인 체포", "외국인 범죄", "외국인 단속", "불법체류 단속", "출입국 단속", "인종차별", "외국인 차별", "이주민 차별", "외국인 혐오", "인종 혐오"] },
@@ -21,7 +21,7 @@ const CATS = {
   oil:       { th: "น้ำมัน", desc: "oil and fuel prices", kw: ["유가", "휘발유", "경유", "기름값", "국제유가", "주유소"] },
   fx:        { th: "ค่าเงิน", desc: "exchange rates, the won", kw: ["환율", "원달러", "원·달러", "원화", "달러 강세", "바트"] },
   wage:      { th: "ค่าแรงขั้นต่ำ", desc: "minimum wage", kw: ["최저임금", "최저시급"] },
-  foreign:   { th: "แรงงานต่างชาติ", desc: "foreign workers, EPS/E-9 visas, work permits", kw: ["외국인 노동자", "이주노동자", "외국인 근로자", "고용허가제", "E-9", "불법체류", "출입국", "비자"] },
+  foreign:   { th: "แรงงานต่างชาติ", desc: "migrant/foreign workers in Korea: employment conditions, safety, wages, EPS/E-9 visas and work permits; may overlap thai, wage or law", kw: ["외국인 노동자", "이주노동자", "외국인 근로자", "고용허가제", "E-9", "불법체류", "출입국", "비자"] },
   law:       { th: "กฎหมายแรงงาน", desc: "labour law changes", kw: ["근로기준법", "노동법", "주 52시간", "노란봉투법", "산업안전", "중대재해", "퇴직금"] },
   president: { th: "ประธานาธิบดี", desc: "the South Korean president and presidential office", kw: ["대통령", "대통령실", "청와대"] }
 };

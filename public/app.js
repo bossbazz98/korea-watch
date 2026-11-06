@@ -53,18 +53,18 @@ Object.assign(T.th, {
   soundType: 'เลือกเสียง', preview: 'ทดลองฟัง', stopSound: 'หยุดเสียง', volume: 'ระดับเสียง',
   tone_siren: 'ไซเรน · สลับเสียง', tone_airraid: 'หวอฉุกเฉิน · ขึ้นลงยาว', tone_emergency: 'ฉุกเฉิน · ไซเรนเร็ว', tone_pulse: 'แจ้งเตือน · สองจังหวะ', tone_bell: 'ระฆัง · นุ่มนวล', tone_chime: 'กระดิ่ง · สามโน้ต', tone_radar: 'เรดาร์ · ไล่ระดับ',
   backgroundSound: 'เสียงเมื่อปิดแอปใช้การตั้งค่าของอุปกรณ์ แถบนี้ปรับเฉพาะเสียงในแอป',
-  notifications: 'การแจ้งเตือนข่าว', allNews: 'ทุกข่าวในหมวดที่เลือก', criticalHint: 'เฉพาะเหตุการณ์ที่ต้องรู้ทันที', highHint: 'รวมข่าวสำคัญที่ควรติดตาม', allHint: 'รับทุกข่าวใหม่ในหมวดที่คุณสนใจ',
+  notifications: 'การแจ้งเตือนข่าว', allNews: 'ทุกข่าวในหมวดที่เลือก', criticalHint: 'เฉพาะเกาหลีเหนือโจมตีเกาหลีใต้ ยิงหรือทดสอบขีปนาวุธ/จรวด เกาหลีใต้ถูกโจมตี ขีปนาวุธตกใกล้เกาหลีใต้ หรือทหารเกาหลีใต้เหยียบทุ่นระเบิดสังหาร จากสำนักข่าวเกาหลีใต้', highHint: 'รวมข่าวสำคัญที่ควรติดตาม', allHint: 'รับทุกข่าวใหม่ในหมวดที่คุณสนใจ',
   quietTitle: 'เวลาพัก', quietHint: 'งดแจ้งเตือนตามเวลาเกาหลี (KST)', quietFrom: 'เริ่มพัก', quietTo: 'กลับมาแจ้ง',
   quietBypass: 'ยกเว้นข่าวสงครามเกาหลีระดับด่วนมาก', saveAlerts: 'บันทึกการแจ้งเตือน', audioError: 'ยังเล่นเสียงไม่ได้ ลองแตะทดลองฟังอีกครั้ง'
 });
 Object.assign(T.en, {
-  categoryPending: count => `${count} stories in this topic are being prepared`, refresh: 'Refresh news', refreshing: 'Refreshing news…', refreshed: 'News is up to date', refreshHint: 'Scroll to the bottom to refresh news', refreshFailed: 'Could not refresh. Check your connection and try again.', translationPending: 'English translation is pending', testPending: 'A server test is already queued.', testCooldown: 'Local test sent. Wait 5 minutes before requesting another server test.', localTestFailed: 'Saved, but the local notification could not be displayed.', settings: 'Settings', settingsIntro: 'Make Korea Watch feel like yours.', devicePrefs: 'Language, theme and sound save automatically on this device',
+  categoryPending: count => `${count} stories in this topic are being prepared`, refresh: 'Refresh news', refreshing: 'Refreshing news…', refreshed: 'News is up to date', refreshHint: 'Scroll to the bottom to refresh news', refreshFailed: 'Could not refresh. Check your connection and try again.', translationPending: 'English translation is pending', testPending: 'A server test is already queued.', testCooldown: 'Local test sent. Wait 5 minutes before requesting another server test.', localTestFailed: 'Saved, but the local notification could not be displayed.', settings: 'Settings', settingsIntro: 'Make it feel like yours.', devicePrefs: 'Language, theme and sound save automatically on this device',
   appearance: 'Appearance & language', appearanceHint: 'A comfortable way to read, day or night.', language: 'Display language', theme: 'Appearance',
   theme_system: 'System', theme_light: 'Light', theme_dark: 'Dark', soundTitle: 'In-app alert sound', soundHint: 'For urgent news while the app is open',
   soundType: 'Choose a sound', preview: 'Preview', stopSound: 'Stop sound', volume: 'Volume',
   tone_siren: 'Siren · alternating', tone_airraid: 'Air-raid siren · long wail', tone_emergency: 'Emergency · rapid siren', tone_pulse: 'Alert · double pulse', tone_bell: 'Bell · gentle', tone_chime: 'Chime · three notes', tone_radar: 'Radar · sweep',
   backgroundSound: 'Background push sounds follow your device settings. These controls affect in-app audio only.',
-  notifications: 'News notifications', allNews: 'All selected news', criticalHint: 'Only events that need immediate attention', highHint: 'Include important developments', allHint: 'Every new story in your selected topics',
+  notifications: 'News notifications', allNews: 'All selected news', criticalHint: 'Only North Korean attacks on South Korea, North Korean missile/rocket launches or tests, attacks on South Korea, missiles falling nearby, or South Korean soldiers stepping on antipersonnel mines. South Korean news outlets only.', highHint: 'Include important developments', allHint: 'Every new story in your selected topics',
   quietTitle: 'Quiet hours', quietHint: 'Pause notifications using Korean time (KST)', quietFrom: 'From', quietTo: 'Until',
   quietBypass: 'Allow urgent Korean Peninsula alerts', saveAlerts: 'Save notifications', audioError: 'Audio is unavailable. Try tapping Preview again.'
 });
@@ -294,7 +294,7 @@ async function getMessagingMod() {
   messaging = msgMod.getMessaging(fb.app);
   msgMod.onMessage(messaging, p => { // แจ้งเตือนที่มาตอนเปิดแอปอยู่
     const id = p?.data?.id, n = id && items.find(x => x.id === id);
-    if (n) { if (!seen.has(n.id)) raiseAlert(n) } else if (p?.notification?.title) toast(p.notification.title);
+    if (n && globalThis.KW_NEWS_POLICY.incident(n)) { if (!seen.has(n.id)) raiseAlert(n) } else if (p?.data?.level === 'test' && p?.notification?.title) toast(p.notification.title);
   });
   return msgMod;
 }
@@ -349,7 +349,7 @@ function openSettings(keepDraft = false) {
   const [cls, msg] = pushState(), blocked = cls === 'warn';
   const toggle = (id, checked, label, disabled = false) => `<label class="sw"><input type="checkbox" id="${id}" ${checked ? 'checked' : ''} ${disabled ? 'disabled' : ''} aria-label="${esc(label)}"><i></i></label>`;
   const hourOptions = value => Array.from({ length: 24 }, (_, hour) => `<option value="${hour}" ${Number(value) === hour ? 'selected' : ''}>${String(hour).padStart(2, '0')}:00</option>`).join('');
-  showSheet(`<div class="bar settings-heading"><div><span class="eyebrow">KOREA WATCH</span><h2 id="sheet-title">${t('settings')}</h2></div><button class="close-button" id="close" aria-label="${t('close')}">${uiIcon('close')}</button></div>
+  showSheet(`<div class="bar settings-heading"><div><h2 id="sheet-title">${t('settings')}</h2></div><button class="close-button" id="close" aria-label="${t('close')}">${uiIcon('close')}</button></div>
     <div class="settings-intro"><p>${t('settingsIntro')}</p><span class="local-note">${uiIcon('device')}${t('devicePrefs')}</span></div>
     <section class="settings-card" aria-labelledby="appearance-title">
       <div class="section-heading"><span class="section-icon">${uiIcon('palette')}</span><div><h3 id="appearance-title">${t('appearance')}</h3><p>${t('appearanceHint')}</p></div></div>
@@ -365,7 +365,7 @@ function openSettings(keepDraft = false) {
     <section class="settings-card" aria-labelledby="notifications-title">
       <div class="section-heading"><span class="section-icon">${uiIcon('bell')}</span><div><h3 id="notifications-title">${t('notifications')}</h3><p>${t('nOnS')}</p></div>${toggle('p-on', draft.enabled, t('nOn'), blocked)}</div>
       <div class="state ${cls}" id="p-state" role="status" ${blocked ? '' : 'hidden'}>${blocked ? esc(msg) : ''}</div>
-      <fieldset id="p-opts" ${blocked ? 'disabled' : ''}><legend>${t('nLevel')}</legend><div class="level-choices">${[['critical', 'nCrit', 'criticalHint'], ['high', 'nHigh', 'highHint'], ['all', 'allNews', 'allHint']].map(([value, label, hint]) => `<label><input type="radio" name="lv" value="${value}" ${draft.level === value ? 'checked' : ''}><span class="radio-indicator"></span><span><b>${t(label)}</b><small>${t(hint)}</small></span></label>`).join('')}</div></fieldset>
+      <fieldset id="p-opts" ${blocked ? 'disabled' : ''}><legend>${t('nLevel')}</legend><div class="level-choices">${[['critical', 'nCrit', 'criticalHint']].map(([value, label, hint]) => `<label><input type="radio" name="lv" value="${value}" checked><span class="radio-indicator"></span><span><b>${t(label)}</b><small>${t(hint)}</small></span></label>`).join('')}</div></fieldset>
       <fieldset ${blocked ? 'disabled' : ''}><legend>${t('nCats')}<span class="selection-count" id="category-count">${draft.cats.length}/${Object.keys(CATS).length}</span></legend><div class="topic-choices">${Object.keys(CATS).map(key => `<label><input type="checkbox" name="pc" value="${key}" ${draft.cats.includes(key) ? 'checked' : ''}><span class="topic-check">${uiIcon('check')}</span><span>${CATS[key][lang]}</span></label>`).join('')}</div></fieldset>
     </section>
     <section class="settings-card" aria-labelledby="quiet-title">
@@ -460,7 +460,7 @@ function renderRefreshState() {
 }
 function applyFeedSnapshot(snapshot) {
   const list = snapshot.exists() ? snapshot.data().items : [];
-  items = Array.isArray(list) ? list.filter(item => item?.id).map(item => ({ ...item, translated: item.translated === true && globalThis.KW_NEWS_TEXT.completeThai(item) })) : [];
+  items = Array.isArray(list) ? list.filter(item => item?.id).map(item => globalThis.KW_NEWS_POLICY.apply({ ...item, translated: item.translated === true && globalThis.KW_NEWS_TEXT.completeThai(item) })) : [];
   loaded = true; render(); openDeepLink();
   if (!snapshot.metadata?.fromCache) checkAlerts();
 }

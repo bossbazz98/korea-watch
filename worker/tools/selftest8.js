@@ -108,7 +108,7 @@ export function onSnapshot(ref,ok){setTimeout(()=>{if(ref==="meta/feed")ok({exis
       await page.locator('#settings').click();
       await page.locator('label:has(#p-on)').click();
       assert.strictEqual(await page.locator('#p-on').isChecked(), true);
-      await page.locator('label:has(input[name="lv"][value="all"])').click();
+      await page.locator('label:has(input[name="lv"][value="critical"])').click();
       await page.locator('label:has(#p-quiet)').click();
       await page.locator('#p-from').selectOption('22');
       await page.locator('#p-to').selectOption('7');
@@ -116,7 +116,7 @@ export function onSnapshot(ref,ok){setTimeout(()=>{if(ref==="meta/feed")ok({exis
       await page.waitForFunction(() => window.__writes?.length > 0);
       const write = await page.evaluate(() => window.__writes.at(-1));
       assert.strictEqual(write.ref, 'subscribers/fixture-user', 'subscription owned by authenticated UID');
-      assert.strictEqual(write.value.level, 'all');
+      assert.strictEqual(write.value.level, 'critical');
       assert.strictEqual(write.value.subscriptionVersion, 2);
       assert.strictEqual(write.value.quietOn, true);
       assert.ok(write.value.cats.includes('korwar'));

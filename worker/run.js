@@ -15,6 +15,8 @@ const { grams, similarity, SAME_KO, SAME_TH } = require("./lib/similar");
 const { Quota } = require("./lib/quota");
 const { persist, prepare } = require("./lib/storage");
 const { balancedQueue } = require("./lib/scheduler");
+const policy = require("../public/news-policy");
+const { publicationCategories } = require("./lib/categories");
 const { completeThai } = require("../public/news-text");
 
 const CFG = {
@@ -79,6 +81,13 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
   };
   let feedChanged = (feedSnap.exists ? (feedSnap.data().items || []) : []).some(i => !shown(i)), seenChanged = false;
 
+  // Reclassify existing critical records too; never replay historical alerts.
+  for (const item of items) {
+    const checked = policy.apply({ ...item, categories: publicationCategories({titleKo:item.titleKo, snippet:item.snippetKo}, item.categories || []) });
+    if (checked.level !== item.level || checked.emergency !== item.emergency || checked.categories?.length !== item.categories?.length) feedChanged = true;
+    Object.assign(item, checked);
+  }
+
   // Repair previously published records whose Thai fields still contain Korean.
   for (const item of items) {
     if (!item.translated || completeThai(item)) continue;
@@ -89,7 +98,7 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
   }
   stat.workerCommit = process.env.GITHUB_SHA || 'local';
   stat.workerBranch = process.env.GITHUB_REF_NAME || 'local';
-  const FEED_V = 8;
+  const FEED_V = 9;
   const oldV = feedSnap.exists ? (feedSnap.data().v || 1) : FEED_V;
   if (oldV < FEED_V) {
     items.forEach(i => { if (!i.translated && i.attempts) i.attempts = 0 });
@@ -109,7 +118,7 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
   let saving = Promise.resolve();
   const saveFeed = () => (saving = saving.then(async () => {
     const stamp=iso(Date.now());
-    await persist(db, structuredClone(items), { updatedAt: stamp, v: FEED_V }, seen, quota.toJSON(), toPush.map(n => ({ news: {id:n.id,title:n.title,summary:n.summary,categories:n.categories,level:n.level}, appUrl, status:"pending", expiresAt:Date.now()+6*3600e3 })));
+    await persist(db, structuredClone(items), { updatedAt: stamp, v: FEED_V }, seen, quota.toJSON(), toPush.map(n => ({ news: {id:n.id,title:n.title,summary:n.summary,categories:n.categories,level:n.level,titleKo:n.titleKo,publisherUrl:n.publisherUrl || n.sourceUrl}, appUrl, status:"pending", expiresAt:Date.now()+6*3600e3 })));
     publishedAt=stamp;
   }));
   let fixDocs = [];
@@ -178,7 +187,7 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
         title: { ko: n.titleKo }, summary: { ko: n.snippet }, body: {},
         categories: n.cats, level: "normal", translated: false, attempts: 0, image: n.image || null, emergency: !!n.emergency,
         publishedAt: n.publishedAt, addedAt: iso(now),
-        source: n.source, sourceUrl: n.link, links: [{ label: n.source || "ข่าวต้นฉบับ", url: n.link }]
+        source: n.source, sourceUrl: n.link, publisherUrl: n.publisherUrl, links: [{ label: n.source || "ข่าวต้นฉบับ", url: n.link }]
       };
       (n.alts || []).forEach(a => addSource(it, a.source, a.link));
       items.push(it); pool.push({ i: it, g }); fresh.push(it);
@@ -223,7 +232,7 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
   stat.pushFailed = 0; stat.pushErrors = {};
   const addPush = pr => { stat.pushed += pr.sent; stat.pushFailed += pr.failed; for (const [k, v] of Object.entries(pr.errors || {})) stat.pushErrors[k] = (stat.pushErrors[k] || 0) + v };
   const hasAI = !!(geminiKey || groqKey || githubToken);
-  const aiOpts = { apiKey: geminiKey, groqKey, githubToken, models, groqModels, githubModels, fetchImpl, log, waitMs, cool: new Map(), quota, tpm: new Map() };
+  const aiOpts = { apiKey: geminiKey, groqKey, githubToken, models, groqModels, githubModels, fetchImpl, log, waitMs, cool: new Map(), quota, tpm: new Map(), modelErrors: new Map(), unavailable: new Map() };
   const deadline = runDeadline - imgBudgetMs, used = new Set(), errs = [], drop = new Set(), tried = new Set();
   let ok = 0, total = 0, stopAI = false;
   stat.titled = 0; stat.priority = 0; stat.enriched = 0;
@@ -239,9 +248,10 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
       if (!r.relevant) { audit(it, 'rejected'); if (wasNew) drop.add(it.id); else it.enrichTries = 9; return; } // ข่าวเก่าไม่ลบทิ้งเพราะการเขียนใหม่
       audit(it, 'completed', r.categories);
       Object.assign(it, { title: r.title, summary: r.summary, body: r.body, tips: r.tips, categories: r.categories, level: r.level, translated: true });
+      Object.assign(it, policy.apply(it));
       if (hadText) { it.rich = true; delete it.needsEnrich } else if (!wasNew) it.enrichTries = (it.enrichTries || 0) + 1;
       delete it.snippetKo; delete it.attempts; delete it.lastTry; delete it.titleTries;
-      if (wasNew) { stat.translated++; if (!it.retranslation && now - Date.parse(it.publishedAt) < CFG.PUSH_WINDOW_H * 3600e3) toPush.push(it) }
+      if (wasNew) { stat.translated++; if (!it.retranslation && policy.incident(it) && now - Date.parse(it.publishedAt) < CFG.PUSH_WINDOW_H * 3600e3) toPush.push(it) }
       else stat.enriched++;
       delete it.retranslation;
     });
@@ -250,7 +260,7 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
   // ข่าวฉุกเฉินที่โควตาปกติหมด: ใช้โควตาสำรองได้วันละ 3 ข่าว
   const withEmergency = async (batch, call) => {
     try { return await call(false) } catch (e) {
-      const claim = e.reserved && batch.every(i => i.emergency || isKorwar(i)) ? quota.claimEmergency(batch.map(i=>i.id)) : null;
+      const claim = e.reserved && batch.every(i => policy.incident(i)) ? quota.claimEmergency(batch.map(i=>i.id)) : null;
       if (claim) {
         let res; try { res=await call(true); } catch(error) { claim.rollback(); throw error; }
         stat.emergency+=claim.count;
@@ -288,7 +298,7 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
   //    คิว: ข่าวที่ยังไม่เคยลอง และข่าวที่ลองล่าสุดนานที่สุดได้ก่อน (ไม่มีข่าวไหนถูกแซงคิวตลอด)
   const korwarDone = new Set();
   const korwarTitles = async (until) => {
-    const need = items.filter(i => isKorwar(i) && !i.translated && !hasThai(i.title && i.title.th)).slice(0, CFG.TITLE_BATCH);
+    const need = items.filter(i => policy.incident(i) && !i.translated && !hasThai(i.title && i.title.th)).slice(0, CFG.TITLE_BATCH);
     if (!need.length || !hasAI) return;
     try {
       const t = await withEmergency(need, emergency => translateTitles(need.map(i => ({ titleKo: i.titleKo })), { ...aiOpts, deadline: until, timeoutMs: CFG.KORWAR_TITLE_MS, waitMs: 0, emergency }));
@@ -300,7 +310,7 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
   const fastKorwar = async () => {
     const until = Math.min(runDeadline - 15000, Date.now() + CFG.KORWAR_BUDGET_MS);
     await korwarTitles(until);
-    const q = items.filter(i => isKorwar(i) && !i.translated && !korwarDone.has(i.id) && ((i.attempts || 0) < CFG.MAX_ATTEMPTS || Date.now() - (i.lastTry || 0) > CFG.KORWAR_RETRY_MS))
+    const q = items.filter(i => policy.incident(i) && !i.translated && !korwarDone.has(i.id) && ((i.attempts || 0) < CFG.MAX_ATTEMPTS || Date.now() - (i.lastTry || 0) > CFG.KORWAR_RETRY_MS))
       .sort((a, b) => (a.lastTry || 0) - (b.lastTry || 0) || b.publishedAt.localeCompare(a.publishedAt))
       .slice(0, Math.max(0, CFG.KORWAR_PER_RUN - korwarDone.size));
     for (const it of q) {
@@ -369,7 +379,7 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
     if (prQueue.length && timeLeft()) await fullBatch(prQueue);
 
     // (ข) แปลหัวข้อก่อน: เฉพาะข่าวที่แสดงในแอปก่อนแปลเสร็จ (สงครามเกาหลี) ข่าวอื่นจะขึ้นแอปเมื่อแปลเต็มเสร็จแล้ว
-    const tq = items.filter(i => !i.translated && shown(i) && !(i.title && hasThai(i.title.th)) && !tried.has(i.id) && (i.titleTries || 0) < CFG.MAX_ATTEMPTS)
+    const tq = items.filter(i => !i.translated && policy.incident(i) && !(i.title && hasThai(i.title.th)) && !tried.has(i.id) && (i.titleTries || 0) < CFG.MAX_ATTEMPTS)
       .sort((a, b) => b.publishedAt.localeCompare(a.publishedAt)).slice(0, CFG.TITLES_MAX);
     const tBatches = [];
     for (let b = 0; b < tq.length; b += CFG.TITLE_BATCH) tBatches.push(tq.slice(b, b + CFG.TITLE_BATCH));
@@ -466,7 +476,10 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
   for (const event of events.docs) {
     const e=event.data(); if(!e.news) continue;
     if(e.expiresAt<Date.now() || !liveIds.has(e.news.id)) { await event.ref.delete(); continue; }
-    readyEvents.push(event);
+    // Recheck current source/headline, including outbox events from older workers.
+    const current = items.find(i => i.id === e.news.id);
+    if (!policy.incident(current)) { await event.ref.delete(); continue; }
+    readyEvents.push({ ref: event.ref, data: () => ({ ...e, news: current }) });
   }
   pushContext.deferSummary=false;
   if (readyEvents.length || pushContext.extra.size) addPush(await sendNews(db,messaging,readyEvents.map(d=>d.data().news),appUrl,log,pushContext));
@@ -474,6 +487,8 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
   addPush(await retryNotifications(db, messaging, log));
   addPush(await sendTests(db, messaging, appUrl, log));
 
+  stat.aiModelErrors = Object.fromEntries(aiOpts.modelErrors);
+  stat.aiUnavailableModels = Object.fromEntries(aiOpts.unavailable);
   stat.lastSuccessfulPublishAt = publishedAt;
   stat.lastSuccessfulRunAt = iso(Date.now());
   stat.pending = items.filter(i => !i.translated).length;
@@ -557,6 +572,9 @@ async function retryNotifications(db, messaging, log) {
   for(const d of snap.docs) {
     const j=d.data(); if(!j.recipients || !j.msg) continue;
     if(j.expiresAt < Date.now()) { await d.ref.delete(); continue; }
+    // Old queued news/summary payloads have no verifiable incident provenance.
+    // Test notifications remain available for delivery diagnostics.
+    if (j.msg.data?.level !== 'test' && !policy.incident({ titleKo: j.msg.data?.titleKo, publisherUrl: j.msg.data?.publisherUrl })) { await d.ref.delete(); continue; }
     if(j.nextAttemptAt > Date.now()) continue;
     const subs=[], deferred=[];
     let categories=[];try {categories=JSON.parse(j.msg.data?.categories || '[]')} catch {}
@@ -609,17 +627,20 @@ async function sendNews(db, messaging, news, appUrl, log, context = { count: new
   }
   const subs = context.subs;
   const count = context.count, extra = context.extra || (context.extra = new Map()), last = new Map();
-  for (const n of news) {
+  for (const raw of news) {
+    if (!policy.incident(raw)) continue;
+    const n = policy.apply(raw);
     const wanted = subs.filter(s => Array.isArray(s.cats) && s.cats.some(c => (n.categories || []).includes(c)) && levelOk(s, n) && !quietBlocks(s, n));
     const targets = wanted.filter(s => (count.get(s.token) || 0) < MAX_PER_DEVICE);
     wanted.filter(s => !targets.includes(s)).forEach(s => extra.set(s.token, (extra.get(s.token) || 0) + 1));
+    context.lastIncident = n;
     if (!targets.length) continue;
     targets.forEach(s => count.set(s.token, (count.get(s.token) || 0) + 1));
     const tag = n.level === "critical" ? "🔴 ด่วนมาก" : n.level === "high" ? "🟠 สำคัญ" : "🆕 ข่าวใหม่";
     try {
       const r = await sendMulticast(db, messaging, targets, {
         notification: { title: `${tag}: ${n.title.th}`.slice(0, 120), body: (n.summary.th || "").slice(0, 240) },
-        data: { id: String(n.id), level: String(n.level), categories: JSON.stringify(n.categories || []) }, webpush: webpush(appUrl, n.id, n.level)
+        data: { id: String(n.id), level: String(n.level), categories: JSON.stringify(n.categories || []), titleKo: n.titleKo, publisherUrl: n.publisherUrl || n.sourceUrl, policy: policy.VERSION }, webpush: webpush(appUrl, n.id, n.level)
       }, log);
       merge(r); targets.forEach(s => last.set(s.token, { r: r.perToken.get(s.token), title: n.title.th }));
     } catch (e) { if (!e.deliveryPersisted) throw e; log.warn("push failed", n.id, e.message); out.failed += targets.length; out.errors[e.code || e.message] = (out.errors[e.code || e.message] || 0) + targets.length }
@@ -628,7 +649,7 @@ async function sendNews(db, messaging, news, appUrl, log, context = { count: new
   const byN = new Map();
   for (const [tok, k] of context.deferSummary ? [] : extra) { if (!byN.has(k)) byN.set(k, []); byN.get(k).push(subs.find(s => s.token === tok)) }
   for (const [k, list] of byN) {
-    try { merge(await sendMulticast(db, messaging, list, { notification: { title: "Korea Watch", body: `มีข่าวใหม่อีก ${k} ข่าว แตะเพื่ออ่าน` }, data: { id: "", level: "summary" }, webpush: webpush(appUrl, "", "summary") }, log)) } catch (e) { if(!e.deliveryPersisted) throw e; log.warn("summary push failed", e.message) }
+    try { merge(await sendMulticast(db, messaging, list, { notification: { title: "Korea Watch", body: `มีข่าวใหม่อีก ${k} ข่าว แตะเพื่ออ่าน` }, data: { id: "", level: "summary", titleKo: context.lastIncident.titleKo, publisherUrl: context.lastIncident.publisherUrl || context.lastIncident.sourceUrl, policy: policy.VERSION }, webpush: webpush(appUrl, "", "summary") }, log)) } catch (e) { if(!e.deliveryPersisted) throw e; log.warn("summary push failed", e.message) }
   }
   if (!context.deferSummary) extra.clear();
   const per = new Map([...last].map(([t, v]) => [t, v.r]));

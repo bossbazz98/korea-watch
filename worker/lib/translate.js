@@ -1,6 +1,7 @@
 // แปลและสรุปข่าวด้วย AI หลายเจ้า: Groq (เร็ว โควตาฟรีเยอะ) เป็นตัวหลัก แล้วสำรองด้วย Gemini
 // ถ้าเจ้าไหนยุ่ง/โควตาเต็ม/ตอบช้า จะสลับไปตัวถัดไปเอง และไม่นับเป็นการแปลล้มเหลว
 const { CATS, CAT_KEYS } = require("../feeds");
+const { publicationCategories } = require("./categories");
 const { isThai, completeThai } = require("../../public/news-text");
 
 const SYSTEM = `You are the news editor of "Korea Watch", an app for Thai people living in South Korea.
@@ -10,8 +11,9 @@ Rules:
 - Write in your own words. Do not translate the article sentence by sentence; summarise it.
 - "relevant": false if the item does not really fit any listed category or is entertainment, sports, celebrity gossip, ads or opinion columns.
 - "categories": keep only keys from this list that truly apply: ${CAT_KEYS.map(k => `${k} = ${CATS[k].desc || CATS[k].th}`).join("; ")}.
+- Multiple categories may apply. Keep "food" for staple-food prices/supply, food insecurity, shortages, stockpiling and panic buying; keep "foreign" for migrant workers, employment permits, EPS/E-9 and their working conditions, even when "korea", "law", "wage" or "thai" also applies. Do not replace specific topics with "korea" alone.
 - "korwar" and "war" are different: use "korwar" only for the Korean Peninsula; use "war" for conflicts elsewhere.
-- "level": "critical" only for news that needs immediate attention from people in Korea: military attack, missile launch or air-raid alert affecting Korea, a declared outbreak or new dangerous virus spreading in Korea, panic buying or shortages of daily goods, disasters or emergency alerts, or serious incidents involving Thai nationals. "high" for important developments in those categories or major policy changes affecting foreign workers. Otherwise "normal".
+- "level": "critical" only for a confirmed North Korean attack on South Korea, a North Korean missile/rocket launch or test, an attack on South Korea, a missile falling near South Korea, or a South Korean soldier stepping on an antipersonnel mine. Threats, plans, drills, old anniversaries and speculation are not critical. "high" for important developments in those categories or major policy changes affecting foreign workers. Otherwise "normal".
 - "title" and "summary" in natural Thai ("th", written in Thai script) and English ("en"). summary: 2-3 sentences with the key facts.
 - "body_th": a detailed Thai summary as an array of paragraphs. When "article" has enough text, write 4-6 paragraphs covering: what happened, where and when, who is involved, key numbers, causes and reactions, impact, and what happens next (only parts the article actually covers). When only a headline/snippet is available, write 1-2 short paragraphs.
 - "tips_th": 0-3 short practical points in Thai for Thai people living in Korea (e.g. what to watch out for, what to do), ONLY when the news clearly affects them (work, visas, health, prices, safety). Otherwise an empty array. Never invent advice that the facts do not support.
@@ -132,7 +134,7 @@ function chainOf({ apiKey, groqKey, githubToken, models = DEFAULT_MODELS, groqMo
 
 // ลองทีละรุ่นจนได้คำตอบ คืน { text, model, finish }
 async function runChain(system, user, maxTokens, opts) {
-  const { apiKey, groqKey, githubToken, fetchImpl = fetch, log = console, waitMs = 2000, timeoutMs = 60000, deadline = Infinity, cool = new Map(), exclude = new Set(), only = null, rotate = 0, quota = null, emergency = false, signal = null, tpm = null } = opts;
+  const { apiKey, groqKey, githubToken, fetchImpl = fetch, log = console, waitMs = 2000, timeoutMs = 60000, deadline = Infinity, cool = new Map(), exclude = new Set(), only = null, rotate = 0, quota = null, emergency = false, signal = null, tpm = null, modelErrors = new Map(), unavailable = new Map() } = opts;
   const need = Math.ceil((system.length + user.length) / 2.5) + Math.min(maxTokens, 2000); // token ที่คำขอนี้น่าจะใช้
   let chain = chainOf(opts);
   if (!chain.length) throw new Error("no AI key (GROQ_API_KEY / GEMINI_API_KEY)");
@@ -146,6 +148,7 @@ async function runChain(system, user, maxTokens, opts) {
     if (skip.has(entry.p)) continue;
     const ctag = `${entry.p}:${entry.m}`;
     if (exclude.has(ctag)) continue;
+    if (unavailable.has(ctag)) { last = unavailable.get(ctag); continue; }
     if ((cool.get(ctag) || 0) > Date.now()) { busy.push(`${ctag} cooling`); reservedOnly = false; continue; } // เพิ่งโดน 429 ข้ามไปก่อน
     if (quota && quota.isDisabled && quota.isDisabled(entry.p)) { skip.add(entry.p); last = last || `${entry.p} disabled: ${quota.disabled[entry.p].reason}`; continue; } // ช่องทางที่เสีย พักไว้
     if (quota && !quota.canUse(ctag, emergency)) { busy.push(`${ctag} reserved`); continue; } // เหลือแต่โควตาฉุกเฉิน
@@ -160,12 +163,15 @@ async function runChain(system, user, maxTokens, opts) {
       if (quota?.reserve && !settle) { busy.push(`${ctag} reserved`); break; }
       const r = await callOne(entry, system, user, maxTokens, { groq: groqKey, gemini: apiKey, github: githubToken }, fetchImpl, Math.min(timeoutMs, left - 2000), signal);
       const tag = `${entry.p}:${entry.m}`;
+      for (const key of [apiKey, groqKey, githubToken]) if (typeof key === 'string' && key.length >= 8) r.msg = r.msg.split(key).join('[redacted]');
+      if (!r.ok && r.status !== 499) modelErrors.set(tag, {status:r.status, message:String(r.msg || 'request failed').slice(0,500)});
       noteTpm(tpm, tag, r.h);
       // ตัวที่ถูกยกเลิกกลางคันก็ใช้โควตาไปแล้ว: ประมาณจากขนาดคำขอ (ภาษาเกาหลี/ไทย ~2.5 ตัวอักษรต่อ token)
       const uncertain = r.status === 499 || /timeout|network/.test(r.msg);
       if (settle) settle(r.tokens || (uncertain ? Math.ceil((system.length+user.length)/2.5) : 0));
       else if (quota) quota.record(tag,r.tokens || (uncertain ? need : 0));
       if (r.status === 499) throw new QuotaError("cancelled (another AI answered first)", 499);
+      if (r.status === 404 || (!r.ok && /decommission|does not exist|no longer available|no longer supported|retired/i.test(r.msg))) { log.warn(`${tag} unavailable, trying next`); last = r.msg; unavailable.set(tag, r.msg); break; }
       // รุ่นนี้ไม่รับพารามิเตอร์เสริม: ลองรุ่นเดิมอีกครั้งแบบพื้นฐาน
       if (r.status === 400 && r.extras && !/api key|api_key|invalid.*key/i.test(r.msg)) { plain.add(tag); log.warn(`${tag} rejected extra params, retrying plain`); continue; }
       if (RETRYABLE.has(r.status) || /overloaded|high demand|unavailable|capacity/i.test(r.msg)) {
@@ -177,7 +183,6 @@ async function runChain(system, user, maxTokens, opts) {
         if (waitMs && deadline - Date.now() > waitMs + 5000) await sleep(waitMs);
         break;
       }
-      if (r.status === 404 || (r.status === 400 && /not found|not supported|decommission|does not exist/i.test(r.msg))) { log.warn(`${tag} unavailable, trying next`); last = r.msg; break; }
       if (r.status === 401 || r.status === 403 || (r.status === 400 && /api key|api_key/i.test(r.msg))) {
         // คีย์ของเจ้านี้ใช้ไม่ได้: ข้ามไปเจ้าอื่น (ถ้าไม่มีเจ้าอื่นจะแจ้งเป็นข้อผิดพลาด)
         const hint = entry.p === "github" ? " (no permission: upload fetch-news.yml with 'models: read')" : " (check the API key in GitHub Secrets)";
@@ -212,33 +217,39 @@ async function translate(items, opts) {
   if (!items.length) return { results: [], model: null, partial: false };
   const input = items.map((n, i) => ({ i, headline: n.titleKo, snippet: n.snippet, article: n.article || "", source: n.source, guessedCategories: n.cats }));
   const exclude = new Set(opts.exclude || []);
+  const results = items.map(() => null);
   for (let round = 0; ; round++) {
-    const { text, model, finish } = await runChain(SYSTEM, JSON.stringify(input), 8192, { ...opts, exclude });
+    let completion;
+    try { completion = await runChain(SYSTEM, JSON.stringify(input), 8192, { ...opts, exclude }); }
+    catch (error) {
+      if (results.some(Boolean)) return { results, model: [...exclude].join(', '), partial: true };
+      throw error;
+    }
+    const { text, model, finish } = completion;
     let parsed;
     try { parsed = parseItems(text); }
-    catch (e) { if(round >= 2) throw e; exclude.add(model); log.warn(`${model}: invalid JSON, trying next model`); continue; }
+    catch (e) { if(round >= 2) { if (results.some(Boolean)) return {results, model, partial:true}; throw e; } exclude.add(model); log.warn(`${model}: invalid JSON, trying next model`); continue; }
     const { items: arr, partial } = parsed;
-    const results = items.map(() => null);
-    let bad = 0, judged = 0;
+    let bad = 0;
     for (const o of arr) {
       const i = Number(o?.i);
       if (!Number.isInteger(i) || i < 0 || i >= items.length) continue;
       if (results[i] !== null) continue;
       const cats = (Array.isArray(o.categories) ? o.categories : []).filter(c => CAT_KEYS.includes(c));
       const title = pair(o.title), summary = pair(o.summary);
-      // AI ตอบว่างทั้งหัวข้อและหมวด = ไม่เกี่ยวข้อง (ไม่ต้องลองแปลซ้ำ)
-      const relevant = o.relevant !== false && !(!title.th && !cats.length);
-      judged++;
-      if (relevant && !completeThai({title, summary, body:{th:paras(o.body_th ?? o.body?.th)}})) { bad++; continue; }
+      // Only an explicit editorial rejection can drop an item. Empty structured
+      // responses are translation failures, not evidence that a topic is irrelevant.
+      const relevant = o.relevant !== false;
+      if (relevant && (!cats.length || !completeThai({title, summary, body:{th:paras(o.body_th ?? o.body?.th)}}))) { bad++; continue; }
       results[i] = {
         relevant: relevant && cats.length > 0 && !!title.th,
-        categories: cats, level: ["critical", "high"].includes(o.level) ? o.level : "normal",
+        categories: relevant ? publicationCategories(items[i], cats) : cats, level: ["critical", "high"].includes(o.level) ? o.level : "normal",
         title: {th:title.th.slice(0,300),en:title.en.slice(0,300)}, summary: {th:summary.th.slice(0,1800),en:summary.en.slice(0,1800)}, body: { th: paras(o.body_th ?? o.body?.th).slice(0,8).map(p=>p.slice(0,2200)) }, tips: { th: paras(o.tips_th).slice(0, 3).map(p=>p.slice(0,500)) }
       };
     }
-    // ข่าวเกินครึ่งช่องภาษาไทยไม่ใช่ภาษาไทย: ลองชุดเดิมกับรุ่นถัดไปทันที (ไม่ต้องรอรอบหน้า)
-    if (bad && bad * 2 > judged && round < 2) {
-      log.warn(`${model}: ${bad}/${judged} items not in Thai, retrying with next model now`);
+    // Preserve completed entries while trying another model for missing/invalid entries.
+    if (results.some(result => result === null) && round < 2) {
+      log.warn(`${model}: ${results.filter(result => result === null).length}/${items.length} missing or incomplete translations, retrying with next model now`);
       exclude.add(model);
       continue;
     }
@@ -268,7 +279,7 @@ async function translateTitles(items, opts) {
 // (เดิมส่งทุกตัว 9 ช่องทาง เปลืองโควตาเกินไป จนโควตาหมดและแปลไม่ได้ทั้งวัน)
 const RACE_PREF = ["groq:openai/gpt-oss-20b", "github:openai/gpt-4o-mini", "gemini:gemini-flash-lite-latest"];
 function raceLanes(opts, max) {
-  const all = chainOf(opts).map(e => `${e.p}:${e.m}`).filter(t => !opts.quota || (opts.quota.canUse(t, opts.emergency) && !(opts.quota.isDisabled && opts.quota.isDisabled(t.split(":")[0]))));
+  const all = chainOf(opts).map(e => `${e.p}:${e.m}`).filter(t => !opts.unavailable?.has(t) && (!opts.quota || (opts.quota.canUse(t, opts.emergency) && !(opts.quota.isDisabled && opts.quota.isDisabled(t.split(":")[0])))));
   const cooled = t => (opts.cool && (opts.cool.get(t) || 0) > Date.now()) || (opts.tpm && opts.tpm.get(t) && opts.tpm.get(t).until > Date.now() && opts.tpm.get(t).rem < 3000);
   const picked = [];
   // ตัวที่เร็วที่สุดก่อน แล้วเติมด้วยตัวอื่นจากผู้ให้บริการที่ยังไม่มีในรายการ

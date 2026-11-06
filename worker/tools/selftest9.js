@@ -14,7 +14,7 @@ function fakeDb() {
   return { data, writes, doc: ref, collection: col => ({ where() { return this }, limit() { return this }, async get() { const docs = [...data.keys()].filter(k => k.startsWith(col + "/")).map(k => ({ id: k.split("/").pop(), ref: ref(k), data: () => data.get(k) })); return { empty: !docs.length, docs } } }) };
 }
 const now = Date.now();
-const rss = items => `<rss><channel>${items.map(i => `<item><title>${i.t}${i.s ? " - " + i.s : ""}</title><link>${i.l}</link><pubDate>${new Date(now - i.h * 3600e3).toUTCString()}</pubDate><description>${i.d || ""}</description>${i.s ? `<source url="x">${i.s}</source>` : ""}</item>`).join("")}</channel></rss>`;
+const rss = items => `<rss><channel>${items.map(i => `<item><title>${i.t}${i.s ? " - " + i.s : ""}</title><link>${i.l}</link><pubDate>${new Date(now - i.h * 3600e3).toUTCString()}</pubDate><description>${i.d || ""}</description>${i.s ? `<source url="https://www.yna.co.kr">${i.s}</source>` : ""}</item>`).join("")}</channel></rss>`;
 const okItem = (x, by) => ({ i: x.i, relevant: true, categories: x.guessedCategories || ["korea"], level: x.guessedCategories && x.guessedCategories.includes("korwar") ? "critical" : "normal", title: { th: thaiTitle(x.headline), en: "n" }, summary: { th: "สรุป", en: "s" }, body_th: ["ก", "ข", "ค", "ง"], tips_th: [] });
 
 (async () => {
@@ -65,16 +65,16 @@ const okItem = (x, by) => ({ i: x.i, relevant: true, categories: x.guessedCatego
   const db = fakeDb();
   db.data.set("meta/feed", { v: 8, items: [
     { id: "exist1", titleKo: "최저임금 내년 1만1천원으로 결정", title: { th: "ค่าแรงขั้นต่ำปีหน้า 11,000 วอน", en: "x" }, summary: { th: "ส", en: "s" }, body: { th: ["ก".repeat(500)] }, rich: true, image: "https://i/1.jpg",
-      categories: ["wage"], level: "normal", translated: true, publishedAt: new Date(now - 2 * 3600e3).toISOString(), source: "연합뉴스", sourceUrl: "https://yna/1", links: [{ label: "연합뉴스", url: "https://yna/1" }] },
+      categories: ["wage"], level: "normal", translated: true, publishedAt: new Date(now - 2 * 3600e3).toISOString(), source: "연합뉴스", sourceUrl: "https://www.yna.co.kr/1", links: [{ label: "연합뉴스", url: "https://www.yna.co.kr/1" }] },
     { id: "kw-old", titleKo: "북한, 동해상으로 탄도미사일 발사", title: { th: "เกาหลีเหนือยิงขีปนาวุธ (เมื่อวาน)", en: "x" }, summary: { th: "ส", en: "s" }, body: { th: ["ก".repeat(500)] }, rich: true, image: "https://i/2.jpg",
-      categories: ["korwar"], level: "critical", translated: true, publishedAt: new Date(now - 20 * 3600e3).toISOString(), source: "KBS", sourceUrl: "https://kbs/1", links: [{ label: "KBS", url: "https://kbs/1" }] }
+      categories: ["korwar"], level: "critical", translated: true, publishedAt: new Date(now - 20 * 3600e3).toISOString(), source: "KBS", sourceUrl: "https://news.kbs.co.kr/1", links: [{ label: "KBS", url: "https://news.kbs.co.kr/1" }] }
   ] });
   db.data.set("subscribers/a", { token: "tokA", subscriptionVersion: 2, enabled: true, level: "critical", cats: ["korwar"], testRequested: false });
   let pollCount = 0;
-  const feedFor = { gn_labor: () => rss([{ t: "최저임금 1만1천원 확정", s: "SBS", l: "https://sbs/2", h: 1 }]),                // ข่าวซ้ำกับ exist1
-                    gn_korwar: () => rss([{ t: "북한, 동해상으로 탄도미사일 발사", l: "https://sbs/kw-today", h: 0.2 }]), // ซ้ำหัวข้อกับเมื่อวาน แต่ห่าง 20 ชม. → ข่าวใหม่
-                    gn_oil_fx: () => rss([{ t: "국제유가 급등 휘발유 2천원 돌파", l: "https://khan/oil", h: 0.5 }]),
-                    yna: () => pollCount++ >= 1 ? rss([{ t: "합참 \"북한, 서해 군사분계선 인근 포격\"", l: "https://yna/kw-late", h: 0 }]) : rss([]) };
+  const feedFor = { gn_labor: () => rss([{ t: "최저임금 1만1천원 확정", s: "SBS", l: "https://news.sbs.co.kr/2", h: 1 }]),                // ข่าวซ้ำกับ exist1
+                    gn_korwar: () => rss([{ t: "북한, 동해상으로 탄도미사일 발사", l: "https://news.sbs.co.kr/kw-today", h: 0.2 }]), // ซ้ำหัวข้อกับเมื่อวาน แต่ห่าง 20 ชม. → ข่าวใหม่
+                    gn_oil_fx: () => rss([{ t: "국제유가 급등 휘발유 2천원 돌파", l: "https://www.khan.co.kr/oil", h: 0.5 }]),
+                    yna: () => pollCount++ >= 1 ? rss([{ t: "합참 \"북한, 서해 군사분계선 인근 한국 연평도 포격\"", l: "https://www.yna.co.kr/kw-late", h: 0 }]) : rss([]) };
   const pushes = [], feedWritesBeforeEnd = [];
   const fetchImpl = async (url, opt) => {
     if (url.includes("api.groq.com") || url.includes("models.github.ai") || url.includes("generativelanguage")) {
@@ -124,7 +124,7 @@ const okItem = (x, by) => ({ i: x.i, relevant: true, categories: x.guessedCatego
   const full = { tokens: 175000, requests: 10 };
   db2.data.set("meta/quota", { day: kstDay(now), used: { "groq:openai/gpt-oss-120b": full, "groq:openai/gpt-oss-20b": full, "groq:qwen/qwen3-32b": { tokens: 445000, requests: 10 } }, exhausted: {}, emergencyUsed: 0 });
   db2.data.set("meta/feed", { v: 8, items: [] });
-  const feed2 = { gn_korwar: () => rss([{ t: "북한 장사정포 포격 도발", l: "https://a/kw", h: 0.1 }]), gn_oil_fx: () => rss([{ t: "휘발유 가격 하락세 지속", l: "https://a/oil", h: 0.1 }]) };
+  const feed2 = { gn_korwar: () => rss([{ t: "북한 장사정포 한국 연평도 포격", l: "https://www.yna.co.kr/kw", h: 0.1 }]), gn_oil_fx: () => rss([{ t: "휘발유 가격 하락세 지속", l: "https://www.yna.co.kr/oil", h: 0.1 }]) };
   const f2 = async (url, opt) => { const f = FEEDS.find(x => x.url === url); if (f) return { ok: true, text: async () => (feed2[f.id] ? feed2[f.id]() : "<rss><channel></channel></rss>") }; return fetchImpl(url, opt) };
   const st2 = await runOnce({ db: db2, messaging, appUrl: "https://x", groqKey: "g", fetchImpl: f2, now, log, waitMs: 0, budgetMs: 31000, imgBudgetMs: 2000, watchEveryMs: 60000 });
   const fd2 = allItems(db2.data);

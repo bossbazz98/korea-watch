@@ -1,9 +1,10 @@
 const crypto = require("crypto");
 const { XMLParser } = require("fast-xml-parser");
-const { CATS, FEEDS, CAT_KEYS, EMERGENCY_KW } = require("../feeds");
+const { CATS, FEEDS, CAT_KEYS } = require("../feeds");
 const { grams, similarity, SAME_KO } = require("./similar");
 
 const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@", textNodeName: "#text", processEntities: true, htmlEntities: true });
+const policy = require("../../public/news-policy");
 const MAX_AGE_MS = 36 * 3600e3;
 
 const text = v => (v == null ? "" : typeof v === "object" ? String(v["#text"] ?? "") : String(v));
@@ -58,6 +59,8 @@ function parseFeed(xml, feed, now) {
     let link = text(it.link) || it.link?.["@href"] || "";
     link = String(link).trim();
     if (!/^https?:\/\//.test(link)) continue;
+    const publisherUrl = text(it.source?.["@url"]) || link;
+    if (!policy.isKoreanPublisher(publisherUrl)) continue;
     const rawDesc = text(it.description || it.summary);
     let snippet = stripTags(rawDesc);
     if (norm(snippet).startsWith(norm(title).slice(0, 20))) snippet = ""; // Google News ซ้ำหัวข้อ
@@ -69,7 +72,8 @@ function parseFeed(xml, feed, now) {
     if (feed.hint && !cats.includes(feed.hint)) cats.push(feed.hint);
     if (!cats.length) continue;
     out.push({
-      emergency: cats.includes("korwar") || EMERGENCY_KW.some(w => title.includes(w)),
+      publisherUrl,
+      emergency: !!policy.incident({ titleKo: title, publisherUrl }),
       id: newsId(title, link, new Date(publishedAt).toISOString()), titleKo: title, snippet: snippet.slice(0, 600), link, image: rssImage(it, rawDesc),
       source: sourceName || feed.source || "",
       publishedAt: new Date(publishedAt).toISOString(), cats
