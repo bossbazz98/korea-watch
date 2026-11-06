@@ -86,7 +86,7 @@ test('retry respects quiet hours without dropping the pending recipient',async()
 test('emergency budget counts distinct stories, not title/body calls, and reserves before awaiting',()=>{
  const q=new Quota();const a=q.claimEmergency(['a','b']);assert.equal(a.count,2);assert.equal(q.claimEmergency(['c','d']),null);assert.equal(q.claimEmergency(['a']).count,0);a.rollback();assert.equal(q.emergencyLeft(),3);assert.equal(q.claimEmergency(['c','d','e']).count,3);assert.equal(q.claimEmergency(['f']),null);
 });
-function translatedNewsFetch() {
+function translatedNewsFetch(transform = value => value) {
  return async (url,options={})=>{
   if(String(url).includes('api.groq.com')) {
    const payload=JSON.parse(options.body),input=JSON.parse(payload.messages[1].content),titles=payload.messages[0].content.startsWith('Translate Korean');
@@ -94,7 +94,7 @@ function translatedNewsFetch() {
     const hash=require('crypto').createHash('sha256').update(x.headline).digest('hex').slice(0,24);
     return titles?{i:x.i,th:'หัวข้อไทย '+hash,en:'Headline '+hash}:{i:x.i,relevant:true,categories:x.guessedCategories,level:'normal',title:{th:'ข่าวแปล '+hash,en:'News '+hash},summary:{th:'สรุปเนื้อข่าวภาษาไทย',en:'Translated summary'},body_th:['เนื้อข่าวภาษาไทย '.repeat(40)]};
    });
-   return {ok:true,status:200,json:async()=>({usage:{total_tokens:500},choices:[{message:{content:JSON.stringify({items:results})}}]})};
+   return {ok:true,status:200,json:async()=>({usage:{total_tokens:500},choices:[{message:{content:JSON.stringify({items:titles?results:results.map(transform)})}}]})};
   }
   if(String(url).includes('rss')||String(url).includes('feed')) return {ok:true,text:async()=>'<rss><channel/></rss>'};
   return {ok:true,status:200,headers:{get:()=> 'text/html'},arrayBuffer:async()=>Buffer.from('<article><p>'+'국제 뉴스 기사 내용과 사실을 확인합니다. '.repeat(60)+'</p></article>')};
@@ -107,9 +107,25 @@ test('a large Korean backlog cannot consume all translation slots; other categor
  const options={db,messaging:{},appUrl:'https://example.test',groqKey:'fixture',fetchImpl:translatedNewsFetch(),log,waitMs:0,budgetMs:60000,imgBudgetMs:2000,watchEveryMs:120000};
  const first=await runOnce({...options,now});
  assert.equal(first.korwar,6);
+ assert.equal(first.translationByCategory.korwar.attempted,6);
+ assert.equal(first.translationByCategory.korwar.completed,6);
  assert(categories.filter(category=>first.publishedByCategory[category]>0).length>=9);
  const second=await runOnce({...options,now:now+300000});
  for(const category of categories) assert(second.publishedByCategory[category]>0,category);
+});
+test('diagnostics distinguish AI category reassignment from retry cooldown',async()=>{
+ const db=dbFake(),now=Date.now();
+ const food={...story('food',false),sourceUrl:'https://example.test/food',source:'Fixture',categories:['food']};
+ const foreign={...story('foreign',false),categories:['foreign'],attempts:4,lastTry:now};
+ db.data.set('meta/feed',{v:8,items:[food,foreign]});
+ const stat=await runOnce({db,messaging:{},appUrl:'https://example.test',groqKey:'fixture',fetchImpl:translatedNewsFetch(r=>({...r,categories:['korea']})),log,now,budgetMs:60000,imgBudgetMs:2000,waitMs:0});
+ assert.equal(stat.translationByCategory.food.attempted,1);
+ assert.equal(stat.translationByCategory.food.completed,1);
+ assert.deepEqual(stat.translationByCategory.food.movedTo,{korea:1});
+ assert.equal(stat.publishedByCategory.food,0);
+ assert.equal(stat.translationByCategory.foreign.attempted,0);
+ assert.equal(stat.retryDelayedByCategory.foreign,1);
+ assert.deepEqual(db.data.get('meta/status').translationByCategory,stat.translationByCategory);
 });
 test('legacy Thai headline with Korean body is requeued and repaired without a duplicate alert',async()=>{
  const db=dbFake(),now=Date.now();
