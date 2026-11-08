@@ -8,7 +8,7 @@
   "scripts": {
     "start": "node --require ./tools/load-env.cjs run.js",
     "dry-run": "node tools/dry-run.js",
-    "test": "node tools/selftest.js && node tools/selftest2.js && node tools/selftest3.js && node tools/selftest4.js && node tools/selftest5.js && node tools/selftest6.js && node tools/selftest7.js && node tools/selftest8.js && node tools/selftest9.js && node tools/selftest10.js && node tools/selftest11.js && node tools/selftest12.js && node tools/regression.test.js && node tools/audio.test.mjs && node tools/settings-ui.cjs && node tools/subscriptions.test.mjs && node tools/scheduler.test.cjs && node --test tools/news-policy.test.cjs tools/translation-publication.test.cjs tools/categories.test.cjs && node tools/navigation-ui.cjs",
+    "test": "node tools/selftest.js && node tools/selftest2.js && node tools/selftest3.js && node tools/selftest4.js && node tools/selftest5.js && node tools/selftest6.js && node tools/selftest7.js && node tools/selftest8.js && node tools/selftest9.js && node tools/selftest10.js && node tools/selftest11.js && node tools/selftest12.js && node tools/regression.test.js && node tools/audio.test.mjs && node tools/settings-ui.cjs && node tools/subscriptions.test.mjs && node tools/scheduler.test.cjs && node --test tools/news-policy.test.cjs tools/translation-publication.test.cjs tools/categories.test.cjs tools/feed-data.test.cjs && node tools/navigation-ui.cjs",
     "agent": "node --require ./tools/load-env.cjs agent.js",
     "build:web": "node tools/build-web.cjs",
     "serve": "node ../scripts/serve.cjs",

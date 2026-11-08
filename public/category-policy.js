@@ -3,6 +3,8 @@
   const labels = typeof module !== 'undefined' ? require('./categories') : globalThis.KW_CATEGORIES;
   const news = typeof module !== 'undefined' ? require('./news-policy') : globalThis.KW_NEWS_POLICY;
   const keys = Object.keys(labels);
+  const array = value => Array.isArray(value) ? value : [];
+  const links = value => array(value).filter(item => item && typeof item === 'object');
   const patterns = {
     war: /전쟁|공습|교전|휴전|폭격|포격|침공|무력\s*충돌|군사\s*충돌|전투(?!\s*준비)|내전|무장\s*분쟁|warfare|airstrike|ceasefire|invasion/i,
     disease: /감염병|전염병|바이러스|확진|독감|인플루엔자|코로나|백신|엠폭스|결핵|홍역|팬데믹|전염|infectious|virus|vaccine|outbreak/i,
@@ -23,12 +25,12 @@
   }
   function publisherKeys(input) {
     return [...new Set([input.publisherUrl || input.sourceUrl || input.link,
-      ...(input.publishers || []), ...(input.links || []).map(l => l.publisherUrl || l.url),
-      ...(input.alts || []).map(l => l.publisherUrl || l.link)].map(news.publisherKey).filter(Boolean))];
+      ...array(input.publishers), ...links(input.links).map(l => l.publisherUrl || l.url),
+      ...links(input.alts).map(l => l.publisherUrl || l.link)].map(news.publisherKey).filter(Boolean))];
   }
   function classify(input, proposed = []) {
     const text = `${input.titleKo || ''} ${input.snippet || input.snippetKo || ''} ${input.article || ''} ${input.categoryEvidence || ''}`.replace(/北京/g, '베이징');
-    const result = new Set(proposed.filter(key => keys.includes(key)));
+    const result = new Set(array(proposed).filter(key => keys.includes(key)));
     const sourceKnown = !!(input.publisherUrl || input.sourceUrl || input.link);
     const local = (!sourceKnown || news.trusted(input)) && (korea.test(text) || !abroad.test(text));
     for (const [key, re] of Object.entries(patterns)) if (re.test(text)) result.add(key);

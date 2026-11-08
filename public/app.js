@@ -1,4 +1,5 @@
-import { attachPullRefresh } from "./pull-refresh.js";
+import { normalizeFeed, timestamp } from "./feed-data.js?v=20261109-feed2";
+import { attachPullRefresh } from "./pull-refresh.js?v=20261109-feed2";
 import { AlertAudio, SOUND_PRESETS } from "./audio.js";
 import { writeSubscription } from "./subscriptions.js";
 // Korea Watch: หน้าแอป (อ่านข่าวจาก Firestore, ตั้งค่าแจ้งเตือน, ติดตั้งแอป)
@@ -125,7 +126,7 @@ const L = value => globalThis.KW_NEWS_TEXT.pick(value, lang) || t("translationPe
 const t = k => T[lang][k];
 function ago(ms) { const s = (Date.now() - ms) / 1000; if (s < 90) return t("now"); if (s < 3600) return Math.round(s / 60) + " " + t("m"); if (s < 86400) return Math.round(s / 3600) + " " + t("h"); return Math.round(s / 86400) + " " + t("d") }
 function kst(ms) { try { return new Intl.DateTimeFormat(lang === "th" ? "th-TH" : "en-GB", { timeZone: "Asia/Seoul", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(ms)) + " " + t("kst") } catch (e) { return new Date(ms).toLocaleString() } }
-function ts(n) { return Date.parse(n.publishedAt) || 0 }
+function ts(n) { return timestamp(n.publishedAt) }
 function isNew(n) { const a = Date.parse(n.addedAt || n.publishedAt) || 0; return (lastVisit > 0 && a > lastVisit) || Date.now() - ts(n) < DAY }
 function esc(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])) }
 function safeUrl(u) { try { const x = new URL(u); return /^https?:$/.test(x.protocol) ? x.href : "" } catch (e) { return "" } }
@@ -453,24 +454,32 @@ async function refreshToken() {
 }
 $("settings").onclick = () => openSettings();
 
-let refreshingNews = false, refreshMessage = 'refreshHint', lastAutoRefresh = 0;
+let refreshingNews = false, refreshMessage = 'refreshHint';
 function renderRefreshState() {
-  if (!$('refresh-news')) return;
-  $('refresh-news').disabled = refreshingNews;
-  $('refresh-news').setAttribute('aria-busy', String(refreshingNews));
-  $('refresh-news').closest('section').setAttribute('aria-label', t('refresh'));
-  $('refresh-label').textContent = t(refreshingNews ? 'refreshing' : 'refresh');
-  $('refresh-status').textContent = t(refreshingNews ? 'refreshing' : refreshMessage);
+  const indicator = $('refresh-status');
+  indicator.hidden = !refreshingNews && refreshMessage !== 'refreshFailed';
+  indicator.textContent = t(refreshingNews ? 'refreshing' : refreshMessage);
 }
 function applyFeedSnapshot(snapshot) {
   const list = snapshot.exists() ? snapshot.data().items : [];
-  items = Array.isArray(list) ? list.filter(item => item?.id).map(item => globalThis.KW_NEWS_POLICY.apply({ ...item, categories:globalThis.KW_CATEGORY_POLICY.classify(item,item.categories || []), translated: item.translated === true && globalThis.KW_NEWS_TEXT.completeThai(item) })) : [];
+  const normalized = normalizeFeed(list);
+  if (normalized.errors.length) console.warn('Feed records could not be displayed', normalized.errors);
+  items = normalized.items;
+  if (items.length) refreshMessage = 'refreshed';
   loaded = true; render(); openDeepLink();
   if (!snapshot.metadata?.fromCache) checkAlerts();
 }
-async function refreshNews(reason = 'manual') {
-  if (refreshingNews || (reason === 'scroll' && Date.now() - lastAutoRefresh < 30000)) return;
-  lastAutoRefresh = Date.now();
+let recoveredStatus = null;
+function recoverEmptyFeed() {
+  const key = status?.lastSuccessfulPublishAt || status?.lastRun;
+  const published = Object.values(status?.publishedByCategory || {}).some(count => count > 0);
+  if (!key || key === recoveredStatus || visible().length || !published || refreshingNews) return;
+  recoveredStatus = key;
+  refreshNews();
+}
+
+async function refreshNews() {
+  if (refreshingNews) return;
   refreshingNews = true; renderRefreshState();
   try {
     if (!fb || navigator.onLine === false) throw new Error('News connection unavailable');
@@ -478,28 +487,19 @@ async function refreshNews(reason = 'manual') {
       fb.fs.getDocFromServer(fb.fs.doc(fb.db, 'meta/feed')),
       fb.fs.getDocFromServer(fb.fs.doc(fb.db, 'meta/status'))
     ]);
-    if (feedResult.status === 'rejected') throw feedResult.reason;
     if (statusResult.status === 'fulfilled') status = statusResult.value.exists() ? statusResult.value.data() : null;
-    applyFeedSnapshot(feedResult.value); refreshMessage = 'refreshed';
+    if (feedResult.status === 'rejected') throw feedResult.reason;
+    const snapshot = feedResult.value;
+    applyFeedSnapshot(snapshot); refreshMessage = 'refreshed';
   } catch (error) { console.warn('refresh news', error.code || error.message); refreshMessage = 'refreshFailed'; }
   finally { refreshingNews = false; renderRefreshState(); }
 }
-let previousScrollY = scrollY, bottomRefreshArmed = true;
-addEventListener('scroll', () => {
-  const current = scrollY, distance = document.documentElement.scrollHeight - innerHeight - current;
-  if (distance > 160) bottomRefreshArmed = true;
-  if (current > previousScrollY && distance <= 60 && bottomRefreshArmed && $('sheet').hidden && !document.hidden) {
-    bottomRefreshArmed = false; refreshNews('scroll');
-  }
-  previousScrollY = current;
-}, { passive: true });
-$('refresh-news').onclick = () => refreshNews();
 $('home-top').onclick = () => window.scrollTo({top:0, left:0, behavior:'instant'});
 attachPullRefresh({
-  element:$('pull-refresh'),
+  element:$('pull-refresh'), source:$('home-top'),
   canStart:() => scrollY <= 0 && $('sheet').hidden && $('alert').hidden && !document.hidden,
   isBusy:() => refreshingNews,
-  refresh:() => refreshNews('pull')
+  refresh:refreshNews
 });
 
 /* data */
@@ -517,9 +517,10 @@ async function boot() {
     // Live listeners incur reads when feed/status documents change.
     fs.onSnapshot(fs.doc(db, "meta/feed"), snap => {
       if (!snap.metadata.fromCache) clearTimeout(timer);
-      applyFeedSnapshot(snap);
+      try { applyFeedSnapshot(snap); recoverEmptyFeed(); }
+      catch (error) { console.error(error); refreshMessage = 'refreshFailed'; renderRefreshState(); recoverEmptyFeed(); }
     }, err => { console.error(err); clearTimeout(timer); loaded = true; toast(t("slow")); render() });
-    fs.onSnapshot(fs.doc(db, "meta/status"), s => { status = s.exists() ? s.data() : null; render() }, () => { });
+    fs.onSnapshot(fs.doc(db, "meta/status"), s => { status = s.exists() ? s.data() : null; render(); recoverEmptyFeed() }, () => { });
     refreshToken();
   } catch (e) { console.error(e); clearTimeout(timer); loaded = true; toast(t("slow")); render() }
 }

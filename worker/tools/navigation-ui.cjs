@@ -29,6 +29,7 @@ async function touch(page,type,x,y,count=1){await page.evaluate(({type,x,y,count
   await page.goto('http://127.0.0.1:8808');await page.waitForSelector('.card');
   assert.deepEqual(await page.locator('#tiles [data-cat]').evaluateAll(nodes=>nodes.map(n=>n.dataset.cat)),['all',...Object.keys(labels)]);
   assert.equal(await page.locator('#grid .card').count(),stories.length,'All includes every published story, including legacy');
+  assert.equal(await page.locator('#refresh-news').count(),0,'bottom update control removed');
   for(const key of Object.keys(labels)){
    await page.locator('#tiles [data-cat="'+key+'"]').evaluate(el=>el.click());
    assert(await page.locator('#grid .card').count()>0,key+' is selectable');
@@ -57,13 +58,22 @@ async function touch(page,type,x,y,count=1){await page.evaluate(({type,x,y,count
   await touch(page,'touchstart',170,180);await touch(page,'touchmove',170,250);
   await page.screenshot({path:path.join(out,`pull-${viewport.width}-partial.png`)});
   await touch(page,'touchmove',170,340);
-  await page.waitForFunction(()=>window.__reads===2);
+  assert.equal(await page.evaluate(()=>window.__reads||0),0,'full fill waits for release');
   assert.equal(await page.locator('#pull-refresh').getAttribute('aria-valuenow'),'100');
+  const position=await page.locator('.pull-brand').boundingBox();
+  assert(Math.abs(position.x+position.width/2-viewport.width/2)<2);
+  assert(Math.abs(position.y+position.height/2-viewport.height/2)<2);
+  assert(await page.locator('.pull-brand img').evaluate(el=>el.getBoundingClientRect().width>document.querySelector('#home-top .logo').getBoundingClientRect().width));
+  await page.waitForTimeout(150);
+  assert(await page.locator('#pull-refresh').isVisible(),'full brand does not disappear while held');
+  await touch(page,'touchmove',170,245);
+  assert.equal(await page.locator('#pull-refresh').getAttribute('aria-valuenow'),'100','full fill is latched while held');
   assert(await page.locator('#pull-refresh').isVisible(),'full logo stays visible while fetching');
   await page.screenshot({path:path.join(out,`pull-${viewport.width}-full.png`)});
   await touch(page,'touchmove',170,480);await touch(page,'touchend',170,480);
+  await page.waitForFunction(()=>window.__reads===2);
   await touch(page,'touchstart',170,180);await touch(page,'touchmove',170,400);await touch(page,'touchend',170,400);
-  assert.equal(await page.evaluate(()=>window.__reads),2,'only one refresh while busy, triggered before releasing');
+  assert.equal(await page.evaluate(()=>window.__reads),2,'only one refresh while busy, triggered on release');
   await page.evaluate(()=>{window.__hold=false;window.__release();});await page.waitForFunction(()=>document.getElementById('pull-refresh').hidden);
   assert.match(await page.locator('#refresh-status').textContent(),/อัปเดตข่าวล่าสุดแล้ว/);
   await page.evaluate(()=>window.__fail=true);await touch(page,'touchstart',170,180);await touch(page,'touchmove',170,400);await touch(page,'touchend',170,400);
@@ -79,13 +89,48 @@ async function touch(page,type,x,y,count=1){await page.evaluate(({type,x,y,count
   await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:170,y:245}]});
   assert.equal(await page.evaluate(()=>window.__reads),4);
   await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:170,y:365}]});
-  await page.waitForFunction(()=>window.__reads===6);
+  assert.equal(await page.evaluate(()=>window.__reads),4,'native input also waits for release');
   await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+  await page.waitForFunction(()=>window.__reads===6);
   await page.evaluate(()=>{window.__hold=false;window.__release();});
   await page.waitForFunction(()=>document.getElementById('pull-refresh').hidden);
   assert(await page.locator('#sheet').isHidden(),'native pull does not click/open a story');
+  await touch(page,'touchstart',170,180);await touch(page,'touchmove',170,400);await touch(page,'touchcancel',170,400);
+  assert.equal(await page.evaluate(()=>window.__reads),6,'cancelled full pulls do not refresh');
+  assert(await page.locator('#pull-refresh').isHidden());
+  assert.equal(await page.locator('#home-top').evaluate(el=>el.classList.contains('brand-pulled')),false);
   assert.deepEqual(errors,[]);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
   console.log(`Navigation UI ${viewport.width}: catalogue, All, legacy prefs, brand, partial/full/cancelled/busy/failed pulls passed`);
   await context.close();
- }}finally{await browser.close();server.close();}
+ }
+ // Regression: the real backend has 184 translated items while the client showed zero.
+ const recoveredStories=Array.from({length:184},(_,i)=>({...stories[3],id:'published'+i,title:{th:'ข่าวที่เผยแพร่ '+i},links:i%2?[null]:{legacy:true}}));
+ for(const mode of ['stale-empty','malformed-records']) {
+  const context=await browser.newContext({viewport:{width:390,height:844},serviceWorkers:'block'});
+  await context.addInitScript(()=>{globalThis.KW_NEWS_POLICY={VERSION:'old',isKoreanPublisher:()=>true};});
+  const requests=[];
+  await context.route('**/news-policy.js*',async route=>{
+   requests.push(route.request().url());
+   if(new URL(route.request().url()).search)await route.fulfill({contentType:'text/javascript',body:fs.readFileSync(path.join(root,'news-policy.js'),'utf8')});
+   else await route.fulfill({contentType:'text/javascript',body:'globalThis.KW_NEWS_POLICY={VERSION:"old",isKoreanPublisher:()=>true};'});
+  });
+  const snapshotData=JSON.stringify(recoveredStories);
+  const recoverySdk=`const items=${snapshotData};
+   export const persistentLocalCache=()=>({}),initializeFirestore=()=>({}),getFirestore=()=>({}),doc=(d,...p)=>p.join('/');
+   const snapshot=(ref,empty=false)=>({exists:()=>true,data:()=>ref==='meta/feed'?{items:empty?[]:items}:{lastRun:'fixture-run',lastSuccessfulPublishAt:'fixture-publish',publishedByCategory:{tech:184},hidden:44},metadata:{fromCache:empty}});
+   export function onSnapshot(ref,ok){setTimeout(()=>ok(snapshot(ref,ref==='meta/feed'&&${mode==='stale-empty'})),0);return()=>{}}
+   export async function getDocFromServer(ref){window.__recoveryReads=(window.__recoveryReads||0)+1;return snapshot(ref);}`;
+  await context.route('**/vendor/firebase/**',route=>route.fulfill({contentType:'text/javascript',body:route.request().url().endsWith('firebase-firestore.js')?recoverySdk:sdk[route.request().url().split('/').pop()]||''}));
+  await context.route('https://fonts.googleapis.com/**',route=>route.fulfill({contentType:'text/css',body:''}));
+  const page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
+  await page.goto('http://127.0.0.1:8808');await page.waitForFunction(()=>document.querySelectorAll('#grid .card').length===184);
+  assert.equal(await page.locator('#tiles [data-cat="all"] .n').textContent(),'184');
+  assert.equal(await page.evaluate(()=>typeof globalThis.KW_NEWS_POLICY.publisherKey),'function');
+  assert(requests.length>0&&requests.every(url=>url.includes('?v=')),'ignore stale unversioned policy files');
+  assert.deepEqual(errors,[]);
+  if(mode==='stale-empty')assert.equal(await page.evaluate(()=>window.__recoveryReads),2,'one forced server read restores the cached empty feed');
+  console.log(`Feed UI ${mode}: all 184 stories displayed, version contract restored, zero uncaught errors`);
+  await context.close();
+ }
+ }finally{await browser.close();server.close();}
 })().catch(e=>{console.error(e);server.close();process.exitCode=1;});
