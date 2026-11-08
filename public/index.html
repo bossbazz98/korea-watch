@@ -203,17 +203,22 @@ fieldset{border:0;margin:0;padding:0;display:grid;gap:8px;min-width:0}
 fieldset:disabled{opacity:.45}
 legend{font-family:var(--f-head);font-weight:600;font-size:14px;color:var(--fg-3);padding:0;margin-bottom:8px}
 .btn:disabled{opacity:.5;cursor:default}
-/* Move the original brand from the header to the centre as the wordmark fills. */
+/* Pull-to-refresh opens space below the sticky header without covering the feed. */
 .refresh-status{margin:0;padding:10px 16px;text-align:center;font-size:14px;color:var(--fg-2);background:var(--surface-2)}
-.brand-pulled .logo,.brand-pulled h1{visibility:hidden}
-.pull-refresh{position:fixed;inset:0;z-index:45;pointer-events:none}
-.pull-brand{position:absolute;left:0;top:0;display:flex;align-items:center;gap:var(--pull-gap,10px);padding:10px 14px;border-radius:18px;background:var(--surface);box-shadow:0 6px 28px rgba(0,0,0,.16);transform:translate(calc(var(--pull-x) - 50%),calc(var(--pull-y) - 50%)) scale(var(--pull-scale,1));transform-origin:center;will-change:transform;white-space:nowrap;filter:drop-shadow(0 4px 12px var(--bg))}
-.pull-brand img{width:var(--pull-icon,38px);height:var(--pull-icon,38px);border-radius:10px;flex:none}
-.pull-wordmark{position:relative;font-family:var(--f-head);font-size:var(--pull-font,21px);font-weight:700;line-height:1.3;color:var(--fg-3)}
-.pull-water{position:absolute;inset:0;color:#31a9e1;clip-path:polygon(0 calc(100% - var(--pull-fill)),12% calc(100% - var(--pull-fill) - 2px),25% calc(100% - var(--pull-fill)),38% calc(100% - var(--pull-fill) + 2px),50% calc(100% - var(--pull-fill)),62% calc(100% - var(--pull-fill) - 2px),75% calc(100% - var(--pull-fill)),88% calc(100% - var(--pull-fill) + 2px),100% calc(100% - var(--pull-fill)),100% 100%,0 100%);animation:water-ripple 1s ease-in-out infinite alternate}
-.is-armed .pull-water,.is-refreshing .pull-water{clip-path:inset(0);animation:none}
-@keyframes water-ripple{to{filter:brightness(1.3)}}
-@media(prefers-reduced-motion:reduce){.pull-water{animation:none}}
+html.pull-active{overflow-anchor:none;overscroll-behavior-y:none}
+.pull-space{position:relative;height:0;overflow:hidden;transition:height 220ms ease;overflow-anchor:none}
+.pull-space.is-dragging{transition:none}
+.pull-refresh{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);display:flex;align-items:center;justify-content:center;gap:8px;height:36px;max-width:calc(100% - 32px);padding:0 12px;border:1px solid #384049;border-radius:999px;background:#24292F;color:#fff;white-space:nowrap;font-size:clamp(12px,3.5vw,14px);line-height:1.2}
+.pull-ring{width:20px;height:20px;flex:none;color:#FF6964;overflow:visible}
+.pull-track{opacity:.22}
+.pull-progress{stroke-dasharray:100;stroke-dashoffset:calc(100 - var(--pull-progress,0) * 100);transform:rotate(-90deg);transform-origin:center}
+.pull-check,.pull-error{display:none}
+.pull-refresh[data-phase="loading"] .pull-arrow{display:none}
+.pull-refresh[data-phase="loading"] .pull-progress{stroke-dasharray:75 25;stroke-dashoffset:0;animation:pull-spin .7s linear infinite}
+.pull-refresh:is([data-phase="updated"],[data-phase="unchanged"]) .pull-arrow,.pull-refresh[data-phase="error"] .pull-arrow{display:none}
+.pull-refresh:is([data-phase="updated"],[data-phase="unchanged"]) .pull-check,.pull-refresh[data-phase="error"] .pull-error{display:block}
+@keyframes pull-spin{to{transform:rotate(270deg)}}
+@media(prefers-reduced-motion:reduce){.pull-space{transition:none}.pull-refresh[data-phase="loading"] .pull-progress{animation:none}}
 </style>
 <link rel="stylesheet" href="/settings.css">
 </head>
@@ -235,8 +240,17 @@ legend{font-family:var(--f-head);font-weight:600;font-size:14px;color:var(--fg-3
     </div>
   </div>
 </header>
-<div id="pull-refresh" class="pull-refresh" role="progressbar" aria-label="ดึงลงเพื่ออัปเดตข่าว" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" hidden>
-  <span class="pull-brand" aria-hidden="true"><img src="/icons/icon-192.png" alt=""><span class="pull-wordmark">KOREA WATCH<span class="pull-water">KOREA WATCH</span></span></span>
+<div class="pull-space" id="pull-space" hidden>
+  <div id="pull-refresh" class="pull-refresh" role="status" aria-live="polite" aria-atomic="true" hidden>
+    <svg class="pull-ring" viewBox="0 0 24 24" role="progressbar" aria-label="ระยะดึงเพื่อรีเฟรช" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle class="pull-track" cx="12" cy="12" r="9"/>
+      <circle class="pull-progress" cx="12" cy="12" r="9" pathLength="100"/>
+      <path class="pull-arrow" d="M12 7v10m-4-4 4 4 4-4"/>
+      <path class="pull-check" d="m7 12 3 3 7-7"/>
+      <path class="pull-error" d="m8 8 8 8m0-8-8 8"/>
+    </svg>
+    <span class="pull-message">ดึงเพื่อรีเฟรช</span>
+  </div>
 </div>
 <div class="strip" id="strip" hidden><div class="wrap"><span class="dot"></span><b id="strip-k">ด่วน</b><button id="strip-t"></button></div></div>
 <div class="offline" id="offline" hidden></div>

@@ -59,3 +59,11 @@ Not a promise of complete semantic deduplication, exactly-once FCM delivery, pro
 - Pull the visible upper-left KW icon and KOREA WATCH wordmark into the screen centre, increasing size with drag distance and filling the text from the bottom. A full fill latches until release; release starts refresh and keeps the full mark visible until the read finishes. Cancelled gestures do not refresh. Preserve top-only, horizontal, multi-touch, dialog and busy guards.
 - Remove the bottom Update news control, its CSS and automatic bottom-scroll refresh. The pull gesture is the refresh control; brand click/keyboard still returns to the top.
 - Firebase data, rules, credentials, AI providers and worker processing are unchanged. This release needs Hosting deployment after review/merge.
+
+## Mobile refresh capsule — 2026-11-09
+
+- Replace only the pull-to-refresh presentation: a 36px dark capsule (#24292F, border #384049, white text and coral #FF6964 ring) opens centred in document flow below the sticky header. The existing header, logo, controls, cards and catalogue retain their resting layout.
+- A predominantly vertical, one-finger pull beginning at the top moves the feed with resistance. The ring fills to a default 64 CSS px gesture threshold, changing ดึงเพื่อรีเฟรช → ปล่อยเพื่อรีเฟรช. Releasing early or cancelling restores the feed without loading; dragging back below the threshold disarms it.
+- Release starts the existing news reader immediately, once per gesture. Keep current stories and show กำลังอัปเดตข่าว… while awaiting the feed. Status metadata is read independently and cannot delay applying the feed or finishing the spinner.
+- Compare reader-visible content to show อัปเดตข่าวแล้ว or ยังไม่มีข่าวใหม่ accurately; metadata/object-key-order changes alone do not count as new content. Show the check/result or temporary failure message for one second, then collapse over 220ms. Reduced motion removes collapse/spinner animation. Horizontal rails, busy guards and retry after error remain covered.
+- No category/filter/worker/Firestore-rule changes. The versioned refresh import and offline shell are rebuilt for Hosting deployment.
