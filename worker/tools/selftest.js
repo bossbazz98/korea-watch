@@ -67,10 +67,10 @@ const log = { log() {}, warn() {} };
 
 (async () => {
   const db = fakeDb(), msg = fakeMessaging();
-  await db.doc("subscribers/a").set({ token: "tokA", subscriptionVersion: 2, enabled: true, level: "critical", cats: ["war"], testRequested: true });
-  await db.doc("subscribers/b").set({ token: "tokB", subscriptionVersion: 2, enabled: true, level: "high", cats: ["disease", "war"], testRequested: false });
+  await db.doc("subscribers/a").set({ token: "tokA", subscriptionVersion: 2, enabled: true, level: "critical", cats: ["korwar"], testRequested: true });
+  await db.doc("subscribers/b").set({ token: "tokB", subscriptionVersion: 2, enabled: true, level: "high", cats: ["disease", "korwar"], testRequested: false });
   await db.doc("subscribers/c").set({ token: "dead", subscriptionVersion: 2, enabled: true, level: "high", cats: ["disease"], testRequested: false });
-  await db.doc("subscribers/d").set({ token: "tokD", subscriptionVersion: 2, enabled: false, level: "high", cats: ["war"], testRequested: false });
+  await db.doc("subscribers/d").set({ token: "tokD", subscriptionVersion: 2, enabled: false, level: "high", cats: ["korwar"], testRequested: false });
   const base = { db, messaging: msg, appUrl: "https://kw.web.app", geminiKey: "k", fetchImpl, log, waitMs: 0 };
 
   // รอบ 1: แปลได้ ส่งแจ้งเตือนตามหมวดและระดับ
@@ -94,11 +94,11 @@ const log = { log() {}, warn() {} };
   assert.strictEqual(s.added, 0); assert.strictEqual(geminiCalls, calls, "no extra AI call"); assert.strictEqual(msg.sent.length, sentN, "no duplicate push");
 
   // รอบ 3: ติดโควตา ข่าวยังขึ้น (ยังไม่แปล) แล้วแปลได้ในรอบถัดไป
-  feeds.gn_food = rss([{ t: "라면 사재기 확산, 마트 품절", s: "KBS", d: d(0.5) }]);
+  feeds.gn_tech = rss([{ t: "인공지능 반도체 신기술 발표", s: "KBS", d: d(0.5) }]);
   geminiMode = "quota";
   s = await runOnce({ ...base, now: now + 600e3 });
   feed = allItems(db.data);
-  const ramen = feed.find(i => i.titleKo.includes("라면"));
+  const ramen = feed.find(i => i.titleKo.includes("인공지능"));
   assert.ok(ramen && ramen.translated === false && ramen.title.ko, "shown untranslated");
   assert.strictEqual(ramen.attempts, 0, "quota does not count as a failed attempt");
   assert.match(db.data.get("meta/status").lastError, /quota/);
@@ -130,7 +130,7 @@ const log = { log() {}, warn() {} };
   const f = db.data.get("meta/feed"); f.items.push({ ...f.items[0], id: "old1", translated: false, attempts: 3 }); delete f.v;
   geminiMode = "busy"; await runOnce({ ...base, now: now + 950e3 });
   assert.strictEqual(allItems(db.data).find(i => i.id === "old1").attempts, 0, "old counters reset once");
-  assert.strictEqual(db.data.get("meta/feed").v, 9);
+  assert.strictEqual(db.data.get("meta/feed").v, 10);
   geminiMode = "ok";
 
   // แปลเป็นชุดละ 5: 12 ข่าว = 3 ชุด ชุดที่เสีย 1 ชุดไม่ทำให้ชุดอื่นเสีย

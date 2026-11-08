@@ -35,7 +35,7 @@ const log = { log() {}, warn() {} };
   const rss = async url => ({ ok: true, text: async () => "<rss><channel></channel></rss>", arrayBuffer: async () => Buffer.from("") });
   await runOnce({ db, messaging: {}, appUrl: "https://x", geminiKey: "", fetchImpl: rss, now, log, waitMs: 0 });
   const fd = {...data.get("meta/feed"),items:allItems(data)}, by = id => fd.items.find(i => i.id === id);
-  assert.strictEqual(fd.v, 9);
+  assert.strictEqual(fd.v, 10);
   assert.strictEqual(by("en").translated, false, "English-titled item sent back for translation");
   assert.strictEqual(by("en").title.ko, "여야 대통령 SNS 공방", "shows Korean headline until re-translated");
   assert.deepStrictEqual(by("en").title, { ko: "여야 대통령 SNS 공방" }, "no English left to show in Thai mode");
