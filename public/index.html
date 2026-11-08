@@ -42,7 +42,7 @@
   --fg:#eceff2; --fg-2:#a9b2bb; --fg-3:#7a848e; --ink:#e3e7eb; --ink-fg:#15181b;
   --crit:#ff6b62; --crit-bg:#3a1e1e; --high:#f0a34a; --high-bg:#352816; --ok:#5fc48a;
   --shadow:none; color-scheme:dark}
-html{scroll-padding-top:env(safe-area-inset-top,0px)}
+html{overscroll-behavior-y:contain;scroll-padding-top:env(safe-area-inset-top,0px)}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--f-body);font-size:17px;line-height:1.6;-webkit-text-size-adjust:100%}
 body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:30;background:var(--surface)}
@@ -56,7 +56,7 @@ button:focus-visible,a:focus-visible{outline:3px solid var(--fg-2);outline-offse
 /* header */
 header.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;background:var(--surface);border-bottom:1px solid var(--line)}
 .top .wrap{display:flex;align-items:center;gap:10px;padding-block:12px}
-.brand{display:flex;align-items:center;gap:10px;min-width:0;flex:1}
+.brand{border:0;padding:0;background:none;text-align:left;display:flex;align-items:center;gap:10px;min-width:0;flex:1}
 .logo{width:38px;height:38px;border-radius:10px;flex:none;display:block}
 .brand h1{font-size:21px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .brand small{display:block;font-size:13px;color:var(--fg-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -203,16 +203,25 @@ fieldset{border:0;margin:0;padding:0;display:grid;gap:8px;min-width:0}
 fieldset:disabled{opacity:.45}
 legend{font-family:var(--f-head);font-weight:600;font-size:14px;color:var(--fg-3);padding:0;margin-bottom:8px}
 .btn:disabled{opacity:.5;cursor:default}
+/* Pull-to-refresh fills the actual app mark from bottom to top. */
+.pull-refresh{position:fixed;inset:calc(env(safe-area-inset-top,0px) + 82px) 0 auto;z-index:25;display:flex;justify-content:center;pointer-events:none}
+.pull-mark{position:relative;display:block;width:58px;height:58px;border:4px solid var(--surface);border-radius:18px;background:var(--surface);box-shadow:0 3px 18px rgba(0,0,0,.18)}
+.pull-mark img{position:absolute;inset:0;width:100%;height:100%;border-radius:14px}
+.pull-empty{opacity:.22;filter:grayscale(1)}
+.pull-filled{clip-path:inset(calc(100% - var(--pull-fill,0%)) 0 0)}
+.is-refreshing .pull-mark{animation:pull-breathe .8s ease-in-out infinite alternate}
+@keyframes pull-breathe{to{transform:scale(.92)}}
+@media(prefers-reduced-motion:reduce){.is-refreshing .pull-mark{animation:none}}
 </style>
 <link rel="stylesheet" href="/settings.css">
 </head>
 <body>
 <header class="top">
   <div class="wrap">
-    <div class="brand">
+    <button class="brand" id="home-top" type="button" aria-label="กลับด้านบนสุด">
       <img class="logo" src="/icons/icon-192.png" alt="" width="38" height="38">
       <div style="min-width:0"><h1>Korea Watch</h1><small id="updated">—</small></div>
-    </div>
+    </button>
     <div class="tools">
       <button class="pill" id="settings" aria-label="ตั้งค่า">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 3-1 3-3 1-2 5 2 5 3 1 1 3h6l1-3 3-1 2-5-2-5-3-1-1-3H9Z"/><circle cx="12" cy="12" r="3"/></svg><span class="lbl" id="settings-l">ตั้งค่า</span>
@@ -224,6 +233,9 @@ legend{font-family:var(--f-head);font-weight:600;font-size:14px;color:var(--fg-3
     </div>
   </div>
 </header>
+<div id="pull-refresh" class="pull-refresh" role="progressbar" aria-label="ดึงลงเพื่ออัปเดตข่าว" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" hidden>
+  <span class="pull-mark" aria-hidden="true"><img class="pull-empty" src="/icons/icon-192.png" alt=""><img class="pull-filled" src="/icons/icon-192.png" alt=""></span>
+</div>
 <div class="strip" id="strip" hidden><div class="wrap"><span class="dot"></span><b id="strip-k">ด่วน</b><button id="strip-t"></button></div></div>
 <div class="offline" id="offline" hidden></div>
 
@@ -255,6 +267,7 @@ legend{font-family:var(--f-head);font-weight:600;font-size:14px;color:var(--fg-3
 <script src="/categories.js"></script>
 <script src="/news-text.js"></script>
 <script src="/news-policy.js"></script>
+<script src="/category-policy.js"></script>
 <script src="/firebase-config.js"></script>
 <script type="module" src="/app.js"></script>
 </body>

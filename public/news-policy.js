@@ -8,6 +8,11 @@
       return /^https?:$/.test(u.protocol) && publishers.some(d => u.hostname === d || u.hostname.endsWith('.' + d));
     } catch { return false; }
   }
+  function publisherKey(url) {
+    if (!isKoreanPublisher(url)) return null;
+    const host = new URL(url).hostname;
+    return publishers.find(d => host === d || host.endsWith('.' + d));
+  }
   function trusted(item) {
     // Google News is a relay, not the publisher; preserve its RSS source URL.
     return isKoreanPublisher(item.publisherUrl || item.sourceUrl || item.link);
@@ -32,7 +37,7 @@
     return { ...item, level: reason ? 'critical' : item.level === 'critical' ? 'high' : item.level,
       emergency: !!reason, categories: reason ? [...new Set([...(item.categories || []), 'korwar'])] : item.categories };
   }
-  const api = { VERSION, isKoreanPublisher, trusted, incident, apply };
+  const api = { VERSION, isKoreanPublisher, publisherKey, trusted, incident, apply };
   if (typeof module !== 'undefined') module.exports = api;
   else globalThis.KW_NEWS_POLICY = api;
 })();

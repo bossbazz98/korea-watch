@@ -6,24 +6,18 @@ const gn = q =>
 
 // ลำดับในรายการนี้ = ลำดับความสำคัญเวลาเลือกข่าวไปแปล
 const CATS = {
-  korwar:    { th: "สงครามเกาหลี", desc: "Korean Peninsula conflict: North Korean military actions, missiles, nuclear tests, DMZ/border incidents, inter-Korean tension, ROK-US drills, air-raid/civil-defence alerts in Korea",
-               // ไม่ใช้ "北" หรือ "도발" เดี่ยวๆ (北 ติดชื่อเมือง 北京 / 도발 ใช้ในข่าวการเมืองทั่วไป) ใช้เฉพาะคำที่ชี้ชัดว่าเป็นเกาหลีเหนือ/การทหาร
-               kw: ["북한", "北 ", "北,", "北미사일", "北 미사일", "北 도발", "北 핵", "北군", "대북", "북측", "탄도미사일", "남북", "군사분계선", "비무장지대", "DMZ", "휴전선", "합참", "합동참모본부", "북한군", "핵실험", "북핵", "연평도", "공습경보", "민방위 훈련", "김정은", "김여정", "한미연합", "을지"] },
-  war:       { th: "สงครามทั่วโลก", desc: "wars and security crises elsewhere in the world (Ukraine-Russia, Middle East, Taiwan Strait etc.), NOT the Korean Peninsula",
-               kw: ["전쟁", "공습", "교전", "휴전", "우크라이나", "러시아군", "이스라엘", "가자", "이란", "중동", "하마스", "헤즈볼라", "대만해협", "분쟁", "나토", "NATO"] },
-  disease:   { th: "โรคติดต่อ/ไวรัส", desc: "infectious diseases and outbreaks in Korea, plus major international outbreaks relevant to health or travel in Korea",
-               kw: ["감염병", "전염병", "바이러스", "확진", "독감", "인플루엔자", "코로나", "질병관리청", "유행", "엠폭스", "결핵", "홍역", "조류인플루엔자", "백신", "팬데믹"] },
-  food:      { th: "อาหาร/กักตุน", desc: "food supply and staple-food prices (rice, grain, groceries), food insecurity, stockpiling, panic buying, shortages of daily goods",
-               kw: ["사재기", "품귀", "생필품", "품절", "식량", "쌀값", "라면", "장보기", "물가 급등", "공급 부족", "비축"] },
-  thai:      { th: "คนไทยในเกาหลี", desc: "Thai nationals in Korea, AND immigration enforcement, arrests/crackdowns on foreigners, deportation, detention, racism or discrimination against foreigners in Korea",
-               kw: ["태국인", "태국 국적", "태국 노동자", "태국 출신", "주한 태국", "태국대사관", "태국", "출입국", "출입국관리", "불법체류", "강제퇴거", "외국인 보호소", "외국인보호소", "외국인 검거", "외국인 체포", "외국인 범죄", "외국인 단속", "불법체류 단속", "출입국 단속", "인종차별", "외국인 차별", "이주민 차별", "외국인 혐오", "인종 혐오"] },
-  korea:     { th: "ข่าวในเกาหลี", desc: "other important general news in South Korea", kw: [] },
-  oil:       { th: "น้ำมัน", desc: "oil and fuel prices", kw: ["유가", "휘발유", "경유", "기름값", "국제유가", "주유소"] },
-  fx:        { th: "ค่าเงิน", desc: "exchange rates, the won", kw: ["환율", "원달러", "원·달러", "원화", "달러 강세", "바트"] },
-  wage:      { th: "ค่าแรงขั้นต่ำ", desc: "minimum wage", kw: ["최저임금", "최저시급"] },
-  foreign:   { th: "แรงงานต่างชาติ", desc: "migrant/foreign workers in Korea: employment conditions, safety, wages, EPS/E-9 visas and work permits; may overlap thai, wage or law", kw: ["외국인 노동자", "이주노동자", "외국인 근로자", "고용허가제", "E-9", "불법체류", "출입국", "비자"] },
-  law:       { th: "กฎหมายแรงงาน", desc: "labour law changes", kw: ["근로기준법", "노동법", "주 52시간", "노란봉투법", "산업안전", "중대재해", "퇴직금"] },
-  president: { th: "ประธานาธิบดี", desc: "the South Korean president and presidential office", kw: ["대통령", "대통령실", "청와대"] }
+  korwar: { desc: "Korean Peninsula military/security conflict ONLY. North/South Korea attacks, missiles, nuclear tests, DMZ incidents, inter-Korean threats and drills. Never unrelated foreign military readiness.", kw: ["북한", "북측", "남북", "한반도", "군사분계선", "DMZ"] },
+  war: { desc: "Actual wars and armed conflicts anywhere outside the Korean Peninsula, fighting, invasions, airstrikes, ceasefires. Exclude trade/price wars and unrelated military readiness.", kw: ["전쟁", "공습", "교전", "휴전", "폭격", "침공"] },
+  disease: { desc: "All infectious diseases worldwide, new viruses, outbreaks, transmission and vaccines.", kw: ["감염병", "바이러스", "백신", "전염병"] },
+  tech: { desc: "All AI news, emerging technology, semiconductors, robotics and new innovations.", kw: ["인공지능", "AI", "반도체", "로봇", "신기술"] },
+  crypto: { desc: "All cryptocurrency news: coins, celebrity launches, adoption and legalisation by countries, tokens and blockchain.", kw: ["암호화폐", "비트코인", "가상자산", "이더리움"] },
+  foreign: { desc: "Foreigners and migrant workers IN SOUTH KOREA ONLY: employment ministry, recruitment, work, visas, labour law, protests and racial discrimination. Not workers abroad.", kw: ["외국인", "이주노동자", "고용허가제", "고용노동부"] },
+  wage: { desc: "SOUTH KOREAN wages/pay, wage law, minimum wages and minimum-wage adjustments only.", kw: ["최저임금", "최저시급"] },
+  fx: { desc: "KOREAN WON only: KRW exchange rates, appreciation and depreciation. Not unrelated dollar/baht news.", kw: ["원화", "원달러", "원·달러"] },
+  oil: { desc: "Oil and all energy globally and in Korea: prices, renewable energy, fuels, shortages and oversupply.", kw: ["유가", "원유", "에너지", "연료", "태양광"] },
+  thai: { desc: "Thailand, Thai people and businesses, Thai people/restaurants/embassy/events in Korea, marriage visas and E-9 visas. May overlap foreign.", kw: ["태국", "결혼비자", "E-9"] },
+  president: { desc: "SOUTH KOREAN president and government only. Not other countries' presidents/governments.", kw: ["대통령", "대통령실", "정부"] },
+  hot: { desc: "Viral/trending stories of ANY topic covered by at least THREE independent South Korean news outlets. Use verified publishers in input; do not guess popularity.", kw: [] }
 };
 
 const labels = require("../public/categories");
@@ -37,21 +31,23 @@ const EMERGENCY_KW = ["미사일 발사", "탄도미사일", "공습경보", "�
 // take = จำนวนข่าวบนสุดที่หยิบจาก feed นั้นต่อรอบ
 const FEEDS = [
   { id: "gn_korwar",    hint: "korwar",    take: 15, korwar: true, url: gn("북한 미사일 OR 북한 도발 OR 합참 OR 군사분계선 OR 남북 군사 OR 공습경보") },
-  { id: "gn_war",       hint: "war",       take: 12, url: gn("우크라이나 전쟁 OR 중동 전쟁 OR 이스라엘 공습 OR 이란 공습 OR 대만해협") },
+  { id: "gn_war",       hint: "war",       take: 12, url: gn("전쟁 OR 공습 OR 교전 OR 휴전 OR 무력 충돌") },
   { id: "gn_disease",   hint: "disease",   take: 15, url: gn("감염병 OR 전염병 OR 바이러스 확산 OR 질병관리청 OR 유행 주의보") },
-  { id: "gn_food",      hint: "food",      take: 12, url: gn("사재기 OR 품귀 OR 생필품 부족 OR 쌀값 급등") },
-  { id: "gn_thai",      hint: "thai",      take: 12, url: gn("태국인 OR 태국 노동자 OR 태국 국적") },
-  { id: "gn_immig",     hint: "thai",      take: 15, url: gn("출입국 단속 OR 불법체류 외국인 OR 외국인 검거 OR 강제퇴거 OR 인종차별 OR 외국인 차별") },
-  { id: "gn_top",       hint: "korea",     take: 8,  url: "https://news.google.com/rss?hl=ko&gl=KR&ceid=KR:ko" },
+  { id: "gn_tech",      hint: "tech",      take: 12, url: gn("인공지능 OR AI 신기술 OR 반도체 OR 기술 혁신") },
+  { id: "gn_thai",      hint: "thai",      take: 12, url: gn("태국 OR 주한 태국대사관 OR 한국 태국 음식점 OR 결혼 비자 OR E-9") },
+  { id: "gn_immig",     hint: "foreign",   take: 15, url: gn("출입국 단속 OR 불법체류 외국인 OR 외국인 검거 OR 강제퇴거 OR 인종차별 OR 외국인 차별") },
+  { id: "gn_top",       hint: "hot",     take: 8,  url: "https://news.google.com/rss?hl=ko&gl=KR&ceid=KR:ko" },
   { id: "gn_oil_fx",    hint: null,        take: 10, url: gn("국제유가 OR 휘발유 가격 OR 원달러 환율") },
-  { id: "gn_labor",     hint: null,        take: 10, url: gn("최저임금 OR 외국인 노동자 OR 고용허가제 OR 근로기준법") },
-  { id: "gn_president", hint: "president", take: 6,  url: gn("대통령실 OR 대통령 발표") },
+  { id: "gn_foreign", hint: "foreign", take: 12, url: gn("한국 외국인 근로자 OR 고용허가제 OR 고용노동부 외국인 OR 한국 인종차별") },
+  { id: "gn_wage", hint: "wage", take: 12, url: gn("한국 최저임금 OR 최저임금위원회 OR 최저시급 인상 OR 한국 임금 체불") },
+  { id: "gn_labor",     hint: null,        take: 10, url: gn("한국 최저임금 OR 외국인 노동자 OR 고용허가제 OR 근로기준법 OR 고용노동부") },
+  { id: "gn_president", hint: "president", take: 6,  url: gn("한국 대통령 OR 대통령실 OR 한국 정부 정책") },
   // Separate international/category searches so the Korean Peninsula feed cannot dominate collection.
   { id: "gn_war_global", hint: "war", take: 12, url: gn("러시아 우크라이나 전쟁 OR 중동 분쟁 OR 이스라엘 가자 OR 대만 해협") },
   { id: "gn_health_global", hint: "disease", take: 8, url: gn("세계보건기구 감염병 OR 해외 바이러스 확산 OR 국제 감염병 비상") },
-  { id: "gn_food_global", hint: "food", take: 8, url: gn("세계 식량 공급 부족 OR 국제 곡물 가격 급등 OR 생필품 품귀") },
-  { id: "gn_oil_global", hint: "oil", take: 8, url: gn("국제유가 OR OPEC 원유 공급 OR 세계 에너지 가격") },
-  { id: "gn_fx_global", hint: "fx", take: 8, url: gn("원달러 환율 OR 달러 강세 OR 바트 환율") },
+  { id: "gn_crypto", hint: "crypto", take: 8, url: gn("암호화폐 OR 비트코인 OR 가상자산 OR 밈코인 OR 스테이블코인") },
+  { id: "gn_oil_global", hint: "oil", take: 8, url: gn("국제유가 OR 원유 공급 OR 재생에너지 OR 에너지 부족 OR 연료") },
+  { id: "gn_fx_global", hint: "fx", take: 8, url: gn("원달러 환율 OR 원화 강세 OR 원화 약세 OR 원바트 환율") },
   // ฟีดตรงของสำนักข่าว: ได้ลิงก์จริง (ไม่ต้องถอดลิงก์ Google) และหลายเจ้าแนบภาพ/คำโปรยมาในฟีด
   // เก็บเฉพาะข่าวที่ตรงคำค้นของหมวดใดหมวดหนึ่ง ฟีดไหนใช้ไม่ได้จะถูกข้ามอัตโนมัติ
   // หมายเหตุ: ฟีด RSS ของสำนักข่าวอนุญาตให้ใช้ส่วนบุคคล/ไม่แสวงหากำไร

@@ -101,8 +101,9 @@ function translatedNewsFetch(transform = value => value) {
  };
 }
 test('a large Korean backlog cannot consume all translation slots; other categories publish across runs',async()=>{
- const db=dbFake(),now=Date.now(),categories=['war','disease','food','thai','korea','oil','fx','wage','foreign','law','president'];
- const item=(id,category)=>({id,titleKo:'기사 '+id,title:{ko:'기사 '+id},summary:{ko:'한국어 요약'},body:{},translated:false,attempts:0,categories:[category],level:'normal',publishedAt:new Date(now-600000).toISOString(),addedAt:new Date(now-600000).toISOString(),source:'Fixture',sourceUrl:'https://example.test/'+id,links:[]});
+ const db=dbFake(),now=Date.now(),categories=['war','disease','tech','thai','crypto','oil','fx','wage','foreign','hot','president'];
+ const titles={korwar:'남북 군사회담 제안',war:'우크라이나 전쟁 교전',disease:'신종 바이러스 확산',tech:'AI 반도체 신기술',thai:'태국대사관 축제',crypto:'비트코인 가상자산',oil:'국제유가 급등',fx:'원화 환율',wage:'한국 최저임금',foreign:'고용허가제 외국인 근로자',hot:'인기 배우 결혼 소식',president:'한국 대통령 발표'};
+ const item=(id,category)=>({id,titleKo:titles[category]+' '+id,title:{ko:'기사 '+id},summary:{ko:'한국어 요약'},body:{},translated:false,attempts:0,categories:[category],level:'normal',publishedAt:new Date(now-600000).toISOString(),addedAt:new Date(now-600000).toISOString(),source:'Fixture',sourceUrl:'https://www.yna.co.kr/'+id,publishers:category==='hot'?['https://www.yna.co.kr','https://news.sbs.co.kr','https://news.kbs.co.kr']:[],links:[]});
  db.data.set('meta/feed',{v:8,items:[...Array.from({length:80},(_,i)=>item('kw'+i,'korwar')),...categories.map((category,i)=>item('other'+i,category))]});
  const options={db,messaging:{},appUrl:'https://example.test',groqKey:'fixture',fetchImpl:translatedNewsFetch(),log,waitMs:0,budgetMs:60000,imgBudgetMs:2000,watchEveryMs:120000};
  const first=await runOnce({...options,now});
@@ -115,14 +116,14 @@ test('a large Korean backlog cannot consume all translation slots; other categor
 });
 test('diagnostics distinguish AI category reassignment from retry cooldown',async()=>{
  const db=dbFake(),now=Date.now();
- const food={...story('food',false),sourceUrl:'https://example.test/food',source:'Fixture',categories:['food']};
+ const tech={...story('tech',false),sourceUrl:'https://www.yna.co.kr/tech',source:'Fixture',categories:['tech']};
  const foreign={...story('foreign',false),categories:['foreign'],attempts:4,lastTry:now};
- db.data.set('meta/feed',{v:9,items:[food,foreign]});
- const stat=await runOnce({db,messaging:{},appUrl:'https://example.test',groqKey:'fixture',fetchImpl:translatedNewsFetch(r=>({...r,categories:['korea']})),log,now,budgetMs:60000,imgBudgetMs:2000,waitMs:0});
- assert.equal(stat.translationByCategory.food.attempted,1);
- assert.equal(stat.translationByCategory.food.completed,1);
- assert.deepEqual(stat.translationByCategory.food.movedTo,{korea:1});
- assert.equal(stat.publishedByCategory.food,0);
+ db.data.set('meta/feed',{v:10,items:[tech,foreign]});
+ const stat=await runOnce({db,messaging:{},appUrl:'https://example.test',groqKey:'fixture',fetchImpl:translatedNewsFetch(r=>({...r,categories:['crypto']})),log,now,budgetMs:60000,imgBudgetMs:2000,waitMs:0});
+ assert.equal(stat.translationByCategory.tech.attempted,1);
+ assert.equal(stat.translationByCategory.tech.completed,1);
+ assert.deepEqual(stat.translationByCategory.tech.movedTo,{crypto:1});
+ assert.equal(stat.publishedByCategory.tech,0);
  assert.equal(stat.translationByCategory.foreign.attempted,0);
  assert.equal(stat.retryDelayedByCategory.foreign,1);
  assert.deepEqual(db.data.get('meta/status').translationByCategory,stat.translationByCategory);
@@ -138,12 +139,12 @@ test('legacy Thai headline with Korean body is requeued and repaired without a d
  await runOnce({db,messaging:{async sendEachForMulticast(){sent++;return {successCount:0,responses:[]}}},appUrl:'https://example.test',groqKey:'fixture',fetchImpl:translatedNewsFetch(),log,now,budgetMs:60000,imgBudgetMs:2000,waitMs:0});
  assert(require('../../public/news-text').completeThai(db.data.get('meta/feed').items[0]));assert.equal(sent,0);
 });
-test('nonincident Korean backlog cannot spend the fast lane before food/foreign publication under rate limiting',async()=>{
+test('nonincident Korean backlog cannot spend the fast lane before tech/foreign publication under rate limiting',async()=>{
  const db=dbFake(),now=Date.now(),sourceUrl='https://www.yna.co.kr/news';
  const pending=(id,titleKo,categories)=>({...story(id,false),titleKo,categories,sourceUrl,publishedAt:new Date(now-2*86400000).toISOString(),attempts:4,lastTry:now-4*3600000});
- db.data.set('meta/feed',{v:9,items:[{...story('published-korean'),categories:['korwar']},...Array.from({length:40},(_,i)=>pending('politics'+i,'김여정 남북 군사회담 '+i,['korwar']))]});
- db.data.set('meta/pending',{v:9,items:[pending('food','쌀값 급등 생필품 공급 부족',['food']),pending('foreign','외국인 근로자 고용허가제 임금 개선',['foreign'])]});
- const requests=[],base=translatedNewsFetch(r=>({...r,categories:['korea']}));
+ db.data.set('meta/feed',{v:9,items:[{...story('published-korean'),titleKo:'남북 군사회담 재개',categories:['korwar']},...Array.from({length:40},(_,i)=>pending('politics'+i,'김여정 남북 군사회담 '+i,['korwar']))]});
+ db.data.set('meta/pending',{v:9,items:[pending('tech','인공지능 AI 반도체 신기술',['tech']),pending('foreign','외국인 근로자 고용허가제 고용 환경 개선',['foreign'])]});
+ const requests=[],base=translatedNewsFetch(r=>({...r,categories:['crypto']}));
  let limited=false;
  const fetchImpl=async(url,opt={})=>{
   if(String(url).includes('api.groq.com')) {
@@ -156,8 +157,8 @@ test('nonincident Korean backlog cannot spend the fast lane before food/foreign 
  const stat=await runOnce({db,messaging:{},appUrl:'https://example.test',groqKey:'fixture',fetchImpl,log,now,budgetMs:60000,imgBudgetMs:2000,waitMs:0});
  assert.equal(stat.korwar,0);
  assert(!requests.some(r=>r.titles),'general Korean news does not consume separate title requests');
- assert.deepEqual(new Set(requests[0].input.flatMap(i=>i.guessedCategories)),new Set(['food','foreign']));
- for(const category of ['food','foreign']) {
+ assert.deepEqual(new Set(requests[0].input.flatMap(i=>i.guessedCategories)),new Set(['tech','foreign']));
+ for(const category of ['tech','foreign']) {
   assert(stat.publishedByCategory[category]>0,category);
   assert(db.data.get('meta/feed').items.some(i=>i.id===category&&i.translated&&i.categories.includes(category)),category+' really persisted publicly');
  }
@@ -175,4 +176,19 @@ test('all/high preferences and old pending jobs never bypass the incident/source
  assert.equal(sent.length,0);assert(![...db.data.keys()].some(p=>p.startsWith('notificationJobs/')));
  await sendNews(db,messaging,[critical('북한 탄도미사일 발사','https://www.yna.co.kr')],'https://example.test',log);
  assert.equal(sent.length,1);assert.equal(sent[0].data.level,'critical');assert.equal(sent[0].data.publisherUrl,'https://www.yna.co.kr');
+});
+test('repeat ingestion adds verified trending coverage to an existing translated item without republishing alerts',async()=>{
+ const db=dbFake(),now=Date.now(),title='유명 배우 결혼 소식',date=new Date(now-60000).toISOString();
+ const sources=[['연합뉴스','https://www.yna.co.kr'],['SBS','https://news.sbs.co.kr'],['KBS','https://news.kbs.co.kr']];
+ const link='https://www.yna.co.kr/a',id=newsId(title,link,date);
+ db.data.set('meta/feed',{v:10,items:[{...story(id),titleKo:title,source:'연합뉴스',sourceUrl:link,publisherUrl:sources[0][1],publishedAt:date,categories:[]}]});
+ db.data.set('meta/seen',{ids:{[id]:now-1000}});
+ const {FEEDS}=require('../feeds');
+ const xml='<rss><channel>'+sources.map(([name,url])=>`<item><title>${title}</title><link>${url}/a</link><source url="${url}">${name}</source><pubDate>${date}</pubDate></item>`).join('')+'</channel></rss>';
+ const fetchImpl=async url=>({ok:true,text:async()=>url===FEEDS.find(f=>f.id==='gn_top').url?xml:'<rss><channel/></rss>'});
+ let pushes=0;
+ const stat=await runOnce({db,messaging:{async sendEachForMulticast(){pushes++;throw Error('must not notify')}},appUrl:'https://example.test',fetchImpl,log,now,budgetMs:1000,imgBudgetMs:0});
+ const saved=db.data.get('meta/feed').items;
+ assert.equal(stat.added,0);assert.equal(saved.length,1);assert(saved[0].categories.includes('hot'));
+ assert.equal(require('../../public/category-policy').publisherKeys(saved[0]).length,3);assert.equal(pushes,0);
 });

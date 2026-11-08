@@ -42,7 +42,7 @@ const okReply = async (url, opt) => {
 
   // 2) ข่าวที่พักไว้ (ล้มเหลวครบ 4 ครั้ง) ลองใหม่หลัง 3 ชั่วโมง
   db = fakeDb();
-  await db.doc("meta/feed").set({ v: 9, items: [item("old", { attempts: 4, lastTry: now - 4 * 3600e3 }), item("recent", { attempts: 4, lastTry: now - 3600e3 })] });
+  await db.doc("meta/feed").set({ v: 10, items: [item("old", { attempts: 4, lastTry: now - 4 * 3600e3 }), item("recent", { attempts: 4, lastTry: now - 3600e3 })] });
   const s2 = await runOnce({ db, messaging: msg, appUrl: "https://x", geminiKey: "k", fetchImpl: okReply, now, log, waitMs: 0 });
   const f = allItems(db.data);
   assert.strictEqual(f.find(i => i.id === "old").translated, true, "paused 4h ago → retried and translated");

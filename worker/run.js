@@ -16,7 +16,7 @@ const { Quota } = require("./lib/quota");
 const { persist, prepare } = require("./lib/storage");
 const { balancedQueue } = require("./lib/scheduler");
 const policy = require("../public/news-policy");
-const { publicationCategories } = require("./lib/categories");
+const { publicationCategories, publisherKeys, evidenceOf } = require("./lib/categories");
 const { completeThai } = require("../public/news-text");
 
 const CFG = {
@@ -83,8 +83,8 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
 
   // Reclassify existing critical records too; never replay historical alerts.
   for (const item of items) {
-    const checked = policy.apply({ ...item, categories: publicationCategories({titleKo:item.titleKo, snippet:item.snippetKo}, item.categories || []) });
-    if (checked.level !== item.level || checked.emergency !== item.emergency || checked.categories?.length !== item.categories?.length) feedChanged = true;
+    const checked = policy.apply({ ...item, categories: publicationCategories(item, item.categories || []) });
+    if (checked.level !== item.level || checked.emergency !== item.emergency || JSON.stringify(checked.categories) !== JSON.stringify(item.categories)) feedChanged = true;
     Object.assign(item, checked);
   }
 
@@ -98,7 +98,7 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
   }
   stat.workerCommit = process.env.GITHUB_SHA || 'local';
   stat.workerBranch = process.env.GITHUB_REF_NAME || 'local';
-  const FEED_V = 9;
+  const FEED_V = 10;
   const oldV = feedSnap.exists ? (feedSnap.data().v || 1) : FEED_V;
   if (oldV < FEED_V) {
     items.forEach(i => { if (!i.translated && i.attempts) i.attempts = 0 });
@@ -170,14 +170,24 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
     const recentCut = now - CFG.DEDUPE_H * 3600e3;
     const pool = items.filter(i => (Date.parse(i.publishedAt) || 0) >= recentCut).map(i => ({ i, g: grams(i.titleKo) }));
     for (const n of list) {
-      if (seen[n.id] || have.has(n.id)) continue;
+      if (have.has(n.id)) {
+        const old = items.find(item => item.id === n.id);
+        const before = JSON.stringify([old.publishers, old.categories, old.links]);
+        old.publishers = [...new Set([...(old.publishers || []), ...(n.publishers || []), n.publisherUrl].filter(Boolean))];
+        old.categories = publicationCategories(old, [...old.categories, ...n.cats]);
+        (n.alts || []).forEach(a => addSource(old, a.source, a.link));
+        if (before !== JSON.stringify([old.publishers, old.categories, old.links])) feedChanged = true;
+        continue;
+      }
+      if (seen[n.id]) continue;
       seen[n.id] = now; seenChanged = true;
       const g = grams(n.titleKo);
       const win = (n.cats.includes("korwar") ? 6 : 24) * 3600e3;
       const twin = pool.find(p => Math.abs(Date.parse(p.i.publishedAt) - Date.parse(n.publishedAt)) <= win && similarity(p.g, g) >= SAME_KO);
       if (twin) { // ข่าวเดิมเรื่องเดียวกัน: เพิ่มเป็นแหล่งข่าว
         addSource(twin.i, n.source, n.link); (n.alts || []).forEach(a => addSource(twin.i, a.source, a.link));
-        twin.i.categories = [...new Set([...(twin.i.categories || []), ...n.cats])];
+        twin.i.publishers = [...new Set([...(twin.i.publishers || []), ...(n.publishers || []), n.publisherUrl].filter(Boolean))];
+        twin.i.categories = publicationCategories(twin.i, [...(twin.i.categories || []), ...n.cats]);
         twin.i.emergency ||= n.emergency;
         if (!twin.i.image && n.image) twin.i.image = n.image;
         stat.merged++; feedChanged = true; continue;
@@ -187,7 +197,7 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
         title: { ko: n.titleKo }, summary: { ko: n.snippet }, body: {},
         categories: n.cats, level: "normal", translated: false, attempts: 0, image: n.image || null, emergency: !!n.emergency,
         publishedAt: n.publishedAt, addedAt: iso(now),
-        source: n.source, sourceUrl: n.link, publisherUrl: n.publisherUrl, links: [{ label: n.source || "ข่าวต้นฉบับ", url: n.link }]
+        source: n.source, sourceUrl: n.link, publisherUrl: n.publisherUrl, publishers: n.publishers || [n.publisherUrl], links: [{ label: n.source || "ข่าวต้นฉบับ", url: n.link }]
       };
       (n.alts || []).forEach(a => addSource(it, a.source, a.link));
       items.push(it); pool.push({ i: it, g }); fresh.push(it);
@@ -237,7 +247,7 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
   let ok = 0, total = 0, stopAI = false;
   stat.titled = 0; stat.priority = 0; stat.enriched = 0;
   const timeLeft = () => { if (deadline - Date.now() < 20000) { errs.push("time budget reached"); return false } return true };
-  const inputOf = (i, max = Infinity) => ({ titleKo: i.titleKo, snippet: i.snippetKo || "", article: (article.get(i.id) || "").slice(0, max), source: i.source, cats: i.categories });
+  const inputOf = (i, max = Infinity) => ({ titleKo: i.titleKo, snippet: i.snippetKo || "", article: (article.get(i.id) || "").slice(0, max), source: i.source, sourceUrl: i.sourceUrl, publisherUrl: i.publisherUrl, publishers: i.publishers, links: i.links, cats: i.categories });
 
   // นำผลแปลเต็มไปใส่ข่าว (ใช้ทั้งทางด่วนและงานปกติ)
   const apply = (batch, results, model, partial) => {
@@ -246,8 +256,9 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
       const r = results[k], wasNew = !it.translated, hadText = (article.get(it.id) || "").length > 300;
       if (!r) { audit(it, 'incomplete'); if (wasNew) { it.attempts = (it.attempts || 0) + 1; it.lastTry = now } else it.enrichTries = (it.enrichTries || 0) + 1; return; }
       if (!r.relevant) { audit(it, 'rejected'); if (wasNew) drop.add(it.id); else it.enrichTries = 9; return; } // ข่าวเก่าไม่ลบทิ้งเพราะการเขียนใหม่
+      it.categoryEvidence = evidenceOf({...it, article:article.get(it.id)});
       audit(it, 'completed', r.categories);
-      Object.assign(it, { title: r.title, summary: r.summary, body: r.body, tips: r.tips, categories: r.categories, level: r.level, translated: true });
+      Object.assign(it, { title: r.title, summary: r.summary, body: r.body, tips: r.tips, categories: publicationCategories({...it, article:article.get(it.id)}, r.categories), level: r.level, translated: true });
       Object.assign(it, policy.apply(it));
       if (hadText) { it.rich = true; delete it.needsEnrich } else if (!wasNew) it.enrichTries = (it.enrichTries || 0) + 1;
       delete it.snippetKo; delete it.attempts; delete it.lastTry; delete it.titleTries;
@@ -446,7 +457,8 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
     const twin = keep.find(k => Math.abs(Date.parse(k.it.publishedAt) - Date.parse(it.publishedAt)) <= win && similarity(k.g, g) >= SAME_TH);
     if (!twin) { keep.push({ it, g }); continue }
     (it.links || []).forEach(l => addSource(twin.it, l.label, l.url)); addSource(twin.it, it.source, it.sourceUrl);
-    twin.it.categories = [...new Set([...(twin.it.categories || []), ...(it.categories || [])])];
+    twin.it.publishers = [...new Set([...publisherKeys(twin.it), ...publisherKeys(it)])].map(domain => "https://" + domain);
+    twin.it.categories = publicationCategories(twin.it, [...(twin.it.categories || []), ...(it.categories || [])]);
     gone.add(it.id);
   }
   if (gone.size) { items = items.filter(i => !gone.has(i.id)); stat.merged += gone.size; feedChanged = true; }

@@ -9,8 +9,8 @@ service cloud.firestore {
       return d.keys().hasOnly(['token','cats','level','enabled','testRequested','updatedAt','lang','subscriptionVersion','quietOn','quietFrom','quietTo','quietBypass','lastTestAt'])
         && d.keys().hasAll(['token','cats','level','enabled','testRequested','updatedAt','lang','subscriptionVersion','quietOn','quietFrom','quietTo','quietBypass'])
         && d.token is string && d.token.size() > 20 && d.token.size() < 4096
-        && d.cats is list && d.cats.size() > 0 && d.cats.size() <= 12
-        && d.cats.hasOnly(['korwar','war','food','disease','thai','korea','oil','fx','wage','foreign','law','president'])
+        && d.cats is list && d.cats.size() > 0 && d.cats.size() <= 15
+        && d.cats.hasOnly(['korwar','war','disease','tech','crypto','foreign','wage','fx','oil','thai','president','hot','food','korea','law'])
         && d.level in ['critical','high','all'] && d.lang in ['th','en']
         && d.enabled is bool && d.testRequested is bool && d.subscriptionVersion == 2
         && d.quietOn is bool && d.quietBypass is bool

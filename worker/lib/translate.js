@@ -9,9 +9,10 @@ You receive Korean news items: headline, an RSS snippet, and often "article" = t
 Rules:
 - Use ONLY facts found in the headline, snippet and article. Never add names, numbers, dates, places, quotes or causes that are not in the input.
 - Write in your own words. Do not translate the article sentence by sentence; summarise it.
-- "relevant": false if the item does not really fit any listed category or is entertainment, sports, celebrity gossip, ads or opinion columns.
+- "relevant": false if the item does not really fit any listed category or is an ad. Entertainment, sports and celebrity stories are allowed in "hot" ONLY when verifiedPublishers contains at least three independent Korean outlets covering that same story.
 - "categories": keep only keys from this list that truly apply: ${CAT_KEYS.map(k => `${k} = ${CATS[k].desc || CATS[k].th}`).join("; ")}.
-- Multiple categories may apply. Keep "food" for staple-food prices/supply, food insecurity, shortages, stockpiling and panic buying; keep "foreign" for migrant workers, employment permits, EPS/E-9 and their working conditions, even when "korea", "law", "wage" or "thai" also applies. Do not replace specific topics with "korea" alone.
+- Categories must follow their country and topic scope. Never assign korwar to foreign countries just because a search/feed guessed korwar. Never assign hot from your opinion; require at least three verifiedPublishers.
+- Multiple categories may apply. Preserve specific topics supported by original source facts; never replace a specific topic with a generic label. Only use the current listed category keys.
 - "korwar" and "war" are different: use "korwar" only for the Korean Peninsula; use "war" for conflicts elsewhere.
 - "level": "critical" only for a confirmed North Korean attack on South Korea, a North Korean missile/rocket launch or test, an attack on South Korea, a missile falling near South Korea, or a South Korean soldier stepping on an antipersonnel mine. Threats, plans, drills, old anniversaries and speculation are not critical. "high" for important developments in those categories or major policy changes affecting foreign workers. Otherwise "normal".
 - "title" and "summary" in natural Thai ("th", written in Thai script) and English ("en"). summary: 2-3 sentences with the key facts.
@@ -215,7 +216,7 @@ async function runChain(system, user, maxTokens, opts) {
 async function translate(items, opts) {
   const log = opts.log || console;
   if (!items.length) return { results: [], model: null, partial: false };
-  const input = items.map((n, i) => ({ i, headline: n.titleKo, snippet: n.snippet, article: n.article || "", source: n.source, guessedCategories: n.cats }));
+  const input = items.map((n, i) => ({ i, headline: n.titleKo, snippet: n.snippet, article: n.article || "", source: n.source, guessedCategories: n.cats, verifiedPublishers: require("./categories").publisherKeys(n) }));
   const exclude = new Set(opts.exclude || []);
   const results = items.map(() => null);
   for (let round = 0; ; round++) {

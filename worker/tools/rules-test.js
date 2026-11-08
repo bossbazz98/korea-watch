@@ -14,6 +14,8 @@ const {doc,setDoc,getDoc,serverTimestamp,Timestamp,updateDoc}=client;
     await assertSucceeds(getDoc(doc(alice,'subscribers/alice')));
     await assertFails(getDoc(doc(bob,'subscribers/alice')));
     await assertFails(setDoc(doc(alice,'subscribers/alice'),{...data(),cats:['unknown']}));
+    await assertSucceeds(setDoc(doc(alice,'subscribers/alice'),{...data(),cats:['tech','crypto','hot','foreign']}));
+    await assertSucceeds(setDoc(doc(alice,'subscribers/alice'),{...data(),cats:['food','korea','law']})); // Older installed clients remain compatible.
     await assertFails(setDoc(doc(alice,'subscribers/alice'),{...data(),quietFrom:24}));
     await assertFails(setDoc(doc(alice,'subscribers/alice'),{...data(),updatedAt:Timestamp.fromMillis(0)}));
     await assertSucceeds(setDoc(doc(alice,'subscribers/alice'),{...data(),testRequested:true,lastTestAt:serverTimestamp()}));

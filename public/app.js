@@ -1,3 +1,4 @@
+import { attachPullRefresh } from "./pull-refresh.js";
 import { AlertAudio, SOUND_PRESETS } from "./audio.js";
 import { writeSubscription } from "./subscriptions.js";
 // Korea Watch: หน้าแอป (อ่านข่าวจาก Firestore, ตั้งค่าแจ้งเตือน, ติดตั้งแอป)
@@ -5,10 +6,10 @@ const SDK = "/vendor/firebase/";
 const CFG = self.KW_CONFIG || {};
 const DAY = 864e5, KEEP = 30 * DAY;
 const CATS = globalThis.KW_CATEGORIES;
-const BK_CATS = ["korwar", "war", "food", "disease"], BK_MAX = 10;
-const DEFAULT_PUSH = { enabled: false, level: "critical", cats: ["korwar", "war", "food", "disease", "thai"] };
+const BK_CATS = ["korwar", "war", "disease"], BK_MAX = 10;
+const DEFAULT_PUSH = { enabled: false, level: "critical", cats: ["korwar"] };
 const T = {
-  th: { bk: "ข่าวด่วนล่าสุด", bksub: "สงคราม กักตุน โรคติดต่อ/ไวรัส", bknone: "ยังไม่มีข่าวด่วนในหมวดสงคราม กักตุน หรือโรคติดต่อภายใน 30 วัน",
+  th: { bk: "ข่าวด่วนล่าสุด", bksub: "สงครามเกาหลี สงครามทั่วโลก โรคติดต่อ/ไวรัส", bknone: "ยังไม่มีข่าวด่วนในหมวดสงครามหรือโรคติดต่อภายใน 30 วัน",
     topics: "หมวดข่าว", all: "ข่าวทั้งหมด", d30: "ปัดดูหมวดเพิ่ม", allcat: "ทั้งหมด", bell: "แจ้งเตือน", bellOn: "แจ้งเตือนเปิด", install: "ติดตั้ง",
     urgent: "ด่วน", crit: "ด่วนมาก", high: "สำคัญ", isnew: "ใหม่", summary: "สรุปข่าว", full: "เนื้อหาข่าว", source: "แหล่งข่าว", orig: "หัวข้อต้นฉบับ", open: "เปิดข่าวต้นฉบับ",
     close: "ปิด", ack: "รับทราบ", read: "อ่านข่าวนี้", alertK: "แจ้งเตือนข่าวด่วน", count: n => n + " ข่าว", upd: t => "อัปเดต " + t, loading: "กำลังโหลดข่าว…",
@@ -26,7 +27,7 @@ const T = {
     and: "Android (Chrome)", and1: "เปิดเว็บนี้ใน Chrome", and2: "แตะเมนู ⋮ มุมขวาบน", and3: "เลือก “ติดตั้งแอป” หรือ “เพิ่มลงในหน้าจอหลัก”", and4: "เปิดแอปแล้วกดปุ่มแจ้งเตือน",
     copy: "คัดลอกลิงก์", copied: "คัดลอกลิงก์แล้ว", installed: "ติดตั้งแอปแล้ว", pending: "กำลังแปล",
     testLocal: "เครื่องนี้แสดงแจ้งเตือนได้", testLocalB: "แจ้งเตือนทดสอบจากระบบจะตามมาภายใน 5–15 นาที" },
-  en: { bk: "Breaking now", bksub: "War, stockpiling, disease & viruses", bknone: "No breaking stories on war, stockpiling or disease in the last 30 days",
+  en: { bk: "Breaking now", bksub: "Korean Peninsula, world conflicts & disease", bknone: "No breaking stories on war or disease in the last 30 days",
     topics: "Topics", all: "All news", d30: "Swipe for more", allcat: "All", bell: "Alerts", bellOn: "Alerts on", install: "Install",
     urgent: "URGENT", crit: "Urgent", high: "Important", isnew: "New", summary: "Summary", full: "Full story", source: "Source", orig: "Original headline", open: "Open original article",
     close: "Close", ack: "Got it", read: "Read this story", alertK: "Breaking alert", count: n => n + " stories", upd: t => "Updated " + t, loading: "Loading news…",
@@ -47,7 +48,7 @@ const T = {
 };
 
 Object.assign(T.th, {
-  categoryPending: count => `กำลังเตรียมข่าวหมวดนี้ ${count} ข่าว`, refresh: 'อัปเดตข่าว', refreshing: 'กำลังอัปเดตข่าว…', refreshed: 'อัปเดตข่าวล่าสุดแล้ว', refreshHint: 'เลื่อนลงถึงท้ายหน้าเพื่ออัปเดตข่าว', refreshFailed: 'อัปเดตข่าวไม่ได้ โปรดตรวจการเชื่อมต่อแล้วลองอีกครั้ง', translationPending: 'กำลังแปลข่าวเป็นภาษาไทย', testPending: 'มีคำขอทดสอบจากระบบรอส่งอยู่แล้ว', testCooldown: 'ส่งทดสอบจากเครื่องแล้ว กรุณารอ 5 นาทีก่อนขอทดสอบจากระบบอีกครั้ง', localTestFailed: 'บันทึกแล้ว แต่แสดงแจ้งเตือนทดสอบบนเครื่องไม่ได้', settings: 'ตั้งค่า', settingsIntro: 'ปรับให้เป็นแบบที่คุณชอบ', devicePrefs: 'ภาษา ธีม และเสียง บันทึกให้อัตโนมัติบนเครื่องนี้',
+  categoryPending: count => `กำลังเตรียมข่าวหมวดนี้ ${count} ข่าว`, refresh: 'อัปเดตข่าว', refreshing: 'กำลังอัปเดตข่าว…', refreshed: 'อัปเดตข่าวล่าสุดแล้ว', refreshHint: 'ดึงลงจากด้านบนสุดเพื่ออัปเดตข่าว', refreshFailed: 'อัปเดตข่าวไม่ได้ โปรดตรวจการเชื่อมต่อแล้วลองอีกครั้ง', translationPending: 'กำลังแปลข่าวเป็นภาษาไทย', testPending: 'มีคำขอทดสอบจากระบบรอส่งอยู่แล้ว', testCooldown: 'ส่งทดสอบจากเครื่องแล้ว กรุณารอ 5 นาทีก่อนขอทดสอบจากระบบอีกครั้ง', localTestFailed: 'บันทึกแล้ว แต่แสดงแจ้งเตือนทดสอบบนเครื่องไม่ได้', settings: 'ตั้งค่า', settingsIntro: 'ปรับให้เป็นแบบที่คุณชอบ', devicePrefs: 'ภาษา ธีม และเสียง บันทึกให้อัตโนมัติบนเครื่องนี้',
   appearance: 'หน้าตาและภาษา', appearanceHint: 'อ่านข่าวได้สบาย ในสไตล์ของคุณ', language: 'ภาษาที่แสดง', theme: 'รูปแบบหน้าจอ',
   theme_system: 'ตามระบบ', theme_light: 'สว่าง', theme_dark: 'มืด', soundTitle: 'เสียงเตือนในแอป', soundHint: 'ใช้กับข่าวด่วนมากขณะเปิดแอป',
   soundType: 'เลือกเสียง', preview: 'ทดลองฟัง', stopSound: 'หยุดเสียง', volume: 'ระดับเสียง',
@@ -58,7 +59,7 @@ Object.assign(T.th, {
   quietBypass: 'ยกเว้นข่าวสงครามเกาหลีระดับด่วนมาก', saveAlerts: 'บันทึกการแจ้งเตือน', audioError: 'ยังเล่นเสียงไม่ได้ ลองแตะทดลองฟังอีกครั้ง'
 });
 Object.assign(T.en, {
-  categoryPending: count => `${count} stories in this topic are being prepared`, refresh: 'Refresh news', refreshing: 'Refreshing news…', refreshed: 'News is up to date', refreshHint: 'Scroll to the bottom to refresh news', refreshFailed: 'Could not refresh. Check your connection and try again.', translationPending: 'English translation is pending', testPending: 'A server test is already queued.', testCooldown: 'Local test sent. Wait 5 minutes before requesting another server test.', localTestFailed: 'Saved, but the local notification could not be displayed.', settings: 'Settings', settingsIntro: 'Make it feel like yours.', devicePrefs: 'Language, theme and sound save automatically on this device',
+  categoryPending: count => `${count} stories in this topic are being prepared`, refresh: 'Refresh news', refreshing: 'Refreshing news…', refreshed: 'News is up to date', refreshHint: 'Pull down at the top to refresh news', refreshFailed: 'Could not refresh. Check your connection and try again.', translationPending: 'English translation is pending', testPending: 'A server test is already queued.', testCooldown: 'Local test sent. Wait 5 minutes before requesting another server test.', localTestFailed: 'Saved, but the local notification could not be displayed.', settings: 'Settings', settingsIntro: 'Make it feel like yours.', devicePrefs: 'Language, theme and sound save automatically on this device',
   appearance: 'Appearance & language', appearanceHint: 'A comfortable way to read, day or night.', language: 'Display language', theme: 'Appearance',
   theme_system: 'System', theme_light: 'Light', theme_dark: 'Dark', soundTitle: 'In-app alert sound', soundHint: 'For urgent news while the app is open',
   soundType: 'Choose a sound', preview: 'Preview', stopSound: 'Stop sound', volume: 'Volume',
@@ -106,7 +107,8 @@ function applyTheme() {
 colorScheme.addEventListener('change', applyTheme);
 applyTheme();
 let push = Object.assign({}, DEFAULT_PUSH, store.get("kw.push", {}));
-push.cats = Array.isArray(push.cats) ? push.cats.filter(c => CATS[c]) : [...DEFAULT_PUSH.cats];
+push.cats = globalThis.KW_CATEGORY_POLICY.migratePreferences(push.cats);
+if (!push.cats.length) push.cats = [...DEFAULT_PUSH.cats];
 if (store.get("kw.schema", 0) < 2) { push.cats = [...new Set([...(push.cats || []), ...(push.cats?.includes("war") ? ["korwar"] : [])])]; store.set("kw.push", push); store.set("kw.schema", 2); }
 if (!["th", "en"].includes(lang)) lang = "th";
 let items = [], status = null, loaded = false, notReady = false;
@@ -150,6 +152,8 @@ function emptyMsg(def) {
 function renderStatic() {
   document.documentElement.lang = lang;
   renderRefreshState();
+  $('home-top').setAttribute('aria-label', lang === 'th' ? 'กลับด้านบนสุด' : 'Back to top');
+  $('pull-refresh').setAttribute('aria-label', t('refresh'));
   $("settings").setAttribute("aria-label", t("settings")); $("settings-l").textContent = t("settings");
   $("install").hidden = isStandalone(); $("install-l").textContent = t("install"); $("install").setAttribute("aria-label", t("install"));
   $("t-bk").textContent = t("bk"); $("t-bksub").textContent = t("bksub");
@@ -460,7 +464,7 @@ function renderRefreshState() {
 }
 function applyFeedSnapshot(snapshot) {
   const list = snapshot.exists() ? snapshot.data().items : [];
-  items = Array.isArray(list) ? list.filter(item => item?.id).map(item => globalThis.KW_NEWS_POLICY.apply({ ...item, translated: item.translated === true && globalThis.KW_NEWS_TEXT.completeThai(item) })) : [];
+  items = Array.isArray(list) ? list.filter(item => item?.id).map(item => globalThis.KW_NEWS_POLICY.apply({ ...item, categories:globalThis.KW_CATEGORY_POLICY.classify(item,item.categories || []), translated: item.translated === true && globalThis.KW_NEWS_TEXT.completeThai(item) })) : [];
   loaded = true; render(); openDeepLink();
   if (!snapshot.metadata?.fromCache) checkAlerts();
 }
@@ -490,6 +494,13 @@ addEventListener('scroll', () => {
   previousScrollY = current;
 }, { passive: true });
 $('refresh-news').onclick = () => refreshNews();
+$('home-top').onclick = () => window.scrollTo({top:0, left:0, behavior:'instant'});
+attachPullRefresh({
+  element:$('pull-refresh'),
+  canStart:() => scrollY <= 0 && $('sheet').hidden && $('alert').hidden && !document.hidden,
+  isBusy:() => refreshingNews,
+  refresh:() => refreshNews('pull')
+});
 
 /* data */
 function openDeepLink() { if (deepId && openItem(deepId)) { deepId = null; history.replaceState(null, "", location.pathname) } }

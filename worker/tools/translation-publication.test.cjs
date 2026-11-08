@@ -2,8 +2,8 @@ const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const {translate} = require('../lib/translate');
 const {publicationCategories} = require('../lib/categories');
-const input=[{titleKo:'쌀값 급등, 생필품 수급 점검',cats:['food']},{titleKo:'외국인 근로자 고용허가제 임금 개선',cats:['foreign']}];
-const result=i=>({i,relevant:true,categories:['korea'],level:'normal',title:{th:'ข่าวแปลภาษาไทย '+i,en:'Translated news'},summary:{th:'สรุปข่าวภาษาไทย',en:'Summary'},body_th:['เนื้อหาภาษาไทยที่แปลครบแล้ว']});
+const input=[{titleKo:'인공지능 반도체 신기술 발표',cats:['tech']},{titleKo:'외국인 근로자 고용허가제 임금 개선',cats:['foreign']}];
+const result=i=>({i,relevant:true,categories:['tech'],level:'normal',title:{th:'ข่าวแปลภาษาไทย '+i,en:'Translated news'},summary:{th:'สรุปข่าวภาษาไทย',en:'Summary'},body_th:['เนื้อหาภาษาไทยที่แปลครบแล้ว']});
 const quiet={log(){},warn(){}};
 function options(replies) {
  const calls=[];
@@ -14,13 +14,13 @@ function options(replies) {
   return {ok:true,status:200,json:async()=>({choices:[{message:{content:JSON.stringify({items:reply})}}]})};
  }};
 }
-test('structured empty and incomplete JSON fall back; food and foreign remain publishable in their topics',async()=>{
+test('structured empty and incomplete JSON fall back; tech and foreign remain publishable in their topics',async()=>{
  for(const empty of [[],[{}],[{i:0,title:{},categories:[]}],[{...result(0),body_th:[]}]]) {
   const opts=options([empty,input.map((_,i)=>result(i))]);
   const r=await translate(input,opts);
   assert.deepEqual(opts.calls,['a','b']);
   assert(r.results.every(x=>x.relevant));
-  assert(r.results[0].categories.includes('food'));assert(r.results[1].categories.includes('foreign'));
+  assert(r.results[0].categories.includes('tech'));assert(r.results[1].categories.includes('foreign'));
  }
 });
 test('a complete item survives fallback for its missing batch partner',async()=>{
@@ -37,8 +37,8 @@ test('provider failure after partial completion preserves the completed article'
 test('explicit irrelevant remains rejected; RSS category hints alone cannot force a topic',async()=>{
  const opts=options([[{i:0,relevant:false}]]);
  const r=await translate([input[0]],opts);assert.equal(r.results[0].relevant,false);assert.equal(opts.calls.length,1);
- assert.deepEqual(publicationCategories({titleKo:'인기 가수 라면 먹방',cats:['food']},['korea']),['korea']);
- assert.deepEqual(publicationCategories({titleKo:'관광 비자 연장',cats:['foreign']},['law']),['law']);
+ assert.deepEqual(publicationCategories({titleKo:'인기 가수 라면 먹방',cats:['tech']},['korea']),[]);
+ assert.deepEqual(publicationCategories({titleKo:'관광 비자 연장',cats:['foreign']},['law']),[]);
 });
 test('unavailable models are skipped in later batches and full error reasons are retained',async()=>{
  const calls=[],modelErrors=new Map(),unavailable=new Map();
