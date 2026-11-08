@@ -44,25 +44,11 @@ const server = http.createServer((request, response) => {
         assert.equal(await page.locator('.tools #l-th').count(), 0, 'language moved out of header');
         assert.equal(await page.locator('#bell').count(), 0, 'no duplicate settings shortcut');
         assert.equal(await page.locator('#settings').count(), 1);
-        await page.evaluate(() => scrollTo(0, document.documentElement.scrollHeight));
-        await page.waitForFunction(() => window.__refreshReads === 2);
-        assert.match(await page.locator('#refresh-status').textContent(), /อัปเดตข่าวล่าสุดแล้ว/);
-        await page.evaluate(() => { scrollTo(0, 0); });
-        await page.waitForTimeout(40);
+        assert.equal(await page.locator('#refresh-news').count(), 0, 'bottom refresh control removed');
         await page.evaluate(() => scrollTo(0, document.documentElement.scrollHeight));
         await page.waitForTimeout(80);
-        assert.equal(await page.evaluate(() => window.__refreshReads), 2, 'bottom refresh is rate limited');
-        await page.locator('#refresh-news').click();
-        await page.waitForFunction(() => window.__refreshReads === 4);
-        await context.setOffline(true);
-        await page.locator('#refresh-news').click();
-        assert.match(await page.locator('#refresh-status').textContent(), /อัปเดตข่าวไม่ได้/);
-        assert.equal(await page.evaluate(() => window.__refreshReads), 4);
-        await context.setOffline(false);
-        await page.locator('#refresh-news').click();
-        await page.waitForFunction(() => window.__refreshReads === 6);
-
-        await page.evaluate(() => scrollTo(0, 0));
+        assert.equal(await page.evaluate(() => window.__refreshReads || 0), 0, 'bottom scrolling no longer refreshes news');
+        await page.locator('#home-top').click();
 
         await page.locator('#settings').click();
         assert.equal(await page.locator('.settings-heading .eyebrow').count(), 0, 'settings has no duplicate brand');

@@ -169,7 +169,7 @@ section{min-width:0}
 .btn.sm{height:36px;padding:0 12px;font-size:14px;flex:none}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(20px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--ink-fg);padding:10px 16px;border-radius:12px;font-family:var(--f-head);font-size:15px;z-index:60;max-width:calc(100% - 32px)}
 @media (prefers-reduced-motion:reduce){.dot{animation:none}.dots span{transition:none}}
-@media (max-width:460px){.brand h1{font-size:18px}.logo{display:none!important}.brand small{display:none}.pill .lbl{display:none}.pill{padding:0 10px}.lang{padding:0 6px}.nav{display:none}}
+@media (max-width:460px){.brand h1{font-size:18px}.logo{display:block;width:28px;height:28px}.brand{gap:7px}.brand small{display:none}.pill .lbl{display:none}.pill{padding:0 10px}.lang{padding:0 6px}.nav{display:none}}
 
 /* offline / setup banner */
 .offline{background:var(--high-bg);color:var(--high);font-family:var(--f-head);font-weight:600;font-size:14px;text-align:center;padding:8px 16px}
@@ -203,15 +203,17 @@ fieldset{border:0;margin:0;padding:0;display:grid;gap:8px;min-width:0}
 fieldset:disabled{opacity:.45}
 legend{font-family:var(--f-head);font-weight:600;font-size:14px;color:var(--fg-3);padding:0;margin-bottom:8px}
 .btn:disabled{opacity:.5;cursor:default}
-/* Pull-to-refresh fills the actual app mark from bottom to top. */
-.pull-refresh{position:fixed;inset:calc(env(safe-area-inset-top,0px) + 82px) 0 auto;z-index:25;display:flex;justify-content:center;pointer-events:none}
-.pull-mark{position:relative;display:block;width:58px;height:58px;border:4px solid var(--surface);border-radius:18px;background:var(--surface);box-shadow:0 3px 18px rgba(0,0,0,.18)}
-.pull-mark img{position:absolute;inset:0;width:100%;height:100%;border-radius:14px}
-.pull-empty{opacity:.22;filter:grayscale(1)}
-.pull-filled{clip-path:inset(calc(100% - var(--pull-fill,0%)) 0 0)}
-.is-refreshing .pull-mark{animation:pull-breathe .8s ease-in-out infinite alternate}
-@keyframes pull-breathe{to{transform:scale(.92)}}
-@media(prefers-reduced-motion:reduce){.is-refreshing .pull-mark{animation:none}}
+/* Move the original brand from the header to the centre as the wordmark fills. */
+.refresh-status{margin:0;padding:10px 16px;text-align:center;font-size:14px;color:var(--fg-2);background:var(--surface-2)}
+.brand-pulled .logo,.brand-pulled h1{visibility:hidden}
+.pull-refresh{position:fixed;inset:0;z-index:45;pointer-events:none}
+.pull-brand{position:absolute;left:0;top:0;display:flex;align-items:center;gap:var(--pull-gap,10px);padding:10px 14px;border-radius:18px;background:var(--surface);box-shadow:0 6px 28px rgba(0,0,0,.16);transform:translate(calc(var(--pull-x) - 50%),calc(var(--pull-y) - 50%)) scale(var(--pull-scale,1));transform-origin:center;will-change:transform;white-space:nowrap;filter:drop-shadow(0 4px 12px var(--bg))}
+.pull-brand img{width:var(--pull-icon,38px);height:var(--pull-icon,38px);border-radius:10px;flex:none}
+.pull-wordmark{position:relative;font-family:var(--f-head);font-size:var(--pull-font,21px);font-weight:700;line-height:1.3;color:var(--fg-3)}
+.pull-water{position:absolute;inset:0;color:#31a9e1;clip-path:polygon(0 calc(100% - var(--pull-fill)),12% calc(100% - var(--pull-fill) - 2px),25% calc(100% - var(--pull-fill)),38% calc(100% - var(--pull-fill) + 2px),50% calc(100% - var(--pull-fill)),62% calc(100% - var(--pull-fill) - 2px),75% calc(100% - var(--pull-fill)),88% calc(100% - var(--pull-fill) + 2px),100% calc(100% - var(--pull-fill)),100% 100%,0 100%);animation:water-ripple 1s ease-in-out infinite alternate}
+.is-armed .pull-water,.is-refreshing .pull-water{clip-path:inset(0);animation:none}
+@keyframes water-ripple{to{filter:brightness(1.3)}}
+@media(prefers-reduced-motion:reduce){.pull-water{animation:none}}
 </style>
 <link rel="stylesheet" href="/settings.css">
 </head>
@@ -220,7 +222,7 @@ legend{font-family:var(--f-head);font-weight:600;font-size:14px;color:var(--fg-3
   <div class="wrap">
     <button class="brand" id="home-top" type="button" aria-label="กลับด้านบนสุด">
       <img class="logo" src="/icons/icon-192.png" alt="" width="38" height="38">
-      <div style="min-width:0"><h1>Korea Watch</h1><small id="updated">—</small></div>
+      <div style="min-width:0"><h1>KOREA WATCH</h1><small id="updated">—</small></div>
     </button>
     <div class="tools">
       <button class="pill" id="settings" aria-label="ตั้งค่า">
@@ -234,10 +236,11 @@ legend{font-family:var(--f-head);font-weight:600;font-size:14px;color:var(--fg-3
   </div>
 </header>
 <div id="pull-refresh" class="pull-refresh" role="progressbar" aria-label="ดึงลงเพื่ออัปเดตข่าว" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" hidden>
-  <span class="pull-mark" aria-hidden="true"><img class="pull-empty" src="/icons/icon-192.png" alt=""><img class="pull-filled" src="/icons/icon-192.png" alt=""></span>
+  <span class="pull-brand" aria-hidden="true"><img src="/icons/icon-192.png" alt=""><span class="pull-wordmark">KOREA WATCH<span class="pull-water">KOREA WATCH</span></span></span>
 </div>
 <div class="strip" id="strip" hidden><div class="wrap"><span class="dot"></span><b id="strip-k">ด่วน</b><button id="strip-t"></button></div></div>
 <div class="offline" id="offline" hidden></div>
+<p class="refresh-status" id="refresh-status" role="status" aria-live="polite" hidden></p>
 
 <main class="wrap">
   <section>
@@ -257,17 +260,13 @@ legend{font-family:var(--f-head);font-weight:600;font-size:14px;color:var(--fg-3
     <div class="grid" id="grid"></div>
   </section>
   <p class="note" id="t-foot"></p>
-  <section class="feed-refresh" aria-label="อัปเดตข่าว"><button type="button" id="refresh-news" aria-busy="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6 7a7 7 0 0 1 12-1l2 6M4 12l2 6a7 7 0 0 0 12-1"/></svg><span id="refresh-label">อัปเดตข่าว</span></button><p id="refresh-status" role="status" aria-live="polite"></p></section>
+
 </main>
 
 <div class="sheet" id="sheet" hidden><div class="panel" role="dialog" aria-modal="true" id="panel"></div></div>
 <div class="alert" id="alert" hidden><div class="box" role="alertdialog" aria-modal="true" id="alert-box"></div></div>
 <div class="toast" id="toast" hidden></div>
 
-<script src="/categories.js"></script>
-<script src="/news-text.js"></script>
-<script src="/news-policy.js"></script>
-<script src="/category-policy.js"></script>
 <script src="/firebase-config.js"></script>
 <script type="module" src="/app.js"></script>
 </body>
