@@ -5,6 +5,7 @@ import { writeSubscription } from "./subscriptions.js";
 import { createReadingList } from "./reading-list.js";
 import { openShareMenu } from "./share-news.js";
 import { UI_COPY, CATEGORY_KO } from "./ui-copy.js";
+import { attachLiquidTabs, attachDockViewport } from "./liquid-tabs.js";
 // Korea Watch: หน้าแอป (อ่านข่าวจาก Firestore, ตั้งค่าแจ้งเตือน, ติดตั้งแอป)
 const SDK = "/vendor/firebase/";
 const CFG = self.KW_CONFIG || {};
@@ -133,7 +134,7 @@ const readingList = createReadingList({ getItem:key => localStorage.getItem(key)
 function haptic() { if (vibration) { try { navigator.vibrate?.(15); } catch {} } }
 function categoryLabel(key) { return lang === 'ko' ? CATEGORY_KO[key] || CATS[key]?.th || '' : CATS[key]?.[lang] || ''; }
 function headlineOf(n) { return lang === 'ko' && n.titleKo ? n.titleKo : L(n.title); }
-function categoryBadges(n, withNew = true) { return cats(n).filter(c => CATS[c]).map(c => `<span class="chip">${esc(categoryLabel(c))}</span>`).join('') + (withNew && isNew(n) ? `<span class="chip new">${t('isnew')}</span>` : ''); }
+function categoryBadges(n) { return cats(n).filter(c => CATS[c]).map(c => `<span class="chip">${esc(categoryLabel(c))}</span>`).join(''); }
 let items = [], status = null, loaded = false, notReady = false;
 let fb = null; // { app, fs, db }
 let deepId = new URLSearchParams(location.search).get("id");
@@ -149,28 +150,24 @@ const t = k => T[lang][k];
 function ago(ms) { const s = (Date.now() - ms) / 1000; if (s < 90) return t("now"); if (s < 3600) return Math.round(s / 60) + " " + t("m"); if (s < 86400) return Math.round(s / 3600) + " " + t("h"); return Math.round(s / 86400) + " " + t("d") }
 function kst(ms) { try { return new Intl.DateTimeFormat(lang === 'th' ? 'th-TH' : lang === 'ko' ? 'ko-KR' : 'en-GB', { timeZone: "Asia/Seoul", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(ms)) + " " + t("kst") } catch (e) { return new Date(ms).toLocaleString() } }
 function ts(n) { return timestamp(n.publishedAt) }
-function isNew(n) { const a = Date.parse(n.addedAt || n.publishedAt) || 0; return (lastVisit > 0 && a > lastVisit) || Date.now() - ts(n) < DAY }
 function esc(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])) }
 function safeUrl(u) { try { const x = new URL(u); return /^https?:$/.test(x.protocol) ? x.href : "" } catch (e) { return "" } }
 function cats(n) { return Array.isArray(n.categories) ? n.categories : (n.category ? [n.category] : []) }
-function lvl(n) { return n.level === "critical" ? "crit" : n.level === "high" ? "high" : "" }
-function badges(n) {
-  let b = ""; if (n.level === "critical") b += `<span class="badge crit">${t("crit")}</span>`; else if (n.level === "high") b += `<span class="badge high">${t("high")}</span>`;
-  if (n.translated === false) b += `<span class="badge">${t("pending")}</span>`;
-  if (isNew(n)) b += `<span class="badge new">${t("isnew")}</span>`; cats(n).forEach(c => { if (CATS[c]) b += `<span class="badge">${categoryLabel(c)}</span>` }); return b
-}
 function visible() { const cut = Date.now() - KEEP; return items.filter(n => ts(n) >= cut && (n.translated === true || cats(n).includes("korwar"))).sort((a, b) => ts(b) - ts(a)) }
 function picture(n, hero = false) {
   const url=safeUrl(n.image);
   return `<div class="${hero?'hero':'thumb'} news-image"><span class="photo-placeholder" aria-hidden="true"><img src="/icons/icon-192.png" alt=""></span>${url?`<img class="news-photo" src="${esc(url)}" alt="" loading="${hero?'eager':'lazy'}" decoding="async" referrerpolicy="no-referrer">`:''}</div>`;
 }
 document.addEventListener('error',event=>{if(event.target instanceof HTMLImageElement && event.target.classList.contains('news-photo'))event.target.remove()},true);
-function srcLine(n) { return `<div class="meta"><span>${esc(n.source || "")}</span><span>${ago(ts(n))}</span></div>` }
 function setHTML(el, html) { if (el._h === html) return; const sl = el.scrollLeft; el.innerHTML = html; el._h = html; el.scrollLeft = sl }
 function emptyMsg(def) {
   if (notReady) return t('setup');
   const waiting = cat === 'all' ? status?.hidden : status?.pendingByCategory?.[cat];
   return waiting > 0 ? t('categoryPending')(waiting) : def;
+}
+
+function newsCard(n,kind='card') {
+  return `<button class="${kind} hero-card" data-id="${esc(n.id)}">${picture(n)}<div class="hero-copy"><div class="chips">${categoryBadges(n)}</div><h3>${esc(headlineOf(n))}</h3></div></button>`;
 }
 
 function renderStatic() {
@@ -196,7 +193,7 @@ function render() {
   while(bk.length<BK_MAX&&queues.some(queue=>queue.length)) {
     for(const queue of queues){while(queue.length&&featuredIds.has(queue[0].id))queue.shift();const next=queue.shift();if(next){bk.push(next);featuredIds.add(next.id)}if(bk.length===BK_MAX)break}
   }
-  setHTML($("bk"), bk.length ? bk.map(n => `<button class="bkc hero-card" data-id="${esc(n.id)}">${picture(n)}<div class="hero-copy"><div class="chips">${categoryBadges(n)}</div><h3>${esc(headlineOf(n))}</h3></div></button>`).join("")
+  setHTML($("bk"), bk.length ? bk.map(n => newsCard(n,'bkc')).join("")
     : `<div class="empty">${loaded ? emptyMsg(t("bknone")) : t("loading")}</div>`);
   setHTML($("dots"), bk.length > 1 ? bk.map(() => "<span></span>").join("") : "");
   updDots(); updHint();
@@ -207,7 +204,7 @@ function render() {
   const tl = $("tiles"); tl.style.setProperty("--cols", Math.ceil((Object.keys(CATS).length + 1) / 2)); setHTML(tl, tiles);
   const list = cat === "all" ? all : all.filter(n => cats(n).includes(cat));
   $("t-filter").textContent = cat === "all" ? (loaded ? t("count")(all.length) : "") : categoryLabel(cat);
-  setHTML($("grid"), list.length ? list.map(n => `<button class="card ${lvl(n)}" data-id="${esc(n.id)}">${picture(n)}<div class="meta">${badges(n)}</div><h3>${esc(headlineOf(n))}</h3><p>${esc(L(n.summary))}</p>${srcLine(n)}</button>`).join("")
+  setHTML($("grid"), list.length ? list.map(n => newsCard(n)).join("")
     : (loaded ? `<div class="empty">${emptyMsg(t("none"))}</div>` : ""));
 }
 
@@ -227,19 +224,20 @@ addEventListener("resize", () => { cancelAnimationFrame(raf); raf = requestAnima
 addEventListener("online", render); addEventListener("offline", render);
 
 /* Full-screen reader and three persistent app tabs. */
-let lastFocus = null, currentArticle = null, closeShare = null;
+let lastFocus = null, currentArticle = null, closeShare = null, settingsReturnView = 'home';
 const pageScroll = { home:0, saved:0 };
 function updateAppChrome() {
   const overlay = !$('sheet').hidden, modal = overlay && $('panel').dataset.kind !== 'settings';
   $('home-page').hidden = currentView !== 'home'; $('home-header').hidden = currentView !== 'home';
   $('saved-page').hidden = currentView !== 'saved';
   $('home-page').inert = modal; $('home-header').inert = modal; $('saved-page').inert = modal;
-  $('app-tabs').hidden = modal;
+  $('app-tabs').hidden = modal || currentView === 'settings';
   document.body.dataset.view = currentView;
   for (const [id,view] of [['nav-home','home'],['nav-saved','saved'],['settings','settings']]) {
     const selected=currentView===view;$(id).classList.toggle('active',selected);
     if(selected)$(id).setAttribute('aria-current','page');else $(id).removeAttribute('aria-current');
   }
+  tabLens.sync();
 }
 function showSheet(html, kind = 'reader') {
   if ($('sheet').hidden) lastFocus = document.activeElement;
@@ -262,12 +260,13 @@ function closeSheet({restore=true}={}) {
   if(closeShare){closeShare();closeShare=null}$('panel').inert=false;
   alertAudio.stop();$('sheet').hidden=true;document.body.style.overflow='';delete document.body.dataset.overlay;
   settingsDraft=null;currentArticle=null;
-  if(currentView==='settings')currentView='home';updateAppChrome();
+  if(currentView==='settings')currentView=settingsReturnView;updateAppChrome();if(currentView==='saved')renderSaved();
   if(restore){try{if(lastFocus?.isConnected&&!lastFocus.closest('[hidden]'))lastFocus.focus({preventScroll:true});else $('nav-'+(currentView==='saved'?'saved':'home')).focus({preventScroll:true})}catch{}}
 }
 function navigate(view) {
   if(!['home','saved','settings'].includes(view))return;
   if(currentView===view&&$('sheet').hidden){if(view==='home')scrollHomeTop();return}
+  if(view==='settings'&&currentView!=='settings')settingsReturnView=currentView;
   if(currentView!=='settings')pageScroll[currentView]=scrollY;
   if(!$('sheet').hidden)closeSheet({restore:false});currentView=view;
   if(view==='settings'){openSettings();return}
@@ -283,11 +282,11 @@ function openItem(id) {
   const paras=globalThis.KW_NEWS_TEXT.body(n.body,lang==='ko'?'th':lang);
   const links=(Array.isArray(n.links)&&n.links.length?n.links:(n.sourceUrl?[{label:n.source,url:n.sourceUrl}]:[])).filter(Boolean).map(l=>({label:l.label,url:safeUrl(l.url)})).filter(l=>l.url);
   const headline=headlineOf(n);
-  showSheet(`<div class="reader-top"><button id="reader-back-top" class="icon-button glass" aria-label="${t('back')}">${uiIcon('back')}</button><div class="reader-sticky glass" aria-hidden="true"><span>${esc(headline)}</span><div class="read-progress"><i></i></div></div><button class="icon-button glass" id="close" aria-label="${t('close')}">${uiIcon('close')}</button></div>
+  showSheet(`<div class="reader-top"><div class="reader-sticky glass" aria-hidden="true"><span>${esc(headline)}</span><div class="read-progress"><i></i></div></div><button class="icon-button glass" id="close" aria-label="${t('close')}">${uiIcon('close')}</button></div>
     <div class="reader-hero">${picture(n,true)}</div><article class="article"><div class="chips">${categoryBadges(n)}</div><h1 id="article-title">${esc(headline)}</h1><div class="article-meta"><img class="mini-logo" src="/icons/icon-192.png" alt=""><span>${esc(n.source||'')} · ${kst(ts(n))}</span></div>${lang==='ko'?`<p class="content-language">${t('koreanContent')}</p>`:''}<div class="summary-box"><h2>${t('summary')}</h2><p>${esc(L(n.summary))}</p></div>${paras.length?`<div class="article-body body">${paras.map(p=>`<p>${esc(p)}</p>`).join('')}</div>`:''}<div class="src"><div class="k">${t('source')}</div>${n.titleKo?`<div class="ko">${t('orig')}: ${esc(n.titleKo)}</div>`:''}${links.map(l=>`<a href="${esc(l.url)}" target="_blank" rel="noopener noreferrer">${esc(l.label||t('open'))}${uiIcon('external')}</a>`).join('')}<p class="ko">${t('aiNote')}</p></div></article>
     <div class="reader-actions"><button class="back-wide glass" id="reader-back">${uiIcon('back')}${t('back')}</button><button class="icon-button glass" id="reader-save" aria-label="${t('bookmark')}">${uiIcon('bookmark')}</button><button class="icon-button glass" id="reader-share" aria-label="${t('share')}">${uiIcon('share')}</button></div>`,'reader');
   currentArticle=n;bookmarkButton();
-  $('reader-back').onclick=$('reader-back-top').onclick=()=>closeSheet();
+  $('reader-back').onclick=()=>closeSheet();
   $('reader-save').onclick=()=>{try{if(readingList.has(n.id)){readingList.remove(n.id);toast(t('unbookmark'),1500)}else{readingList.save(n);haptic();toast(t('bookmarked'),1500,'bookmark')}bookmarkButton();if(currentView==='saved')renderSaved()}catch{toast(t('storageFailed'))}};
   $('reader-share').onclick=()=>{if(closeShare)return;$('panel').inert=true;closeShare=openShareMenu({article:n,title:headline,summary:L(n.summary),category:cats(n).filter(c=>CATS[c]).map(categoryLabel).join(' · '),icon:uiIcon,t,toast,onClose:()=>{$('panel').inert=false;closeShare=null;$('reader-share')?.focus({preventScroll:true})}})};
   const scroll=$('panel').querySelector('.sheet-content'),title=$('article-title'),sticky=$('panel').querySelector('.reader-sticky');
@@ -297,7 +296,7 @@ function openItem(id) {
 }
 function renderSaved() {
   const entries=readingList.all();$('saved-title').textContent=t('readingList');$('saved-count').textContent=t('count')(entries.length);
-  setHTML($('saved-content'),entries.length?`<div class="saved-rows">${entries.map(({id,savedAt,article:n})=>`<div class="saved-item-wrap"><button class="delete-saved" data-delete="${esc(id)}" aria-label="${t('deleteSaved')}: ${esc(headlineOf(n))}">${uiIcon('trash')}${t('delete')}</button><button class="saved-row" data-id="${esc(id)}">${picture(n)}<span><span class="chips">${categoryBadges(n,false)}</span><h3>${esc(headlineOf(n))}</h3><span class="saved-at">${uiIcon('clock')}${t('savedAt')} ${Date.now()-savedAt<60000?t('minuteSaved'):kst(savedAt)}</span></span></button></div>`).join('')}</div>`:`<div class="empty-saved"><div class="empty-icon">${uiIcon('bookmark')}</div><h2>${t('emptySaved')}</h2><p>${t('emptySavedHint')}</p></div>`);
+  setHTML($('saved-content'),entries.length?`<div class="saved-rows">${entries.map(({id,savedAt,article:n})=>`<div class="saved-item-wrap"><button class="delete-saved" data-delete="${esc(id)}" aria-label="${t('deleteSaved')}: ${esc(headlineOf(n))}">${uiIcon('trash')}${t('delete')}</button><button class="saved-row" data-id="${esc(id)}">${picture(n)}<span><span class="chips">${categoryBadges(n)}</span><h3>${esc(headlineOf(n))}</h3><span class="saved-at">${uiIcon('clock')}${t('savedAt')} ${Date.now()-savedAt<60000?t('minuteSaved'):kst(savedAt)}</span></span></button></div>`).join('')}</div>`:`<div class="empty-saved"><div class="empty-icon">${uiIcon('bookmark')}</div><h2>${t('emptySaved')}</h2><p>${t('emptySavedHint')}</p></div>`);
 }
 let swipeStart=null;
 $('saved-content').addEventListener('touchstart',e=>{const row=e.target.closest('.saved-item-wrap');if(row&&e.touches.length===1)swipeStart={row,x:e.touches[0].clientX,y:e.touches[0].clientY};else swipeStart=null},{passive:true});
@@ -321,6 +320,8 @@ document.addEventListener('click',e=>{
   const tile=e.target.closest('[data-cat]');if(tile){cat=tile.dataset.cat;render()}
 });
 $('nav-home').onclick=()=>navigate('home');$('nav-saved').onclick=()=>navigate('saved');
+const tabLens=attachLiquidTabs({bar:$('app-tabs'),onSelect:id=>navigate({'nav-home':'home','nav-saved':'saved',settings:'settings'}[id])});
+attachDockViewport({isStandalone});
 
 /* install */
 let installEvt = null;
@@ -462,7 +463,7 @@ function openSettings(keepDraft=false) {
   const heading=(text,tools='')=>`<h3 class="group-title"><span>${text}</span>${tools}</h3>`;
   const tools=(id,count,allId)=>`<span class="group-tools"><span id="${id}">${count}/12</span><button type="button" id="${allId}">${t(count===12?'clearAll':'selectAll')}</button></span>`;
   const hourOptions=value=>Array.from({length:24},(_,hour)=>`<option value="${hour}" ${Number(value)===hour?'selected':''}>${hourText(hour)}</option>`).join('');
-  showSheet(`<div class="bar settings-heading glass"><h2 id="sheet-title">${t('settings')}</h2></div>
+  showSheet(`<div class="bar settings-heading glass"><button type="button" id="settings-back" class="icon-button glass" aria-label="${t('back')}">${uiIcon('back')}</button><h2 id="sheet-title">${t('settings')}</h2></div>
     <section class="status-card glass ${push.enabled?'':'off'}" id="notification-status"><span class="status-kw glass"><img src="/icons/icon-192.png" alt="KW"></span><div class="status-copy"><strong id="status-title"></strong><small id="status-summary"></small></div></section><p class="settings-state" id="p-state" role="status" ${blocked?'':'hidden'}>${blocked?esc(statusMessage):''}</p>
     ${heading(t('appearance'))}<section class="settings-card">${row('language',t('language'))}<div class="setting-block"><div class="segments language-choices">${[['th','ไทย'],['en','English'],['ko','한국어']].map(([key,label])=>`<button type="button" id="l-${key}" class="${lang===key?'selected':''}" aria-pressed="${lang===key}">${label}</button>`).join('')}</div>${lang==='ko'?`<p class="hint">${t('koreanPush')}</p>`:''}</div>${row('system',t('theme'))}<div class="setting-block"><div class="segments theme-choices">${['system','light','dark'].map(mode=>`<label><input type="radio" name="theme" value="${mode}" ${themeMode===mode?'checked':''}>${uiIcon(mode)}<span>${t('theme_'+mode)}</span></label>`).join('')}</div></div>${row('type',t('fontSize'))}<div class="setting-block"><div class="segments font-buttons">${[.9,1,1.14].map((value,i)=>`<button type="button" data-font="${value}" class="${fontScale===value?'selected':''}" aria-label="${t('fontSize')} ${i+1}" aria-pressed="${fontScale===value}">${lang==='th'?'ก':lang==='ko'?'가':'A'}</button>`).join('')}</div><div class="font-example"><b>${t('fontPreviewTitle')}</b><p>${t('fontPreviewBody')}</p></div></div></section>
     ${heading(t('featured'),tools('featured-count',featured.length,'featured-all'))}<section class="settings-card">${row('star',t('featuredTopics'),'','') }<div class="topic-picks" id="featured-choices">${featureChoices()}</div></section><p class="hint">${t('featuredHint')}</p>
@@ -473,6 +474,7 @@ function openSettings(keepDraft=false) {
     <footer class="settings-footer settings-actions"><button type="button" class="glass" id="p-test" ${push.enabled&&!blocked?'':'disabled'}>${uiIcon('bell')}${t('test')}</button><button type="button" class="primary glass" id="p-save" ${savingSettings?'disabled':''}>${t(savingSettings?'saving':'saveAlerts')}</button></footer>`,'settings');
   const content=$('panel').querySelector('.sheet-content');content.scrollTop=scroll;
   updateQuietDuration();updateSettingsStatus();
+  $('settings-back').onclick=()=>{navigate(settingsReturnView);$(currentView==='saved'?'nav-saved':'nav-home').focus({preventScroll:true})};
   for(const key of ['th','en','ko'])$('l-'+key).onclick=()=>changeLanguage(key);
   document.querySelectorAll('input[name="theme"]').forEach(input=>input.onchange=()=>{readSettingsDraft();themeMode=input.value;store.set('kw.theme',themeMode);applyTheme()});
   document.querySelectorAll('[data-font]').forEach(button=>button.onclick=()=>{fontScale=Number(button.dataset.font);document.documentElement.style.setProperty('--font-scale',fontScale);store.set('kw.fontScale',fontScale);document.querySelectorAll('[data-font]').forEach(b=>{const active=b===button;b.classList.toggle('selected',active);b.setAttribute('aria-pressed',String(active))})});

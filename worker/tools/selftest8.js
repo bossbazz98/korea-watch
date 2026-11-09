@@ -122,6 +122,7 @@ export function onSnapshot(ref,ok){setTimeout(()=>{if(ref==="meta/feed")ok({exis
       assert.ok(write.value.cats.includes('korwar'));
       assert.strictEqual(write.value.testRequested, true, 'enabling queues a real server test');
       await page.waitForFunction(() => window.__localNotifications === 1);
+      await page.locator('#settings-back').click();
       await page.locator('#settings').click();
       assert(await page.locator('#p-state').isHidden());
       await page.locator('#p-from').selectOption('23');

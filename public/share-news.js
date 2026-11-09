@@ -38,14 +38,14 @@ export async function makeSummaryImage({title,summary,category,source,image}) {
   ctx.fillStyle='#16181C';ctx.fillRect(0,0,600,900);
   const photo=await loadImage(httpUrl(image));
   if (photo) {const scale=Math.max(600/photo.width,310/photo.height),w=photo.width*scale,h=photo.height*scale;ctx.save();ctx.beginPath();ctx.rect(0,0,600,310);ctx.clip();ctx.drawImage(photo,(600-w)/2,(310-h)/2,w,h);ctx.restore();}
-  else {ctx.fillStyle='#22252B';ctx.fillRect(0,0,600,310);ctx.fillStyle='#9A9FA8';ctx.font='700 42px NotoThai, sans-serif';ctx.fillText('KOREA WATCH',36,175);}
-  ctx.fillStyle='#9A9FA8';ctx.font='400 18px NotoThai, sans-serif';ctx.fillText(category,36,352);
-  ctx.fillStyle='#E8E9EC';ctx.font='700 32px NotoThai, sans-serif';const titles=wrap(ctx,title,528,4);let y=410;for(const line of titles){ctx.fillText(line,36,y);y+=51;}
-  y+=20;ctx.fillStyle='#B7BCC5';ctx.font='400 23px NotoThai, sans-serif';for(const line of wrap(ctx,summary,528,3)){ctx.fillText(line,36,y);y+=39;}
+  else {ctx.fillStyle='#22252B';ctx.fillRect(0,0,600,310);ctx.fillStyle='#9A9FA8';ctx.font='700 42px "IBM Plex Sans Thai", sans-serif';ctx.fillText('KOREA WATCH',36,175);}
+  ctx.fillStyle='#9A9FA8';ctx.font='400 18px Sarabun, sans-serif';ctx.fillText(category,36,352);
+  ctx.fillStyle='#E8E9EC';ctx.font='700 32px "IBM Plex Sans Thai", sans-serif';const titles=wrap(ctx,title,528,4);let y=410;for(const line of titles){ctx.fillText(line,36,y);y+=51;}
+  y+=20;ctx.fillStyle='#B7BCC5';ctx.font='400 23px Sarabun, sans-serif';for(const line of wrap(ctx,summary,528,3)){ctx.fillText(line,36,y);y+=39;}
   ctx.fillStyle='#2E3138';ctx.fillRect(36,797,528,1);
   const brand=await loadImage(new URL('/icons/icon-192.png',location.origin).href);if(brand)ctx.drawImage(brand,36,820,44,44);
-  ctx.fillStyle='#E8E9EC';ctx.font='700 19px NotoThai, sans-serif';ctx.fillText('KOREA WATCH',94,846);
-  ctx.fillStyle='#9A9FA8';ctx.font='400 13px NotoThai, sans-serif';ctx.fillText(wrap(ctx,source||'',320,1)[0]||'',94,869);
+  ctx.fillStyle='#E8E9EC';ctx.font='700 19px "IBM Plex Sans Thai", sans-serif';ctx.fillText('KOREA WATCH',94,846);
+  ctx.fillStyle='#9A9FA8';ctx.font='400 13px Sarabun, sans-serif';ctx.fillText(wrap(ctx,source||'',320,1)[0]||'',94,869);
   return new Promise((resolve,reject)=>canvas.toBlob(blob=>blob?resolve(blob):reject(Error('Image unavailable')),'image/png'));
 }
 export function openShareMenu({article,title,summary,category,icon,t,toast,onClose}) {

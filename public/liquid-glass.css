@@ -45,3 +45,81 @@ html.pull-active{overscroll-behavior-y:none;overflow-anchor:none}.pull-space{pos
 @media(prefers-reduced-transparency:reduce){.glass{background:var(--sheet);backdrop-filter:none;-webkit-backdrop-filter:none}.settings-actions .primary{background:var(--ink);color:var(--ink-fg)}}
 @media(prefers-reduced-motion:reduce){.pull-refresh[data-phase="ready"] .pull-point{transform:none;transition:none}.saved-row{transition:none}.reader-sticky{transition:opacity 120ms ease}.toast{animation:soft-in 120ms ease}}
 .alert .box.glass{background:var(--glass);backdrop-filter:var(--glass-filter);-webkit-backdrop-filter:var(--glass-filter)}
+
+/* Original app typography, with local Thai/Latin subsets for offline reading. */
+:root {
+  --f-head:"IBM Plex Sans Thai",NotoThai,"Leelawadee UI",system-ui,sans-serif;
+  --f-body:"Sarabun",NotoThai,"Leelawadee UI",system-ui,sans-serif;
+  --dock-obstruction:0px;
+  --dock-bottom:calc(max(6px,env(safe-area-inset-bottom,0px)) + var(--dock-obstruction));
+}
+h1,h2,h3,.btn,.pill,.tab,.tile,.badge,.chip,.topic-pick,.segments,.group-title { font-family:var(--f-head); }
+body,input,select { font-family:var(--f-body); }
+
+/* A single spring-driven lens replaces separate selected-tab backgrounds. */
+.tabbar {
+  bottom:var(--dock-bottom);
+  overflow:visible;
+  touch-action:pan-y;
+  user-select:none;
+  -webkit-user-select:none;
+  -webkit-touch-callout:none;
+}
+.tabbar .tab { position:relative;z-index:1;touch-action:pan-y;border:1px solid transparent; }
+.tabbar .tab.active {
+  background:transparent;
+  border:1px solid transparent;
+  box-shadow:none;
+}
+.tab-lens {
+  position:absolute;
+  top:0;
+  left:0;
+  z-index:0;
+  border-radius:22px;
+  pointer-events:none;
+  transform-origin:center;
+  will-change:transform;
+  background:color-mix(in srgb,var(--fg) 12%,transparent);
+  border-color:color-mix(in srgb,var(--fg) 18%,transparent);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 3px 12px rgba(0,0,0,.10);
+  transition:box-shadow 220ms ease;
+}
+.tabbar.is-engaged .tab { color:var(--muted); }
+.tabbar.is-engaged .tab.is-hovered { color:var(--fg); }
+.tabbar.is-engaged .tab-lens {
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.28),0 10px 28px rgba(0,0,0,.24);
+}
+
+/* Full-photo cards share the same markup and dimensions in both news sections. */
+.all-news-section { width:100%;max-width:680px;justify-self:center; }
+#grid { display:grid;grid-template-columns:minmax(0,1fr);gap:16px; }
+.card.hero-card {
+  display:flex;
+  flex-direction:column;
+  width:100%;
+  padding:0;
+  gap:0;
+  border-radius:20px;
+  overflow:hidden;
+}
+.hero-card .thumb { flex:none;width:100%;height:156px;min-height:0;max-height:none;border-radius:0; }
+.hero-card .news-photo { object-position:50% 54%;transform:translateY(4px) scale(1.12); }
+.hero-card .hero-copy { width:100%;padding:13px 14px 17px; }
+.hero-card .hero-copy h3 { font-size:calc(19px * var(--font-scale));font-weight:700;line-height:1.6;margin-top:9px; }
+.hero-card .chips { display:flex;flex-wrap:wrap;gap:6px; }
+.hero-card .chip { font-size:calc(10px * var(--font-scale)); }
+.reader-actions { bottom:var(--dock-bottom); }
+.reader-top { justify-content:flex-end; }
+.reader-sticky { left:0;right:56px; }
+.toast { bottom:calc(var(--dock-bottom) + 82px); }
+@media(min-width:640px) {
+  .hero-card .thumb { height:210px; }
+  .hero-card .hero-copy h3 { font-size:calc(21px * var(--font-scale)); }
+}
+@media(max-width:359px) {
+  .hero-card .hero-copy h3 { font-size:calc(17px * var(--font-scale)); }
+}
+@media(prefers-reduced-motion:reduce) {
+  .tab-lens { will-change:auto;transition:opacity 120ms ease; }
+}
