@@ -98,6 +98,7 @@ async function auditUI({ appUrl, chromium, launchOpts = {}, prepare = null }) {
   try {
     for (const vp of [{ name: "mobile-light", w: 390, h: 844, scheme: "light" }, { name: "desktop-dark", w: 1280, h: 900, scheme: "dark" }]) {
       const ctx = await browser.newContext({ viewport: { width: vp.w, height: vp.h }, colorScheme: vp.scheme, locale: "th-TH" });
+      await ctx.addInitScript(() => { localStorage.setItem('kw.theme', JSON.stringify('system')); localStorage.setItem('kw.lang', JSON.stringify('th')); });
       if (prepare) await prepare(ctx); // ใช้ตอนทดสอบเท่านั้น
       const page = await ctx.newPage();
       const jsErrors = [];
@@ -115,13 +116,13 @@ async function auditUI({ appUrl, chromium, launchOpts = {}, prepare = null }) {
       await page.waitForTimeout(1500);
       const r = await page.evaluate(() => {
         const cards = [...document.querySelectorAll(".card")];
-        const imgs = [...document.querySelectorAll(".card .thumb img")];
+        const imgs = [...document.querySelectorAll(".card .thumb .news-photo, .card .thumb > img")];
         const thai = /[\u0E00-\u0E7F]/;
         const titles = cards.map(c => (c.querySelector("h3") || {}).textContent || "");
         return {
           cards: cards.length, breaking: document.querySelectorAll(".bkc").length, tiles: document.querySelectorAll(".tile").length,
           imgs: imgs.length, imgsLoaded: imgs.filter(i => i.complete && i.naturalWidth > 0).length,
-          graphics: [...document.querySelectorAll(".card .thumb")].filter(t => !t.querySelector("img")).length,
+          graphics: [...document.querySelectorAll(".card .thumb")].filter(t => !t.querySelector(".news-photo, :scope > img")).length,
           overflowX: document.documentElement.scrollWidth > window.innerWidth + 2,
           nonThaiTitles: titles.filter(t => t && !thai.test(t)).length,
           emptyTitles: titles.filter(t => !t.trim()).length,
@@ -142,10 +143,10 @@ async function auditUI({ appUrl, chromium, launchOpts = {}, prepare = null }) {
       await page.waitForSelector("#panel .hero", { timeout: 5000 }).catch(() => { });
       await page.waitForTimeout(1200);
       const rd = await page.evaluate(() => {
-        const h = document.querySelector("#panel .hero"), c = h && h.querySelector(".cap"), s = document.querySelector("#panel .sum, #panel .body");
+        const h = document.querySelector("#panel .hero"), c = h && h.querySelector(".cap"), s = document.querySelector("#panel .summary-box, #panel .sum, #panel .body");
         if (!h) return { open: false };
-        const hr = h.getBoundingClientRect(), cr = c.getBoundingClientRect(), sr = s ? s.getBoundingClientRect() : null;
-        return { open: true, capInside: cr.bottom <= hr.bottom + 1 && cr.top >= hr.top - 1, textBelowImage: !sr || sr.top >= hr.bottom - 1, paragraphs: document.querySelectorAll("#panel .body p").length };
+        const hr = h.getBoundingClientRect(), cr = c ? c.getBoundingClientRect() : null, sr = s ? s.getBoundingClientRect() : null;
+        return { open: true, capInside: !cr || (cr.bottom <= hr.bottom + 1 && cr.top >= hr.top - 1), textBelowImage: !sr || sr.top >= hr.bottom - 1, paragraphs: document.querySelectorAll("#panel .body p").length };
       });
       metrics[vp.name].reader = rd;
       if (!rd.open) add(`reader-${vp.name}`, "high", `กดการ์ดข่าวแล้วหน้าอ่านข่าวไม่เปิด (${vp.name})`);

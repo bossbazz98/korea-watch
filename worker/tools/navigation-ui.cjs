@@ -20,104 +20,41 @@ async function touch(page,type,x,y,count=1){await page.evaluate(({type,x,y,count
 (async()=>{
  await new Promise(resolve=>server.listen(8808,'127.0.0.1',resolve));fs.mkdirSync(out,{recursive:true});
  const browser=await chromium.launch({executablePath:process.env.AGENT_CHROMIUM||chromium.executablePath()});
- try {for(const viewport of [{width:390,height:844},{width:320,height:640},{width:1280,height:900}]){
-  const context=await browser.newContext({viewport,hasTouch:true,isMobile:viewport.width<800,colorScheme:viewport.width===390?'dark':'light',reducedMotion:viewport.width===320?'reduce':'no-preference',serviceWorkers:'block'});
+ try{for(const viewport of [{width:390,height:844},{width:320,height:640},{width:1280,height:900}]){
+  const context=await browser.newContext({viewport,hasTouch:true,isMobile:viewport.width<800,colorScheme:'dark',reducedMotion:viewport.width===320?'reduce':'no-preference',serviceWorkers:'block'});
   await context.addInitScript(()=>localStorage.setItem('kw.push',JSON.stringify({cats:['law','korea','food'],enabled:false})));
   await context.route('**/vendor/firebase/**',r=>r.fulfill({contentType:'text/javascript',body:sdk[r.request().url().split('/').pop()]||''}));
-  await context.route('https://fonts.googleapis.com/**',r=>r.fulfill({contentType:'text/css',body:''}));
   const page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
-  await page.goto('http://127.0.0.1:8808');await page.waitForSelector('.card');
-  assert.deepEqual(await page.locator('#tiles [data-cat]').evaluateAll(nodes=>nodes.map(n=>n.dataset.cat)),['all',...Object.keys(labels)]);
-  assert.equal(await page.locator('#grid .card').count(),stories.length,'All includes every published story, including legacy');
-  assert.equal(await page.locator('#refresh-news').count(),0,'bottom update control removed');
-  for(const key of Object.keys(labels)){
-   await page.locator('#tiles [data-cat="'+key+'"]').evaluate(el=>el.click());
-   assert(await page.locator('#grid .card').count()>0,key+' is selectable');
-  }
-  await page.locator('[data-cat="all"]').evaluate(el=>el.click());
-  await page.evaluate(()=>scrollTo(0,700));await page.waitForFunction(()=>scrollY>500);
-  await page.locator('#home-top').click();assert.equal(await page.evaluate(()=>scrollY),0,'brand instantly returns to top');
-  // Keyboard activation is supported by the native button.
-  await page.evaluate(()=>scrollTo(0,500));await page.locator('#home-top').focus();await page.keyboard.press('Enter');
-  assert.equal(await page.evaluate(()=>scrollY),0);
-  const baseline=await page.evaluate(()=>({header:document.querySelector('header').getBoundingClientRect().y,logo:document.querySelector('#home-top .logo').getBoundingClientRect().y,settings:document.querySelector('#settings').getBoundingClientRect().y,title:document.querySelector('#t-bk').getBoundingClientRect().y}));
-  const closed=()=>page.waitForFunction(()=>document.getElementById('pull-space').hidden&&document.getElementById('pull-refresh').dataset.phase==='idle');
-  const message=()=>page.locator('.pull-message').textContent();
-  const pull=async dy=>{await touch(page,'touchstart',170,180);await touch(page,'touchmove',170,180+dy);};
-  await pull(32);
-  assert.equal(await message(),'ดึงเพื่อรีเฟรช');
-  assert.equal(await page.locator('.pull-ring').getAttribute('aria-valuenow'),'50');
-  const during=await page.evaluate(()=>({header:document.querySelector('header').getBoundingClientRect().y,logo:document.querySelector('#home-top .logo').getBoundingClientRect().y,settings:document.querySelector('#settings').getBoundingClientRect().y,title:document.querySelector('#t-bk').getBoundingClientRect().y,height:document.querySelector('#pull-space').getBoundingClientRect().height,scrollY}));
-  assert.equal(during.header,baseline.header);assert.equal(during.logo,baseline.logo);assert.equal(during.settings,baseline.settings);
-  assert(during.height>0&&during.height<32,'feed movement has resistance');assert.equal(during.scrollY,0);
-  assert(Math.abs(during.title-baseline.title-during.height)<1,'space pushes feed instead of overlaying it');
-  assert.equal(await page.evaluate(()=>window.__reads||0),0);
-  await page.screenshot({path:path.join(out,`capsule-${viewport.width}-partial.png`)});
-  await touch(page,'touchend',170,212);await closed();
-  assert.equal(await page.evaluate(()=>window.__reads||0),0,'short releases do not load');
-  assert(Math.abs(await page.locator('#t-bk').evaluate(el=>el.getBoundingClientRect().y)-baseline.title)<1,'original layout returns exactly');
-  await touch(page,'touchstart',170,180);await touch(page,'touchmove',250,190);await touch(page,'touchmove',250,400);await touch(page,'touchend',250,400);await closed();
-  assert.equal(await page.evaluate(()=>window.__reads||0),0,'horizontal swipe never refreshes');
-  await page.evaluate(()=>scrollTo(0,400));await page.waitForFunction(()=>scrollY>300);
-  await pull(90);await touch(page,'touchend',170,270);
-  assert.equal(await page.evaluate(()=>window.__reads||0),0,'below-top pulls never refresh');
-  await page.locator('#home-top').click();await page.locator('#settings').click();
-  assert.equal(await page.locator('input[name="pc"]').count(),12);
-  assert(await page.locator('input[name="pc"][value="foreign"]').isChecked());assert(await page.locator('input[name="pc"][value="hot"]').isChecked());
-  await pull(90);await touch(page,'touchend',170,270);
-  assert.equal(await page.evaluate(()=>window.__reads||0),0,'settings scrolling cannot refresh home');await page.locator('#close').click();
-  // Crossing the threshold and then pulling back disarms the gesture.
-  await pull(64);assert.equal(await message(),'ปล่อยเพื่อรีเฟรช');
-  await touch(page,'touchmove',170,220);assert.equal(await message(),'ดึงเพื่อรีเฟรช');
-  await touch(page,'touchend',170,220);await closed();assert.equal(await page.evaluate(()=>window.__reads||0),0);
-  await page.evaluate(()=>{window.__hold=true;window.__reverseKeys=true;});await pull(64);
-  assert.equal(await page.locator('.pull-ring').getAttribute('aria-valuenow'),'100');
-  const capsule=await page.locator('#pull-refresh').boundingBox();
-  assert.equal(capsule.height,36);assert(Math.abs(capsule.x+capsule.width/2-viewport.width/2)<1);
-  const styles=await page.locator('#pull-refresh').evaluate(el=>({background:getComputedStyle(el).backgroundColor,border:getComputedStyle(el).borderTopColor,color:getComputedStyle(el).color}));
-  assert.deepEqual(styles,{background:'rgb(36, 41, 47)',border:'rgb(56, 64, 73)',color:'rgb(255, 255, 255)'});
-  assert.equal(await page.locator('.pull-ring').evaluate(el=>getComputedStyle(el).color),'rgb(255, 105, 100)');
-  assert.equal(await page.evaluate(()=>window.__reads||0),0,'ready waits for release');
-  await page.screenshot({path:path.join(out,`capsule-${viewport.width}-ready.png`)});
-  await touch(page,'touchend',170,244);await page.waitForFunction(()=>window.__reads===2);
-  assert.equal(await message(),'กำลังอัปเดตข่าว…');assert.equal(await page.locator('#grid .card').count(),stories.length);
-  assert(await page.locator('#refresh-status').isHidden(),'only the capsule shows refresh feedback');
-  if(viewport.width===320)assert.equal(await page.locator('.pull-progress').evaluate(el=>getComputedStyle(el).animationName),'none');
-  await page.screenshot({path:path.join(out,`capsule-${viewport.width}-loading.png`)});
-  await pull(90);await touch(page,'touchend',170,270);assert.equal(await page.evaluate(()=>window.__reads),2,'busy guard prevents duplicate loads');
-  await page.evaluate(()=>{window.__hold=false;window.__release();});
-  await page.waitForFunction(()=>document.getElementById('pull-refresh').dataset.phase==='unchanged');
-  assert.equal(await message(),'ยังไม่มีข่าวใหม่');await closed();
-  // A slow status read cannot delay applying news or finishing the spinner.
-  await page.evaluate(()=>{window.__changed=true;window.__holdStatus=true;});
-  await pull(64);await touch(page,'touchend',170,244);
-  await page.waitForFunction(()=>document.getElementById('pull-refresh').dataset.phase==='updated',{},{timeout:1000});
-  assert.equal(await message(),'อัปเดตข่าวแล้ว');assert((await page.locator('#grid .card h3').first().textContent()).includes('ใหม่'));
-  assert.equal(await page.evaluate(()=>typeof window.__releaseStatus),'function','status is still pending');
-  assert(await page.locator('#refresh-status').isHidden());
-  await page.screenshot({path:path.join(out,`capsule-${viewport.width}-updated.png`)});
-  await page.evaluate(()=>{window.__holdStatus=false;window.__releaseStatus();});await closed();
-  await page.evaluate(()=>window.__fail=true);await pull(64);await touch(page,'touchend',170,244);
-  await page.waitForFunction(()=>document.getElementById('pull-refresh').dataset.phase==='error');
-  assert.equal(await message(),'อัปเดตไม่สำเร็จ ลองดึงอีกครั้ง');
-  assert.equal(await page.locator('#grid .card').count(),stories.length,'failure preserves all current stories');
-  await page.screenshot({path:path.join(out,`capsule-${viewport.width}-error.png`)});await closed();
-  assert.equal(await page.evaluate(()=>window.__reads),6);
-  await page.evaluate(()=>window.__fail=false);await touch(page,'touchstart',170,180,2);await touch(page,'touchmove',170,300,2);await touch(page,'touchend',170,300,2);
-  assert.equal(await page.evaluate(()=>window.__reads),6,'multi-touch does not refresh');
-  const cdp=await context.newCDPSession(page);await page.evaluate(()=>window.__hold=true);
-  await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:170,y:180}]});
-  await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:170,y:215}]});
-  await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:170,y:260}]});
-  assert.equal(await page.evaluate(()=>window.__reads),6,'native input waits for release');
-  await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});await page.waitForFunction(()=>window.__reads===8);
-  await page.evaluate(()=>{window.__hold=false;window.__release();});await closed();
-  assert(await page.locator('#sheet').isHidden(),'native pull does not open a story');
-  await pull(90);await touch(page,'touchcancel',170,270);await closed();
-  assert.equal(await page.evaluate(()=>window.__reads),8,'cancelled ready pulls do not refresh');
-  assert.deepEqual(errors,[]);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
-  console.log(`Capsule UI ${viewport.width}: fixed header, damped feed, threshold, unchanged/updated/error, fast feed, native touch and reduced motion passed`);
-  await context.close();
+  try{
+   await page.goto('http://127.0.0.1:8808');await page.waitForSelector('.card');
+   assert.deepEqual(await page.locator('#tiles [data-cat]').evaluateAll(nodes=>nodes.map(n=>n.dataset.cat)),['all',...Object.keys(labels)]);
+   assert.equal(await page.locator('#grid .card').count(),stories.length,'All includes legacy published stories');
+   for(const key of Object.keys(labels)){await page.locator('#tiles [data-cat="'+key+'"]').evaluate(el=>el.click());assert(await page.locator('#grid .card').count()>0,key+' is selectable')}
+   await page.locator('[data-cat=all]').evaluate(el=>el.click());await page.evaluate(()=>scrollTo(0,700));await page.waitForFunction(()=>scrollY>500);await page.locator('#home-top').click();await page.waitForFunction(()=>scrollY<1);assert.equal(await page.evaluate(()=>scrollY),0);
+   await page.evaluate(()=>scrollTo(0,500));await page.locator('#home-top').focus();await page.keyboard.press('Enter');await page.waitForFunction(()=>scrollY<1);
+   const baseline=await page.evaluate(()=>({header:document.querySelector('#home-header').getBoundingClientRect().y,title:document.querySelector('#t-bk').getBoundingClientRect().y}));
+   const closed=()=>page.waitForFunction(()=>document.getElementById('pull-space').hidden&&document.getElementById('pull-refresh').dataset.phase==='idle');
+   const pull=async dy=>{await touch(page,'touchstart',170,180);await touch(page,'touchmove',170,180+dy)};
+   const reads=()=>page.evaluate(()=>window.__reads||0);
+   await pull(40);assert.equal(await page.locator('#pull-refresh').getAttribute('data-phase'),'pulling');assert.equal(await page.locator('.pull-ring').getAttribute('aria-valuenow'),'28');
+   const during=await page.evaluate(()=>({header:document.querySelector('#home-header').getBoundingClientRect().y,title:document.querySelector('#t-bk').getBoundingClientRect().y,height:document.querySelector('#pull-space').getBoundingClientRect().height}));
+   assert.equal(during.header,baseline.header);assert.equal(during.height,22);assert(Math.abs(during.title-baseline.title-during.height)<1);
+   await touch(page,'touchend',170,220);await closed();assert.equal(await reads(),0);
+   await touch(page,'touchstart',170,180);await touch(page,'touchmove',250,190);await touch(page,'touchmove',250,400);await touch(page,'touchend',250,400);await closed();assert.equal(await reads(),0,'horizontal swipe cannot refresh');
+   await page.evaluate(()=>scrollTo(0,400));await pull(160);await touch(page,'touchend',170,340);assert.equal(await reads(),0,'only start at the top');await page.locator('#home-top').click();await page.waitForFunction(()=>scrollY<1);
+   await page.locator('#settings').click();assert.equal(await page.locator('input[name="pc"]').count(),12);assert(await page.locator('input[name="pc"][value="foreign"]').isChecked());assert(await page.locator('input[name="pc"][value="hot"]').isChecked());await pull(160);await touch(page,'touchend',170,340);assert.equal(await reads(),0);await page.locator('#nav-home').click();
+   await pull(160);assert.equal(await page.locator('#pull-refresh').getAttribute('data-phase'),'ready');await page.waitForTimeout(500);assert.equal(await page.locator('#pull-refresh').getAttribute('data-phase'),'ready','ready stays while holding');await touch(page,'touchmove',170,220);assert.equal(await page.locator('#pull-refresh').getAttribute('data-phase'),'pulling');await touch(page,'touchend',170,220);await closed();assert.equal(await reads(),0);
+   await page.evaluate(()=>{window.__hold=true;window.__reverseKeys=true});await pull(160);assert.equal(await page.locator('.pull-ring').getAttribute('aria-valuenow'),'100');assert.equal(await reads(),0);
+   await page.screenshot({path:path.join(out,`ring-${viewport.width}-ready.png`)});await touch(page,'touchend',170,340);await page.waitForFunction(()=>window.__reads===2);assert.equal(await page.locator('#pull-refresh').getAttribute('data-phase'),'loading');assert.equal(await page.locator('#grid .card').count(),stories.length);assert(await page.locator('#refresh-status').isHidden());
+   if(viewport.width===320)assert.equal(await page.locator('.pull-progress').evaluate(el=>getComputedStyle(el).animationName),'none');
+   await pull(160);await touch(page,'touchend',170,340);assert.equal(await reads(),2,'one request per round');await page.evaluate(()=>{window.__hold=false;window.__release()});await closed();assert.equal(await page.locator('.pull-message').textContent(),'','no no-new-news message');
+   await page.evaluate(()=>{window.__changed=true;window.__holdStatus=true});await pull(160);await touch(page,'touchend',170,340);await page.waitForFunction(()=>document.querySelector('#grid .card h3').textContent.includes('ใหม่'),{},{timeout:1000});assert.equal(await page.evaluate(()=>typeof window.__releaseStatus),'function');await closed();await page.evaluate(()=>{window.__holdStatus=false;window.__releaseStatus()});
+   await page.evaluate(()=>window.__fail=true);await pull(160);await touch(page,'touchend',170,340);await page.waitForFunction(()=>document.getElementById('pull-refresh').dataset.phase==='error');assert.equal(await page.locator('#grid .card').count(),stories.length);await page.screenshot({path:path.join(out,`ring-${viewport.width}-error.png`)});await closed();assert.equal(await reads(),6);
+   await page.evaluate(()=>window.__fail=false);await touch(page,'touchstart',170,180,2);await touch(page,'touchmove',170,360,2);await touch(page,'touchend',170,360,2);assert.equal(await reads(),6);
+   const cdp=await context.newCDPSession(page);await page.evaluate(()=>window.__hold=true);await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:170,y:180}]});await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:170,y:240}]});await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:170,y:350}]});assert.equal(await reads(),6);await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});await page.waitForFunction(()=>window.__reads===8);await page.evaluate(()=>{window.__hold=false;window.__release()});await closed();assert(await page.locator('#sheet').isHidden());
+   await pull(160);await touch(page,'touchcancel',170,340);await closed();assert.equal(await reads(),8);assert.deepEqual(errors,[]);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>document.documentElement.clientWidth),false);
+   console.log(`Ring refresh ${viewport.width}: fixed header, resistance, hold/release, one request, immediate feed, failure, native touch and Reduce Motion passed`);
+  }finally{await context.close()}
  }
  // Regression: the real backend has 184 translated items while the client showed zero.
  const recoveredStories=Array.from({length:184},(_,i)=>({...stories[3],id:'published'+i,title:{th:'ข่าวที่เผยแพร่ '+i},links:i%2?[null]:{legacy:true}}));
