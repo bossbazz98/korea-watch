@@ -1,9 +1,9 @@
 // Ring feedback lives in document flow; only the feed moves below the fixed header.
-export function attachPullRefresh({element,space,canStart,isBusy,refresh,threshold=80,language=()=> 'th',onReady=()=>{},onComplete=()=>{}}) {
+export function attachPullRefresh({element,space,canStart,isBusy,refresh,threshold=80,language=()=> 'th',onReady=()=>{},onComplete=()=>{},minimumSpinMs=450}) {
   const ring=element.querySelector('.pull-ring'),message=element.querySelector('.pull-message');
   const reduced=matchMedia('(prefers-reduced-motion:reduce)');
   const copy={th:{pulling:'ดึงเพื่อรีเฟรช',ready:'ปล่อยเพื่อรีเฟรช',loading:'กำลังอัปเดตข่าว…',finished:'อัปเดตข่าวแล้ว',error:'อัปเดตไม่สำเร็จ ลองดึงอีกครั้ง'},en:{pulling:'Pull to refresh',ready:'Release to refresh',loading:'Updating news…',finished:'News updated',error:'Update failed. Pull to try again'},ko:{pulling:'당겨서 새로고침',ready:'놓으면 새로고침',loading:'뉴스 업데이트 중…',finished:'업데이트됨',error:'업데이트하지 못했습니다. 다시 당겨 주세요'}};
-  let start=null,phase='idle',timer=null,disposed=false;
+  let start=null,phase='idle',timer=null,disposed=false,loadingAt=0;
   const setPhase=next=>{if(phase===next&&element.dataset.phase===next)return;const previous=phase;phase=next;element.dataset.phase=next;message.textContent=(copy[language()]||copy.th)[next]||'';ring.setAttribute('aria-label',message.textContent||(copy[language()]||copy.th).pulling);if(next==='ready'&&previous!=='ready')onReady()};
   const height=pixels=>space.style.height=`${pixels}px`;
   const progress=value=>{element.style.setProperty('--pull-progress',String(value));ring.setAttribute('aria-valuenow',String(Math.round(value*100)))};
@@ -11,9 +11,16 @@ export function attachPullRefresh({element,space,canStart,isBusy,refresh,thresho
   const collapse=()=>{if(space.hidden){clearTimeout(timer);close();return}start=null;space.classList.remove('is-dragging');height(0);phase='collapsing';clearTimeout(timer);timer=setTimeout(close,reduced.matches?120:430)};
   const finish=result=>{
     if(disposed)return;if(result?.busy){collapse();return}
-    progress(1);onComplete(result);
-    if(result?.ok===true){setPhase('finished');collapse()}
-    else{setPhase('error');height(64);timer=setTimeout(collapse,1200)}
+    // Feed content is applied by the loader immediately. Only visual feedback
+    // waits long enough for a fast response to show a short, readable spin.
+    onComplete(result);
+    const complete=()=>{
+      if(disposed)return;progress(1);
+      if(result?.ok===true){setPhase('finished');collapse()}
+      else{setPhase('error');height(64);timer=setTimeout(collapse,1200)}
+    };
+    const remaining=Math.max(0,minimumSpinMs-(performance.now()-loadingAt));
+    if(remaining)timer=setTimeout(complete,remaining);else complete();
   };
   const begin=event=>{
     if(phase!=='idle'||isBusy()||event.touches.length!==1||!canStart())return;
@@ -31,7 +38,7 @@ export function attachPullRefresh({element,space,canStart,isBusy,refresh,thresho
   };
   const end=event=>{
     if(!start)return;if(event.touches.length||phase!=='ready'||!canStart()||isBusy()){cancel();return}
-    start=null;space.classList.remove('is-dragging');setPhase('loading');height(56);ring.removeAttribute('aria-valuenow');
+    start=null;loadingAt=performance.now();space.classList.remove('is-dragging');setPhase('loading');height(56);ring.removeAttribute('aria-valuenow');
     try{Promise.resolve(refresh()).then(finish,()=>finish({ok:false}))}catch{finish({ok:false})}
   };
   document.addEventListener('touchstart',begin,{passive:true});document.addEventListener('touchmove',move,{passive:false});document.addEventListener('touchend',end,{passive:true});document.addEventListener('touchcancel',cancel,{passive:true});document.addEventListener('visibilitychange',cancel);addEventListener('resize',cancel);close();

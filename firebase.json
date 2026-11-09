@@ -21,7 +21,7 @@
         ]
       },
       {
-        "source": "/@(index.html|app.js|audio.js|subscriptions.js|news-text.js|news-policy.js|category-policy.js|pull-refresh.js|feed-data.js|settings.css|liquid-glass.css|fonts.css|liquid-tabs.js|reading-list.js|share-news.js|ui-copy.js|categories.js|cache-manifest.js|firebase-config.js|manifest.webmanifest)",
+        "source": "/@(index.html|app.js|audio.js|subscriptions.js|news-text.js|news-policy.js|category-policy.js|pull-refresh.js|feed-data.js|settings.css|liquid-glass.css|ui-layout.css|fonts.css|liquid-tabs.js|reading-list.js|share-news.js|ui-copy.js|categories.js|cache-manifest.js|firebase-config.js|manifest.webmanifest)",
         "headers": [
           {
             "key": "Cache-Control",

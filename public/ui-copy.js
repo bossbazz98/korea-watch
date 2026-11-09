@@ -8,3 +8,7 @@ export const UI_COPY = {
 Object.assign(UI_COPY.ko, {
   setup:'Firebase 설정이 완료되지 않았습니다.',slow:'뉴스에 연결하지 못했습니다. 아래로 당겨 다시 시도해 주세요.',sDenied:'알림이 차단되어 있습니다. 브라우저나 기기 설정에서 알림을 허용하세요.',sIos:'iPhone에서는 홈 화면에 추가한 뒤 해당 아이콘으로 앱을 열어 알림을 설정하세요 (iOS 16.4 이상).',sNo:'이 브라우저는 알림을 지원하지 않습니다.',sNoKey:'알림 설정이 준비되지 않았습니다.',nOnS:'앱을 닫아도 기기로 알림 수신',installH:'Korea Watch 설치',installed:'앱이 설치되었습니다',ios:'iPhone / iPad (Safari)',ios1:'Safari에서 이 사이트를 여세요',ios2:'공유 버튼을 누르세요',ios3:'홈 화면에 추가를 선택한 뒤 추가를 누르세요',ios4:'홈 화면 아이콘으로 앱을 열어 설정에서 알림을 켜세요',and:'Android (Chrome)',and1:'Chrome에서 이 사이트를 여세요',and2:'오른쪽 위 메뉴를 누르세요',and3:'앱 설치 또는 홈 화면에 추가를 선택하세요',and4:'앱을 열어 설정에서 알림을 켜세요',testLocal:'이 기기에서 알림을 표시할 수 있습니다',testLocalB:'서버 테스트 알림은 5–15분 안에 전송됩니다',tested:'테스트 알림을 요청했습니다. 5–15분 정도 걸릴 수 있습니다.',testPending:'서버 테스트 요청이 이미 대기 중입니다.',testCooldown:'다음 서버 테스트는 5분 후에 요청해 주세요.',localTestFailed:'설정을 저장했지만 이 기기에서 테스트 알림을 표시하지 못했습니다.',alertK:'긴급 뉴스 알림',read:'기사 읽기',ack:'확인',refreshFailed:'새로고침하지 못했습니다. 연결을 확인하세요.',translationPending:'번역 준비 중'
 });
+
+UI_COPY.th.savedTab='บันทึก';
+UI_COPY.en.savedTab='Saved';
+UI_COPY.ko.savedTab='저장';

@@ -8,7 +8,7 @@ export function attachLiquidTabs({bar,onSelect,holdMs=200}) {
   const clamp=(n,min,max)=>Math.min(max,Math.max(min,n));
   const activeButton=()=>buttons.find(button=>button.getAttribute('aria-current')==='page')||buttons[0];
   const paint=()=>{
-    lens.style.transform=`translate3d(${x}px,${y-press*5}px,0) scale(${1+press*.12},${1+press*.60})`;
+    lens.style.transform=`translate3d(${x}px,${y-press*8}px,0) scale(${1+press*.12},${1+press*.60})`;
     lens.style.width=`${width}px`;lens.style.height=`${height}px`;
   };
   const tick=time=>{

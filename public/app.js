@@ -167,13 +167,15 @@ function emptyMsg(def) {
 }
 
 function newsCard(n,kind='card') {
-  return `<button class="${kind} hero-card" data-id="${esc(n.id)}">${picture(n)}<div class="hero-copy"><div class="chips">${categoryBadges(n)}</div><h3>${esc(headlineOf(n))}</h3></div></button>`;
+  const level=['critical','high'].includes(n.level)?n.level:'normal';
+  const accessible=[level==='critical'?t('crit'):level==='high'?t('high'):'',headlineOf(n),...cats(n).filter(c=>CATS[c]).map(categoryLabel)].filter(Boolean).join(' · ');
+  return `<button class="${kind} hero-card" data-level="${level}" aria-label="${esc(accessible)}" data-id="${esc(n.id)}">${picture(n)}<div class="hero-copy"><div class="chips">${categoryBadges(n)}</div><h3>${esc(headlineOf(n))}</h3></div></button>`;
 }
 
 function renderStatic() {
   document.documentElement.lang = lang;
-  $('nav-home-label').textContent=t('home');$('nav-saved-label').textContent=t('readingList');
-  $('nav-home').setAttribute('aria-label',t('home'));$('nav-saved').setAttribute('aria-label',t('readingList'));
+  $('nav-home-label').textContent=t('home');$('nav-saved-label').textContent=t('savedTab');
+  $('nav-home').setAttribute('aria-label',t('home'));$('nav-saved').setAttribute('aria-label',t('savedTab'));
   updateAppChrome();
   renderRefreshState();
   $('home-top').setAttribute('aria-label', lang === 'th' ? 'กลับด้านบนสุด' : 'Back to top');
@@ -186,7 +188,6 @@ function renderStatic() {
 function render() {
   renderStatic();
   const all = visible();
-  $("updated").textContent = status && (status.lastSuccessfulPublishAt || status.lastRun) ? t("upd")(ago(Date.parse(status.lastSuccessfulPublishAt || status.lastRun))) : (loaded ? t("count")(all.length) : t("loading"));
   const u = all.find(n => n.level === "critical" && Date.now() - ts(n) < 3 * DAY);
   $("strip").hidden = !u; if (u) { $("strip-t").textContent = L(u.title); $("strip-t").dataset.id = u.id }
   const queues=featured.map(key=>all.filter(n=>cats(n).includes(key))),bk=[],featuredIds=new Set();
@@ -284,7 +285,7 @@ function openItem(id) {
   const headline=headlineOf(n);
   showSheet(`<div class="reader-top"><div class="reader-sticky glass" aria-hidden="true"><span>${esc(headline)}</span><div class="read-progress"><i></i></div></div><button class="icon-button glass" id="close" aria-label="${t('close')}">${uiIcon('close')}</button></div>
     <div class="reader-hero">${picture(n,true)}</div><article class="article"><div class="chips">${categoryBadges(n)}</div><h1 id="article-title">${esc(headline)}</h1><div class="article-meta"><img class="mini-logo" src="/icons/icon-192.png" alt=""><span>${esc(n.source||'')} · ${kst(ts(n))}</span></div>${lang==='ko'?`<p class="content-language">${t('koreanContent')}</p>`:''}<div class="summary-box"><h2>${t('summary')}</h2><p>${esc(L(n.summary))}</p></div>${paras.length?`<div class="article-body body">${paras.map(p=>`<p>${esc(p)}</p>`).join('')}</div>`:''}<div class="src"><div class="k">${t('source')}</div>${n.titleKo?`<div class="ko">${t('orig')}: ${esc(n.titleKo)}</div>`:''}${links.map(l=>`<a href="${esc(l.url)}" target="_blank" rel="noopener noreferrer">${esc(l.label||t('open'))}${uiIcon('external')}</a>`).join('')}<p class="ko">${t('aiNote')}</p></div></article>
-    <div class="reader-actions"><button class="back-wide glass" id="reader-back">${uiIcon('back')}${t('back')}</button><button class="icon-button glass" id="reader-save" aria-label="${t('bookmark')}">${uiIcon('bookmark')}</button><button class="icon-button glass" id="reader-share" aria-label="${t('share')}">${uiIcon('share')}</button></div>`,'reader');
+    <div class="reader-actions dock-frame glass"><button class="back-wide glass" id="reader-back">${uiIcon('back')}${t('back')}</button><button class="icon-button glass" id="reader-save" aria-label="${t('bookmark')}">${uiIcon('bookmark')}</button><button class="icon-button glass" id="reader-share" aria-label="${t('share')}">${uiIcon('share')}</button></div>`,'reader');
   currentArticle=n;bookmarkButton();
   $('reader-back').onclick=()=>closeSheet();
   $('reader-save').onclick=()=>{try{if(readingList.has(n.id)){readingList.remove(n.id);toast(t('unbookmark'),1500)}else{readingList.save(n);haptic();toast(t('bookmarked'),1500,'bookmark')}bookmarkButton();if(currentView==='saved')renderSaved()}catch{toast(t('storageFailed'))}};
@@ -463,7 +464,7 @@ function openSettings(keepDraft=false) {
   const heading=(text,tools='')=>`<h3 class="group-title"><span>${text}</span>${tools}</h3>`;
   const tools=(id,count,allId)=>`<span class="group-tools"><span id="${id}">${count}/12</span><button type="button" id="${allId}">${t(count===12?'clearAll':'selectAll')}</button></span>`;
   const hourOptions=value=>Array.from({length:24},(_,hour)=>`<option value="${hour}" ${Number(value)===hour?'selected':''}>${hourText(hour)}</option>`).join('');
-  showSheet(`<div class="bar settings-heading glass"><button type="button" id="settings-back" class="icon-button glass" aria-label="${t('back')}">${uiIcon('back')}</button><h2 id="sheet-title">${t('settings')}</h2></div>
+  showSheet(`<div class="bar settings-heading glass"><h2 id="sheet-title">${t('settings')}</h2><button type="button" id="settings-close" class="icon-button glass" aria-label="${t('close')}">${uiIcon('close')}</button></div>
     <section class="status-card glass ${push.enabled?'':'off'}" id="notification-status"><span class="status-kw glass"><img src="/icons/icon-192.png" alt="KW"></span><div class="status-copy"><strong id="status-title"></strong><small id="status-summary"></small></div></section><p class="settings-state" id="p-state" role="status" ${blocked?'':'hidden'}>${blocked?esc(statusMessage):''}</p>
     ${heading(t('appearance'))}<section class="settings-card">${row('language',t('language'))}<div class="setting-block"><div class="segments language-choices">${[['th','ไทย'],['en','English'],['ko','한국어']].map(([key,label])=>`<button type="button" id="l-${key}" class="${lang===key?'selected':''}" aria-pressed="${lang===key}">${label}</button>`).join('')}</div>${lang==='ko'?`<p class="hint">${t('koreanPush')}</p>`:''}</div>${row('system',t('theme'))}<div class="setting-block"><div class="segments theme-choices">${['system','light','dark'].map(mode=>`<label><input type="radio" name="theme" value="${mode}" ${themeMode===mode?'checked':''}>${uiIcon(mode)}<span>${t('theme_'+mode)}</span></label>`).join('')}</div></div>${row('type',t('fontSize'))}<div class="setting-block"><div class="segments font-buttons">${[.9,1,1.14].map((value,i)=>`<button type="button" data-font="${value}" class="${fontScale===value?'selected':''}" aria-label="${t('fontSize')} ${i+1}" aria-pressed="${fontScale===value}">${lang==='th'?'ก':lang==='ko'?'가':'A'}</button>`).join('')}</div><div class="font-example"><b>${t('fontPreviewTitle')}</b><p>${t('fontPreviewBody')}</p></div></div></section>
     ${heading(t('featured'),tools('featured-count',featured.length,'featured-all'))}<section class="settings-card">${row('star',t('featuredTopics'),'','') }<div class="topic-picks" id="featured-choices">${featureChoices()}</div></section><p class="hint">${t('featuredHint')}</p>
@@ -471,10 +472,11 @@ function openSettings(keepDraft=false) {
     ${heading(t('notifications'))}<section class="settings-card">${row('bell',t('nOn'),toggle('p-on',draft.enabled,t('nOn'),blocked&&!draft.enabled))}<fieldset id="p-opts" ${blocked||!draft.enabled?'disabled':''}><div class="radio-list level-choices">${[['critical','nCrit','criticalHint'],['high','nHigh','highHint'],['all','allNews','allHint']].map(([value,label,hint])=>`<label class="radio-card ${value==='critical'?'selected':''} ${value!=='critical'?'unavailable':''}"><input type="radio" name="lv" value="${value}" ${value==='critical'?'checked':'disabled'}><span class="radio-indicator"></span><span><b>${value==='critical'?'<i class="live-dot"></i>':''}${t(label)}</b>${value==='critical'?'':`<small>${t(hint)}</small>`}</span></label>`).join('')}</div>${row('pin',`<label for="p-area">${t('area')}</label>`,`<select id="p-area" aria-label="${t('area')}">${REGIONS.map(entry=>`<option value="${entry[0]}" ${entry[0]===region?'selected':''}>${entry[lang==='ko'?3:lang==='en'?2:1]}</option>`).join('')}</select>`,t('areaHint'))}</fieldset></section><p class="hint policy-hint">${t('policyNote')}</p>
     ${heading(t('nCats'),tools('category-count',draft.cats.length,'topics-all'))}<section class="settings-card"><fieldset id="category-options" ${blocked||!draft.enabled?'disabled':''}><div class="topic-picks topic-choices">${Object.keys(CATS).map(key=>`<label class="topic-pick"><input type="checkbox" name="pc" value="${key}" ${draft.cats.includes(key)?'checked':''}><span>${esc(categoryLabel(key))}</span></label>`).join('')}</div></fieldset></section>
     ${heading(t('quietTitle')+(lang==='ko'?'':' (KST)'))}<section class="settings-card">${row('moon',t('quietTitle'),toggle('p-quiet',draft.quietOn,t('quietTitle')))}<fieldset id="quiet-options" ${draft.quietOn?'':'disabled'}><div class="time-grid"><label class="time-box"><span class="time-label">${uiIcon('moon')}${t('quietFrom')}</span><select id="p-from" aria-label="${t('quietFrom')}">${hourOptions(draft.quietFrom??22)}</select></label><label class="time-box"><span class="time-label">${uiIcon('light')}${t('quietTo')}</span><select id="p-to" aria-label="${t('quietTo')}">${hourOptions(draft.quietTo??10)}</select></label></div><div class="quiet-duration"><span id="quiet-duration-label"></span><i class="quiet-timeline"></i></div><label class="check-row"><input type="checkbox" id="p-bypass" ${draft.quietBypass!==false?'checked':''}><span><b><i class="live-dot"></i>${t('quietBypass')}</b><small>${t('quietNote')}</small></span></label></fieldset></section>
-    <footer class="settings-footer settings-actions"><button type="button" class="glass" id="p-test" ${push.enabled&&!blocked?'':'disabled'}>${uiIcon('bell')}${t('test')}</button><button type="button" class="primary glass" id="p-save" ${savingSettings?'disabled':''}>${t(savingSettings?'saving':'saveAlerts')}</button></footer>`,'settings');
+    <footer class="settings-footer settings-actions dock-frame glass"><button type="button" class="dock-button" id="settings-back">${uiIcon('back')}${t('back')}</button><button type="button" class="primary glass" id="p-save" ${savingSettings?'disabled':''}>${t(savingSettings?'saving':'saveAlerts')}</button></footer>`,'settings');
   const content=$('panel').querySelector('.sheet-content');content.scrollTop=scroll;
   updateQuietDuration();updateSettingsStatus();
-  $('settings-back').onclick=()=>{navigate(settingsReturnView);$(currentView==='saved'?'nav-saved':'nav-home').focus({preventScroll:true})};
+  const leaveSettings=()=>{navigate(settingsReturnView);$(currentView==='saved'?'nav-saved':'nav-home').focus({preventScroll:true})};
+  $('settings-back').onclick=leaveSettings;$('settings-close').onclick=leaveSettings;
   for(const key of ['th','en','ko'])$('l-'+key).onclick=()=>changeLanguage(key);
   document.querySelectorAll('input[name="theme"]').forEach(input=>input.onchange=()=>{readSettingsDraft();themeMode=input.value;store.set('kw.theme',themeMode);applyTheme()});
   document.querySelectorAll('[data-font]').forEach(button=>button.onclick=()=>{fontScale=Number(button.dataset.font);document.documentElement.style.setProperty('--font-scale',fontScale);store.set('kw.fontScale',fontScale);document.querySelectorAll('[data-font]').forEach(b=>{const active=b===button;b.classList.toggle('selected',active);b.setAttribute('aria-pressed',String(active))})});
@@ -490,7 +492,6 @@ function openSettings(keepDraft=false) {
   $('p-tone').onchange=()=>{tone=$('p-tone').value;store.set('kw.alertTone',tone);alertAudio.stop()};
   $('p-volume').oninput=()=>{volume=Number($('p-volume').value)/100;store.set('kw.volume',volume);$('volume-value').textContent=`${Math.round(volume*100)}%`;$('p-volume').style.setProperty('--volume',`${Math.round(volume*100)}%`);alertAudio.setVolume(volume)};
   $('p-preview').onclick=()=>playAlert(tone==='airraid'?4.2:2.4);$('p-stop').onclick=()=>alertAudio.stop();$('p-save').onclick=savePush;
-  $('p-test').onclick=async()=>{const button=$('p-test');button.disabled=true;try{const token=await getToken(),result=await saveSub(token,push,{testRequested:true});await confirmNotifications();toast(result.testQueued?t('tested'):result.testPending?t('testPending'):t('testCooldown'))}catch(error){toast(t('errSave')+(error.message||error))}finally{button.disabled=false}};
 }
 function changeLanguage(next) {
   readSettingsDraft();lang=next;store.set('kw.lang',lang);render();openSettings(true);$('l-'+next).focus({preventScroll:true});
@@ -520,7 +521,6 @@ async function savePush() {
     push = next;
     store.set("kw.push", push); if (token) store.set("kw.token", token);
     settingsDraft = { ...push, cats:[...push.cats] }; render(); updateSettingsStatus();
-    if ($('p-test')) $('p-test').disabled = !push.enabled;
     let confirmed = true;
     if (enabled && (!wasEnabled || result?.enabledNow)) {
       try { await confirmNotifications(); } catch { confirmed = false; }
