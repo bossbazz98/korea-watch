@@ -1,5 +1,5 @@
 import { normalizeFeed, timestamp } from "./feed-data.js?v=20261109-feed2";
-import { attachPullRefresh } from "./pull-refresh.js?v=20261109-feed2";
+import { attachPullRefresh } from "./pull-refresh.js?v=20261109-pull3";
 import { AlertAudio, SOUND_PRESETS } from "./audio.js";
 import { writeSubscription } from "./subscriptions.js";
 // Korea Watch: หน้าแอป (อ่านข่าวจาก Firestore, ตั้งค่าแจ้งเตือน, ติดตั้งแอป)
@@ -154,7 +154,6 @@ function renderStatic() {
   document.documentElement.lang = lang;
   renderRefreshState();
   $('home-top').setAttribute('aria-label', lang === 'th' ? 'กลับด้านบนสุด' : 'Back to top');
-  $('pull-refresh').setAttribute('aria-label', t('refresh'));
   $("settings").setAttribute("aria-label", t("settings")); $("settings-l").textContent = t("settings");
   $("install").hidden = isStandalone(); $("install-l").textContent = t("install"); $("install").setAttribute("aria-label", t("install"));
   $("t-bk").textContent = t("bk"); $("t-bksub").textContent = t("bksub");
@@ -454,10 +453,10 @@ async function refreshToken() {
 }
 $("settings").onclick = () => openSettings();
 
-let refreshingNews = false, refreshMessage = 'refreshHint';
+let refreshingNews = false, capsuleRefresh = false, refreshMessage = 'refreshHint';
 function renderRefreshState() {
   const indicator = $('refresh-status');
-  indicator.hidden = !refreshingNews && refreshMessage !== 'refreshFailed';
+  indicator.hidden = capsuleRefresh || (!refreshingNews && refreshMessage !== 'refreshFailed');
   indicator.textContent = t(refreshingNews ? 'refreshing' : refreshMessage);
 }
 function applyFeedSnapshot(snapshot) {
@@ -478,28 +477,44 @@ function recoverEmptyFeed() {
   refreshNews();
 }
 
-async function refreshNews() {
-  if (refreshingNews) return;
-  refreshingNews = true; renderRefreshState();
+function refreshFingerprint() {
+  const content = value => typeof value === 'string' || Array.isArray(value) ? value : [value?.th ?? null, value?.en ?? null];
+  return JSON.stringify(visible().map(n => [String(n.id), n.publishedAt, n.titleKo,
+    content(n.title), content(n.summary), content(n.body), content(n.tips), [...cats(n)].sort(),
+    n.level, n.image, n.source, n.sourceUrl, (n.links || []).map(link => [link.label,link.url])])
+    .sort((a,b) => a[0].localeCompare(b[0])));
+}
+
+let refreshSequence = 0;
+async function refreshNews({capsule = false} = {}) {
+  if (refreshingNews) return {ok:false,busy:true};
+  const before = refreshFingerprint(), sequence = ++refreshSequence;
+  refreshingNews = true; capsuleRefresh = capsule;
+  if (!capsule) renderRefreshState();
   try {
     if (!fb || navigator.onLine === false) throw new Error('News connection unavailable');
-    const [feedResult, statusResult] = await Promise.allSettled([
-      fb.fs.getDocFromServer(fb.fs.doc(fb.db, 'meta/feed')),
-      fb.fs.getDocFromServer(fb.fs.doc(fb.db, 'meta/status'))
-    ]);
-    if (statusResult.status === 'fulfilled') status = statusResult.value.exists() ? statusResult.value.data() : null;
-    if (feedResult.status === 'rejected') throw feedResult.reason;
-    const snapshot = feedResult.value;
+    // Status is optional: never hold the refreshed feed/spinner waiting for this read.
+    Promise.resolve().then(() => fb.fs.getDocFromServer(fb.fs.doc(fb.db, 'meta/status')))
+      .then(result => { if (sequence === refreshSequence) { status = result.exists() ? result.data() : null; render(); } })
+      .catch(error => console.warn('refresh status',error.code || error.message));
+    const snapshot = await fb.fs.getDocFromServer(fb.fs.doc(fb.db, 'meta/feed'));
     applyFeedSnapshot(snapshot); refreshMessage = 'refreshed';
-  } catch (error) { console.warn('refresh news', error.code || error.message); refreshMessage = 'refreshFailed'; }
-  finally { refreshingNews = false; renderRefreshState(); }
+    return {ok:true,changed:before !== refreshFingerprint()};
+  } catch (error) {
+    console.warn('refresh news', error.code || error.message); refreshMessage = 'refreshFailed';
+    return {ok:false};
+  } finally {
+    refreshingNews = false;
+    if (capsule) { capsuleRefresh = false; refreshMessage = 'refreshHint'; $('refresh-status').hidden = true; }
+    else renderRefreshState();
+  }
 }
 $('home-top').onclick = () => window.scrollTo({top:0, left:0, behavior:'instant'});
 attachPullRefresh({
-  element:$('pull-refresh'), source:$('home-top'),
+  element:$('pull-refresh'), space:$('pull-space'), language:() => lang,
   canStart:() => scrollY <= 0 && $('sheet').hidden && $('alert').hidden && !document.hidden,
   isBusy:() => refreshingNews,
-  refresh:refreshNews
+  refresh:() => refreshNews({capsule:true})
 });
 
 /* data */
