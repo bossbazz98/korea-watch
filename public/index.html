@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="th" data-release="20261110-ui-layout">
+<html lang="th" data-release="20261111-interactions">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -20,6 +20,7 @@
 <link rel="stylesheet" href="/liquid-glass.css">
 <link rel="stylesheet" href="/settings.css">
 <link rel="stylesheet" href="/ui-layout.css">
+<link rel="stylesheet" href="/interactions.css">
 </head>
 <body>
 <header class="top glass" id="home-header">
@@ -74,7 +75,7 @@
 </main>
 
 <section id="saved-page" class="app-page" hidden>
-  <header class="topbar glass app-page-header"><h1 class="page-title" id="saved-title">ข่าวที่บันทึกไว้</h1><span class="head-count" id="saved-count"></span></header>
+  <header class="topbar glass app-page-header"><div class="saved-header-row"><h1 class="page-title" id="saved-title">ข่าวที่บันทึกไว้</h1><div class="saved-header-actions"><span class="head-count" id="saved-count"></span><button class="icon-button glass" id="saved-search-toggle" aria-label="ค้นหาข่าวที่บันทึกไว้" aria-expanded="false" aria-controls="saved-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10" cy="10" r="7"/><path d="m15 15 6 6"/></svg></button></div></div><input class="saved-search" id="saved-search" type="search" aria-label="ค้นหาข่าวที่บันทึกไว้" placeholder="ค้นหาข่าวที่บันทึกไว้" hidden></header>
   <main class="saved-main wrap" id="saved-content"></main>
 </section>
 <nav class="tabbar dock-frame glass" id="app-tabs" aria-label="เมนูหลัก">

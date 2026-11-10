@@ -112,8 +112,7 @@ export function onSnapshot(ref,ok){setTimeout(()=>{if(ref==="meta/feed")ok({exis
       await page.locator('label:has(#p-quiet)').click();
       await page.locator('#p-from').selectOption('22');
       await page.locator('#p-to').selectOption('7');
-      await page.locator('#p-save').click();
-      await page.waitForFunction(() => window.__writes?.length > 0);
+      await page.waitForFunction(() => window.__writes?.at(-1)?.value.quietOn===true && window.__writes.at(-1).value.quietTo===7);
       const write = await page.evaluate(() => window.__writes.at(-1));
       assert.strictEqual(write.ref, 'subscribers/fixture-user', 'subscription owned by authenticated UID');
       assert.strictEqual(write.value.level, 'critical');
@@ -121,17 +120,16 @@ export function onSnapshot(ref,ok){setTimeout(()=>{if(ref==="meta/feed")ok({exis
       assert.strictEqual(write.value.quietOn, true);
       assert.ok(write.value.cats.includes('korwar'));
       assert.strictEqual(write.value.testRequested, true, 'enabling queues a real server test');
-      await page.waitForFunction(() => window.__localNotifications === 1);
-      await page.locator('#settings-back').click();
+      assert.strictEqual(await page.evaluate(() => window.__localNotifications||0),0,'autosave does not show an extra local test');
+      await page.locator('#nav-home').click();
       await page.locator('#settings').click();
       assert(await page.locator('#p-state').isHidden());
       await page.locator('#p-from').selectOption('23');
-      await page.locator('#p-save').click();
-      await page.waitForFunction(() => window.__writes.length === 2);
+      await page.waitForFunction(() => window.__writes.at(-1).value.quietFrom===23);
       const after = await page.evaluate(() => window.__writes.at(-1));
       assert.strictEqual(after.value.lastTestAt, write.value.lastTestAt, 'normal edits retain test history');
       assert.strictEqual(after.value.testRequested, true, 'normal edits do not erase the pending test');
-      assert.strictEqual(await page.evaluate(() => window.__localNotifications), 1, 'normal edits do not fire another local test');
+      assert.strictEqual(await page.evaluate(() => window.__localNotifications||0),0,'normal edits do not fire local tests');
 
       await ctx.close();
     } finally { await browser.close(); }

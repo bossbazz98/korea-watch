@@ -1,10 +1,11 @@
-import { normalizeFeed, timestamp } from "./feed-data.js?v=20261109-feed2";
-import { attachPullRefresh } from "./pull-refresh.js?v=20261109-glass1";
+import { normalizeFeed, timestamp } from "./feed-data.js?v=20261111-interactions";
+import { attachPullRefresh } from "./pull-refresh.js?v=20261111-interactions";
 import { AlertAudio, SOUND_PRESETS } from "./audio.js";
 import { writeSubscription } from "./subscriptions.js";
 import { createReadingList } from "./reading-list.js";
 import { openShareMenu } from "./share-news.js";
 import { UI_COPY, CATEGORY_KO } from "./ui-copy.js";
+import { watchAppResume } from "./app-lifecycle.js";
 import { attachLiquidTabs, attachDockViewport } from "./liquid-tabs.js";
 // Korea Watch: หน้าแอป (อ่านข่าวจาก Firestore, ตั้งค่าแจ้งเตือน, ติดตั้งแอป)
 const SDK = "/vendor/firebase/";
@@ -117,9 +118,10 @@ function applyTheme() {
 colorScheme.addEventListener('change', applyTheme);
 applyTheme();
 let push = Object.assign({}, DEFAULT_PUSH, store.get("kw.push", {}));
-push.level = "critical";
+if (!["critical","high","all"].includes(push.level)) push.level="critical";
+const noTopicsSelected=Array.isArray(push.cats)&&push.cats.length===0;
 push.cats = globalThis.KW_CATEGORY_POLICY.migratePreferences(push.cats);
-if (!push.cats.length) push.cats = [...DEFAULT_PUSH.cats];
+if (!push.cats.length&&!noTopicsSelected) push.cats = [...DEFAULT_PUSH.cats];
 if (store.get("kw.schema", 0) < 2) { push.cats = [...new Set([...(push.cats || []), ...(push.cats?.includes("war") ? ["korwar"] : [])])]; store.set("kw.push", push); store.set("kw.schema", 2); }
 if (!["th", "en", "ko"].includes(lang)) lang = "th";
 let currentView = 'home';
@@ -169,7 +171,7 @@ function emptyMsg(def) {
 function newsCard(n,kind='card') {
   const level=['critical','high'].includes(n.level)?n.level:'normal';
   const accessible=[level==='critical'?t('crit'):level==='high'?t('high'):'',headlineOf(n),...cats(n).filter(c=>CATS[c]).map(categoryLabel)].filter(Boolean).join(' · ');
-  return `<button class="${kind} hero-card" data-level="${level}" aria-label="${esc(accessible)}" data-id="${esc(n.id)}">${picture(n)}<div class="hero-copy"><div class="chips">${categoryBadges(n)}</div><h3>${esc(headlineOf(n))}</h3></div></button>`;
+  return `<button class="${kind} hero-card" data-level="${level}" aria-label="${esc(accessible)}" data-id="${esc(n.id)}">${picture(n)}<div class="hero-copy"><div class="chips">${categoryBadges(n)}</div><h3>${esc(headlineOf(n))}</h3><time class="news-time" datetime="${esc(n.publishedAt)}">${uiIcon('clock')}${esc(kst(ts(n)))}</time></div></button>`;
 }
 
 function renderStatic() {
@@ -232,7 +234,7 @@ function updateAppChrome() {
   $('home-page').hidden = currentView !== 'home'; $('home-header').hidden = currentView !== 'home';
   $('saved-page').hidden = currentView !== 'saved';
   $('home-page').inert = modal; $('home-header').inert = modal; $('saved-page').inert = modal;
-  $('app-tabs').hidden = modal || currentView === 'settings';
+  $('app-tabs').hidden = modal;
   document.body.dataset.view = currentView;
   for (const [id,view] of [['nav-home','home'],['nav-saved','saved'],['settings','settings']]) {
     const selected=currentView===view;$(id).classList.toggle('active',selected);
@@ -295,15 +297,36 @@ function openItem(id) {
   scroll.addEventListener('scroll',()=>{cancelAnimationFrame(frame);frame=requestAnimationFrame(update)},{passive:true});update();
   return true;
 }
+let savedCategory='all',savedQuery='';
+const dateKey=ms=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(ms));
+function savedDayLabel(ms) {
+  const key=dateKey(ms),date=new Intl.DateTimeFormat(lang==='th'?'th-TH':lang==='ko'?'ko-KR':'en-GB',{timeZone:'Asia/Seoul',day:'numeric',month:'short'}).format(new Date(ms));
+  return `${key===dateKey(Date.now())?t('today')+', ':key===dateKey(Date.now()-DAY)?t('yesterday')+', ':''}${date}`;
+}
+function storyClock(ms) { return new Intl.DateTimeFormat(lang==='th'?'th-TH':lang==='ko'?'ko-KR':'en-GB',{timeZone:'Asia/Seoul',hour:'2-digit',minute:'2-digit'}).format(new Date(ms)); }
+function savedBadges(n) {
+  const keys=cats(n).filter(c=>CATS[c]);return keys.slice(0,2).map(c=>`<span class="chip">${esc(categoryLabel(c))}</span>`).join('')+(keys.length>2?`<span class="chip">+${keys.length-2}</span>`:'');
+}
 function renderSaved() {
   const entries=readingList.all();$('saved-title').textContent=t('readingList');$('saved-count').textContent=t('count')(entries.length);
-  setHTML($('saved-content'),entries.length?`<div class="saved-rows">${entries.map(({id,savedAt,article:n})=>`<div class="saved-item-wrap"><button class="delete-saved" data-delete="${esc(id)}" aria-label="${t('deleteSaved')}: ${esc(headlineOf(n))}">${uiIcon('trash')}${t('delete')}</button><button class="saved-row" data-id="${esc(id)}">${picture(n)}<span><span class="chips">${categoryBadges(n)}</span><h3>${esc(headlineOf(n))}</h3><span class="saved-at">${uiIcon('clock')}${t('savedAt')} ${Date.now()-savedAt<60000?t('minuteSaved'):kst(savedAt)}</span></span></button></div>`).join('')}</div>`:`<div class="empty-saved"><div class="empty-icon">${uiIcon('bookmark')}</div><h2>${t('emptySaved')}</h2><p>${t('emptySavedHint')}</p></div>`);
+  $('saved-search-toggle').setAttribute('aria-label',t('savedSearch'));$('saved-search').placeholder=t('savedSearch');$('saved-search').setAttribute('aria-label',t('savedSearch'));
+  const available=Object.keys(CATS).filter(key=>entries.some(({article:n})=>cats(n).includes(key)));
+  if(!available.includes(savedCategory))savedCategory='all';
+  const filters=`<div class="saved-filters" aria-label="${t('topics')}">${['all',...available].map(key=>`<button data-saved-filter="${key}" aria-pressed="${savedCategory===key}">${key==='all'?t('allcat'):esc(categoryLabel(key))}</button>`).join('')}</div>`;
+  const query=savedQuery.trim().toLocaleLowerCase(),filtered=entries.filter(({article:n})=>(savedCategory==='all'||cats(n).includes(savedCategory))&&(!query||[headlineOf(n),n.titleKo,n.source,...cats(n).map(categoryLabel)].join(' ').toLocaleLowerCase().includes(query))).sort((a,b)=>(ts(b.article)||b.savedAt)-(ts(a.article)||a.savedAt));
+  const groups=new Map();for(const entry of filtered){const ms=ts(entry.article)||entry.savedAt,key=dateKey(ms);if(!groups.has(key))groups.set(key,{ms,entries:[]});groups.get(key).entries.push(entry)}
+  const rows=[...groups.values()].map(group=>`<section class="saved-day-group"><h2 class="saved-day">${esc(savedDayLabel(group.ms))}</h2><div class="saved-rows">${group.entries.map(({id,article:n,savedAt})=>`<div class="saved-item-wrap"><button class="delete-saved" data-delete="${esc(id)}" aria-label="${t('deleteSaved')}: ${esc(headlineOf(n))}">${uiIcon('trash')}${t('delete')}</button><button class="saved-row" data-id="${esc(id)}">${picture(n)}<span><span class="chips">${savedBadges(n)}</span><h3>${esc(headlineOf(n))}</h3><time class="saved-at" datetime="${esc(n.publishedAt)}">${uiIcon('clock')}${esc(storyClock(ts(n)||savedAt))}</time></span></button></div>`).join('')}</div></section>`).join('');
+  setHTML($('saved-content'),entries.length?filters+(filtered.length?rows:`<p class="empty">${t('noSavedResults')}</p>`):`<div class="empty-saved"><div class="empty-icon">${uiIcon('bookmark')}</div><h2>${t('emptySaved')}</h2><p>${t('emptySavedHint')}</p></div>`);
 }
+$('saved-search-toggle').onclick=()=>{const input=$('saved-search');input.hidden=!input.hidden;$('saved-search-toggle').setAttribute('aria-expanded',String(!input.hidden));if(!input.hidden)input.focus();else{savedQuery='';input.value='';renderSaved()}};
+$('saved-search').oninput=()=>{savedQuery=$('saved-search').value;renderSaved()};
 let swipeStart=null;
-$('saved-content').addEventListener('touchstart',e=>{const row=e.target.closest('.saved-item-wrap');if(row&&e.touches.length===1)swipeStart={row,x:e.touches[0].clientX,y:e.touches[0].clientY};else swipeStart=null},{passive:true});
-$('saved-content').addEventListener('touchmove',e=>{if(!swipeStart||e.touches.length!==1)return;const dx=e.touches[0].clientX-swipeStart.x,dy=e.touches[0].clientY-swipeStart.y;if(Math.abs(dy)>Math.abs(dx)&&Math.abs(dy)>10){swipeStart=null;return}if(Math.abs(dx)>24&&Math.abs(dx)>Math.abs(dy)*1.3){if(e.cancelable)e.preventDefault();swipeStart.row.classList.toggle('swiped',dx<0)}},{passive:false});
-$('saved-content').addEventListener('touchend',()=>{swipeStart=null},{passive:true});$('saved-content').addEventListener('touchcancel',()=>{swipeStart=null},{passive:true});
-$('saved-content').addEventListener('focusin',e=>{if(e.target.closest('.delete-saved'))e.target.closest('.saved-item-wrap').classList.add('swiped')});
+const closeSavedSwipes=except=>document.querySelectorAll('.saved-item-wrap').forEach(row=>{if(row!==except){row.classList.remove('swiped','dragging');row.style.removeProperty('--swipe')}});
+$('saved-content').addEventListener('touchstart',e=>{const row=e.target.closest('.saved-item-wrap');if(row&&e.touches.length===1){closeSavedSwipes(row);swipeStart={row,x:e.touches[0].clientX,y:e.touches[0].clientY,base:row.classList.contains('swiped')?134:0,offset:row.classList.contains('swiped')?134:0}}else swipeStart=null},{passive:true});
+$('saved-content').addEventListener('touchmove',e=>{if(!swipeStart||e.touches.length!==1)return;const dx=e.touches[0].clientX-swipeStart.x,dy=e.touches[0].clientY-swipeStart.y;if(Math.abs(dy)>Math.abs(dx)&&Math.abs(dy)>10){swipeStart.row.classList.remove('dragging');swipeStart=null;return}if(Math.abs(dx)>8&&Math.abs(dx)>Math.abs(dy)*1.3){if(e.cancelable)e.preventDefault();swipeStart.offset=Math.max(0,Math.min(134,swipeStart.base-dx));swipeStart.row.classList.remove('swiped');swipeStart.row.classList.add('dragging');swipeStart.row.style.setProperty('--swipe',`${-swipeStart.offset}px`)}},{passive:false});
+const endSavedSwipe=cancel=>{if(!swipeStart)return;const {row,offset,base}=swipeStart;row.classList.remove('dragging');row.style.removeProperty('--swipe');row.classList.toggle('swiped',cancel?base===134:offset>=133.5);swipeStart=null};
+$('saved-content').addEventListener('touchend',()=>endSavedSwipe(false),{passive:true});$('saved-content').addEventListener('touchcancel',()=>endSavedSwipe(true),{passive:true});
+$('saved-content').addEventListener('focusin',e=>{if(e.target.closest('.delete-saved')){const row=e.target.closest('.saved-item-wrap');closeSavedSwipes(row);row.classList.add('swiped')}});
 $('sheet').addEventListener('click',e=>{if(e.target===$('sheet')&&$('panel').dataset.kind!=='settings')closeSheet()});
 document.addEventListener('keydown',e=>{
   if($('share-layer'))return;
@@ -316,7 +339,8 @@ document.addEventListener('keydown',e=>{
 document.addEventListener('click',e=>{
   if(e.target.closest('#panel,#alert-box,#share-layer'))return;
   const remove=e.target.closest('[data-delete]');if(remove){try{readingList.remove(remove.dataset.delete);renderSaved();toast(t('unbookmark'),1500)}catch{toast(t('storageFailed'))}return}
-  const row=e.target.closest('.saved-item-wrap');if(row?.classList.contains('swiped')){row.classList.remove('swiped');return}
+  const hadSwipe=!!document.querySelector('.saved-item-wrap.swiped');if(hadSwipe){closeSavedSwipes();return}
+  const savedFilter=e.target.closest('[data-saved-filter]');if(savedFilter){savedCategory=savedFilter.dataset.savedFilter;renderSaved();return}
   const card=e.target.closest('[data-id]');if(card){openItem(card.dataset.id);return}
   const tile=e.target.closest('[data-cat]');if(tile){cat=tile.dataset.cat;render()}
 });
@@ -353,8 +377,8 @@ async function playAlert(duration = 3) {
 document.addEventListener('visibilitychange', () => { if (document.hidden) alertAudio.stop(); });
 function markSeen(id) { seen.add(id); store.set("kw.seenUrgent", [...seen].slice(-300)) }
 function inAppEligible(n) {
-  if (!push.enabled || !globalThis.KW_NEWS_POLICY.incident(n) || !cats(n).some(c => push.cats.includes(c))) return false;
-  if (!push.quietOn || (push.quietBypass !== false && cats(n).includes('korwar'))) return true;
+  if (!globalThis.KW_NEWS_POLICY.matches(push,n)) return false;
+  if (!push.quietOn || (push.quietBypass !== false && n.level==='critical' && cats(n).includes('korwar'))) return true;
   const h = new Date(Date.now() + 9 * 3600e3).getUTCHours(), from = Number(push.quietFrom), to = Number(push.quietTo);
   if (!Number.isInteger(from) || !Number.isInteger(to) || from === to) return true;
   return !(from < to ? h >= from && h < to : h >= from || h < to);
@@ -370,7 +394,7 @@ function raiseAlert(n) {
   try { vibration && navigator.vibrate && navigator.vibrate([400, 200, 400, 200, 600]) } catch (e) { }
 }
 function checkAlerts() {
-  const fresh = visible().filter(n => inAppEligible(n) && n.level === "critical" && Date.now() - ts(n) < 2 * DAY && !seen.has(n.id));
+  const fresh = visible().filter(n => inAppEligible(n) && Date.now() - ts(n) < 2 * DAY && !seen.has(n.id));
   if (!primed) { fresh.forEach(n => markSeen(n.id)); primed = true; return }
   if (fresh.length && $("alert").hidden && $("sheet").hidden) raiseAlert(fresh[0]);
 }
@@ -381,6 +405,7 @@ async function getSw() {
   if (swReg) return swReg;
   if (!("serviceWorker" in navigator)) return null;
   swReg = await navigator.serviceWorker.register("/firebase-messaging-sw.js", { updateViaCache: "none" });
+  swReg.update().catch(()=>{});
   return swReg;
 }
 async function getMessagingMod() {
@@ -391,7 +416,7 @@ async function getMessagingMod() {
   messaging = msgMod.getMessaging(fb.app);
   msgMod.onMessage(messaging, p => { // แจ้งเตือนที่มาตอนเปิดแอปอยู่
     const id = p?.data?.id, n = id && items.find(x => x.id === id);
-    if (n && globalThis.KW_NEWS_POLICY.incident(n)) { if (!seen.has(n.id)) raiseAlert(n) } else if (p?.data?.level === 'test' && p?.notification?.title) toast(p.notification.title);
+    if (n && globalThis.KW_NEWS_POLICY.canNotify(n)) { if (!seen.has(n.id)) raiseAlert(n) } else if (p?.data?.level === 'test' && p?.notification?.title) toast(p.notification.title);
   });
   return msgMod;
 }
@@ -413,14 +438,6 @@ async function saveSub(token, preferences, extra = {}) {
   const uid = await subscriptionId();
   return writeSubscription({ fs: fb.fs, db: fb.db, uid, token, preferences, language: lang === 'ko' ? 'th' : lang, requestTest: extra.testRequested === true });
 }
-async function confirmNotifications() {
-  const registration = await getSw();
-  if (!registration?.showNotification) throw new Error('Local notification unavailable');
-  await registration.showNotification('Korea Watch', {
-    body: t('testLocal'), icon: '/icons/icon-192.png', badge: '/icons/badge-72.png', tag: 'subscription-confirmation', vibrate:vibration ? [200,80,200] : []
-  });
-  await playAlert(3);
-}
 function pushState() {
   if (notReady) return ["warn", t("setup")];
   if (!("Notification" in window) || !("serviceWorker" in navigator)) return isIOS && !isStandalone() ? ["warn", t("sIos")] : ["warn", t("sNo")];
@@ -428,7 +445,7 @@ function pushState() {
   if (push.enabled && Notification.permission === "granted") return ["ok", t("sOn")];
   return ["", t("sOff")];
 }
-let settingsDraft = null, savingSettings = false;
+let settingsDraft = null;
 const REGIONS = [
   ['seoul-gyeonggi','โซล / คยองกี','Seoul / Gyeonggi','서울 / 경기'],['incheon','อินชอน','Incheon','인천'],['busan','ปูซาน','Busan','부산'],['daegu','แทกู','Daegu','대구'],['daejeon','แทจอน','Daejeon','대전'],['gwangju','ควังจู','Gwangju','광주'],['ulsan','อุลซาน','Ulsan','울산'],['sejong','เซจง','Sejong','세종'],['gangwon','คังวอน','Gangwon','강원'],['chungbuk','ชุงชองเหนือ','North Chungcheong','충북'],['chungnam','ชุงชองใต้','South Chungcheong','충남'],['jeonbuk','ชอลลาเหนือ','North Jeolla','전북'],['jeonnam','ชอลลาใต้','South Jeolla','전남'],['gyeongbuk','คยองซังเหนือ','North Gyeongsang','경북'],['gyeongnam','คยองซังใต้','South Gyeongsang','경남'],['jeju','เชจู','Jeju','제주']
 ];
@@ -436,7 +453,7 @@ if(!REGIONS.some(entry=>entry[0]===region))region='seoul-gyeonggi';
 const hourText = value => `${String(Number(value)).padStart(2,'0')}:00`;
 function readSettingsDraft() {
   if(!$('p-on'))return;
-  settingsDraft={enabled:$('p-on').checked,level:'critical',cats:[...document.querySelectorAll('input[name="pc"]:checked')].map(input=>input.value),quietOn:$('p-quiet').checked,quietFrom:Number($('p-from').value),quietTo:Number($('p-to').value),quietBypass:$('p-bypass').checked};
+  settingsDraft={enabled:$('p-on').checked,level:document.querySelector('input[name="lv"]:checked')?.value||'critical',cats:[...document.querySelectorAll('input[name="pc"]:checked')].map(input=>input.value),quietOn:$('p-quiet').checked,quietFrom:Number($('p-from').value),quietTo:Number($('p-to').value),quietBypass:$('p-bypass').checked};
 }
 function featureChoices() {
   return Object.keys(CATS).map(key=>`<button type="button" class="topic-pick ${featured.includes(key)?'selected':''}" data-featured="${key}" aria-pressed="${featured.includes(key)}">${featured.includes(key)?`<span class="order-badge">${featured.indexOf(key)+1}</span>`:''}${esc(categoryLabel(key))}</button>`).join('');
@@ -453,7 +470,7 @@ function updateSettingsStatus() {
   const active=push.enabled&&typeof Notification!=='undefined'&&Notification.permission==='granted';
   $('notification-status').classList.toggle('off',!active);
   $('status-title').innerHTML=`<i class="live-dot"></i>${t(active?'statusOn':'statusOff')}`;
-  $('status-summary').textContent=`${t('nCrit')} · ${t('topicCount')(push.cats.length)} · ${push.quietOn?`${hourText(push.quietFrom??22)}–${hourText(push.quietTo??10)} KST`:t('quietNone')}`;
+  $('status-summary').textContent=`${t(push.level==='all'?'allNews':push.level==='high'?'nHigh':'nCrit')} · ${t('topicCount')(push.cats.length)} · ${push.quietOn?`${hourText(push.quietFrom??22)}–${hourText(push.quietTo??10)} KST`:t('quietNone')}`;
 }
 function openSettings(keepDraft=false) {
   if(keepDraft!==true||!settingsDraft)settingsDraft={...push,cats:[...push.cats]};
@@ -464,75 +481,88 @@ function openSettings(keepDraft=false) {
   const heading=(text,tools='')=>`<h3 class="group-title"><span>${text}</span>${tools}</h3>`;
   const tools=(id,count,allId)=>`<span class="group-tools"><span id="${id}">${count}/12</span><button type="button" id="${allId}">${t(count===12?'clearAll':'selectAll')}</button></span>`;
   const hourOptions=value=>Array.from({length:24},(_,hour)=>`<option value="${hour}" ${Number(value)===hour?'selected':''}>${hourText(hour)}</option>`).join('');
-  showSheet(`<div class="bar settings-heading glass"><h2 id="sheet-title">${t('settings')}</h2><button type="button" id="settings-close" class="icon-button glass" aria-label="${t('close')}">${uiIcon('close')}</button></div>
+  showSheet(`<div class="bar settings-heading glass"><h2 id="sheet-title">${t('settings')}</h2></div>
     <section class="status-card glass ${push.enabled?'':'off'}" id="notification-status"><span class="status-kw glass"><img src="/icons/icon-192.png" alt="KW"></span><div class="status-copy"><strong id="status-title"></strong><small id="status-summary"></small></div></section><p class="settings-state" id="p-state" role="status" ${blocked?'':'hidden'}>${blocked?esc(statusMessage):''}</p>
     ${heading(t('appearance'))}<section class="settings-card">${row('language',t('language'))}<div class="setting-block"><div class="segments language-choices">${[['th','ไทย'],['en','English'],['ko','한국어']].map(([key,label])=>`<button type="button" id="l-${key}" class="${lang===key?'selected':''}" aria-pressed="${lang===key}">${label}</button>`).join('')}</div>${lang==='ko'?`<p class="hint">${t('koreanPush')}</p>`:''}</div>${row('system',t('theme'))}<div class="setting-block"><div class="segments theme-choices">${['system','light','dark'].map(mode=>`<label><input type="radio" name="theme" value="${mode}" ${themeMode===mode?'checked':''}>${uiIcon(mode)}<span>${t('theme_'+mode)}</span></label>`).join('')}</div></div>${row('type',t('fontSize'))}<div class="setting-block"><div class="segments font-buttons">${[.9,1,1.14].map((value,i)=>`<button type="button" data-font="${value}" class="${fontScale===value?'selected':''}" aria-label="${t('fontSize')} ${i+1}" aria-pressed="${fontScale===value}">${lang==='th'?'ก':lang==='ko'?'가':'A'}</button>`).join('')}</div><div class="font-example"><b>${t('fontPreviewTitle')}</b><p>${t('fontPreviewBody')}</p></div></div></section>
     ${heading(t('featured'),tools('featured-count',featured.length,'featured-all'))}<section class="settings-card">${row('star',t('featuredTopics'),'','') }<div class="topic-picks" id="featured-choices">${featureChoices()}</div></section><p class="hint">${t('featuredHint')}</p>
     ${heading(t('soundTitle'))}<section class="settings-card">${row('volume',t('soundTitle'),toggle('p-sound',sound,t('soundTitle')))}<fieldset id="sound-options" ${sound?'':'disabled'}>${row('bell',`<label class="sr-only" for="p-tone">${t('soundType')}</label><select id="p-tone">${SOUND_PRESETS.map(preset=>`<option value="${preset}" ${tone===preset?'selected':''}>${t('tone_'+preset)}</option>`).join('')}</select>`,`<button type="button" class="icon-button glass" id="p-preview" aria-label="${t('preview')}">${uiIcon('play')}</button><button type="button" class="icon-button glass" id="p-stop" aria-label="${t('stopSound')}" disabled>${uiIcon('stop')}</button>`)}<div class="volume-wrap"><div class="volume-top"><label for="p-volume">${t('volume')}</label><output id="volume-value" for="p-volume">${Math.round(volume*100)}%</output></div><div class="volume-line">${uiIcon('volume')}<input type="range" id="p-volume" min="0" max="100" step="1" value="${Math.round(volume*100)}" style="--volume:${Math.round(volume*100)}%" aria-label="${t('volume')}">${uiIcon('volume')}</div></div></fieldset>${row('vibrate',t('vibration'),toggle('p-vibration',vibration,t('vibration')),t('vibrationHint'))}</section><p class="hint">${t('soundShort')}</p>
-    ${heading(t('notifications'))}<section class="settings-card">${row('bell',t('nOn'),toggle('p-on',draft.enabled,t('nOn'),blocked&&!draft.enabled))}<fieldset id="p-opts" ${blocked||!draft.enabled?'disabled':''}><div class="radio-list level-choices">${[['critical','nCrit','criticalHint'],['high','nHigh','highHint'],['all','allNews','allHint']].map(([value,label,hint])=>`<label class="radio-card ${value==='critical'?'selected':''} ${value!=='critical'?'unavailable':''}"><input type="radio" name="lv" value="${value}" ${value==='critical'?'checked':'disabled'}><span class="radio-indicator"></span><span><b>${value==='critical'?'<i class="live-dot"></i>':''}${t(label)}</b>${value==='critical'?'':`<small>${t(hint)}</small>`}</span></label>`).join('')}</div>${row('pin',`<label for="p-area">${t('area')}</label>`,`<select id="p-area" aria-label="${t('area')}">${REGIONS.map(entry=>`<option value="${entry[0]}" ${entry[0]===region?'selected':''}>${entry[lang==='ko'?3:lang==='en'?2:1]}</option>`).join('')}</select>`,t('areaHint'))}</fieldset></section><p class="hint policy-hint">${t('policyNote')}</p>
+    ${heading(t('notifications'))}<section class="settings-card">${row('bell',t('nOn'),toggle('p-on',draft.enabled,t('nOn'),blocked&&!draft.enabled))}<fieldset id="p-opts" ${blocked||!draft.enabled?'disabled':''}><div class="radio-list level-choices">${[['critical','nCrit','criticalHint'],['high','nHigh','highHint'],['all','allNews','allHint']].map(([value,label,hint])=>`<label class="radio-card ${value===draft.level?'selected':''}"><input type="radio" name="lv" value="${value}" ${value===draft.level?'checked':''}><span class="radio-indicator"></span><span><b>${value==='critical'?'<i class="live-dot"></i>':''}${t(label)}</b><small>${t(hint)}</small></span></label>`).join('')}</div>${row('pin',`<label for="p-area">${t('area')}</label>`,`<select id="p-area" aria-label="${t('area')}">${REGIONS.map(entry=>`<option value="${entry[0]}" ${entry[0]===region?'selected':''}>${entry[lang==='ko'?3:lang==='en'?2:1]}</option>`).join('')}</select>`,t('areaHint'))}</fieldset></section><p class="hint policy-hint">${t('policyNote')}</p>
     ${heading(t('nCats'),tools('category-count',draft.cats.length,'topics-all'))}<section class="settings-card"><fieldset id="category-options" ${blocked||!draft.enabled?'disabled':''}><div class="topic-picks topic-choices">${Object.keys(CATS).map(key=>`<label class="topic-pick"><input type="checkbox" name="pc" value="${key}" ${draft.cats.includes(key)?'checked':''}><span>${esc(categoryLabel(key))}</span></label>`).join('')}</div></fieldset></section>
     ${heading(t('quietTitle')+(lang==='ko'?'':' (KST)'))}<section class="settings-card">${row('moon',t('quietTitle'),toggle('p-quiet',draft.quietOn,t('quietTitle')))}<fieldset id="quiet-options" ${draft.quietOn?'':'disabled'}><div class="time-grid"><label class="time-box"><span class="time-label">${uiIcon('moon')}${t('quietFrom')}</span><select id="p-from" aria-label="${t('quietFrom')}">${hourOptions(draft.quietFrom??22)}</select></label><label class="time-box"><span class="time-label">${uiIcon('light')}${t('quietTo')}</span><select id="p-to" aria-label="${t('quietTo')}">${hourOptions(draft.quietTo??10)}</select></label></div><div class="quiet-duration"><span id="quiet-duration-label"></span><i class="quiet-timeline"></i></div><label class="check-row"><input type="checkbox" id="p-bypass" ${draft.quietBypass!==false?'checked':''}><span><b><i class="live-dot"></i>${t('quietBypass')}</b><small>${t('quietNote')}</small></span></label></fieldset></section>
-    <footer class="settings-footer settings-actions dock-frame glass"><button type="button" class="dock-button" id="settings-back">${uiIcon('back')}${t('back')}</button><button type="button" class="primary glass" id="p-save" ${savingSettings?'disabled':''}>${t(savingSettings?'saving':'saveAlerts')}</button></footer>`,'settings');
+`,'settings');
   const content=$('panel').querySelector('.sheet-content');content.scrollTop=scroll;
   updateQuietDuration();updateSettingsStatus();
-  const leaveSettings=()=>{navigate(settingsReturnView);$(currentView==='saved'?'nav-saved':'nav-home').focus({preventScroll:true})};
-  $('settings-back').onclick=leaveSettings;$('settings-close').onclick=leaveSettings;
   for(const key of ['th','en','ko'])$('l-'+key).onclick=()=>changeLanguage(key);
-  document.querySelectorAll('input[name="theme"]').forEach(input=>input.onchange=()=>{readSettingsDraft();themeMode=input.value;store.set('kw.theme',themeMode);applyTheme()});
-  document.querySelectorAll('[data-font]').forEach(button=>button.onclick=()=>{fontScale=Number(button.dataset.font);document.documentElement.style.setProperty('--font-scale',fontScale);store.set('kw.fontScale',fontScale);document.querySelectorAll('[data-font]').forEach(b=>{const active=b===button;b.classList.toggle('selected',active);b.setAttribute('aria-pressed',String(active))})});
-  $('featured-choices').onclick=e=>{const button=e.target.closest('[data-featured]');if(!button)return;const key=button.dataset.featured;featured=featured.includes(key)?featured.filter(c=>c!==key):[...featured,key];updateFeatureChoices()};
-  $('featured-all').onclick=()=>{featured=featured.length===12?[]:Object.keys(CATS);updateFeatureChoices()};
-  document.querySelectorAll('#p-on,input[name="lv"],input[name="pc"],#p-from,#p-to,#p-bypass').forEach(input=>input.addEventListener('change',()=>{readSettingsDraft();$('category-count').textContent=`${settingsDraft.cats.length}/12`;updateQuietDuration()}));
-  $('p-on').addEventListener('change',()=>{$('p-on').disabled=blocked&&!$('p-on').checked;$('p-opts').disabled=blocked||!$('p-on').checked;$('category-options').disabled=blocked||!$('p-on').checked;$('topics-all').disabled=blocked||!$('p-on').checked});
-  $('topics-all').disabled=blocked||!draft.enabled;$('topics-all').onclick=()=>{const all=[...document.querySelectorAll('input[name="pc"]')],select=!all.every(input=>input.checked);all.forEach(input=>input.checked=select);readSettingsDraft();$('category-count').textContent=`${settingsDraft.cats.length}/12`;$('topics-all').textContent=t(select?'clearAll':'selectAll')};
-  $('p-area').onchange=()=>{region=$('p-area').value;store.set('kw.region',region)};
-  $('p-quiet').onchange=()=>{$('quiet-options').disabled=!$('p-quiet').checked;readSettingsDraft()};
-  $('p-sound').onchange=()=>{sound=$('p-sound').checked;store.set('kw.sound',sound);$('sound-options').disabled=!sound;alertAudio.stop();if(sound)unlock()};
-  $('p-vibration').onchange=()=>{vibration=$('p-vibration').checked;store.set('kw.vibration',vibration);if(vibration)haptic()};
-  $('p-tone').onchange=()=>{tone=$('p-tone').value;store.set('kw.alertTone',tone);alertAudio.stop()};
-  $('p-volume').oninput=()=>{volume=Number($('p-volume').value)/100;store.set('kw.volume',volume);$('volume-value').textContent=`${Math.round(volume*100)}%`;$('p-volume').style.setProperty('--volume',`${Math.round(volume*100)}%`);alertAudio.setVolume(volume)};
-  $('p-preview').onclick=()=>playAlert(tone==='airraid'?4.2:2.4);$('p-stop').onclick=()=>alertAudio.stop();$('p-save').onclick=savePush;
+  document.querySelectorAll('input[name="theme"]').forEach(input=>input.onchange=()=>{themeMode=input.value;store.set('kw.theme',themeMode);applyTheme();tabLens.sync();toast(t('changedTo')(t('theme'),t('theme_'+themeMode)))});
+  document.querySelectorAll('[data-font]').forEach(button=>button.onclick=()=>{fontScale=Number(button.dataset.font);document.documentElement.style.setProperty('--font-scale',fontScale);store.set('kw.fontScale',fontScale);document.querySelectorAll('[data-font]').forEach(b=>{const active=b===button;b.classList.toggle('selected',active);b.setAttribute('aria-pressed',String(active))});toast(t('changedTo')(t('fontSize'),t(['fontSmall','fontMedium','fontLarge'][[.9,1,1.14].indexOf(fontScale)])))});
+  $('featured-choices').onclick=e=>{const button=e.target.closest('[data-featured]');if(!button)return;const key=button.dataset.featured,adding=!featured.includes(key);featured=adding?[...featured,key]:featured.filter(c=>c!==key);updateFeatureChoices();toast(t(adding?'topicSelected':'topicRemoved')(categoryLabel(key)))};
+  $('featured-all').onclick=()=>{featured=featured.length===12?[]:Object.keys(CATS);updateFeatureChoices();toast(t(featured.length?'allSelected':'allCleared'))};
+  const reflect=()=>{
+    const disabled=blocked||!$('p-on').checked;$('p-opts').disabled=disabled;$('category-options').disabled=disabled;$('topics-all').disabled=disabled;
+    document.querySelectorAll('input[name="lv"]').forEach(input=>input.closest('.radio-card').classList.toggle('selected',input.checked));
+    $('category-count').textContent=`${settingsDraft.cats.length}/12`;$('topics-all').textContent=t(settingsDraft.cats.length===12?'clearAll':'selectAll');
+    $('quiet-options').disabled=!$('p-quiet').checked;updateQuietDuration();
+  };
+  document.querySelectorAll('#p-on,input[name="lv"],input[name="pc"],#p-from,#p-to,#p-bypass,#p-quiet').forEach(input=>input.addEventListener('change',()=>{
+    readSettingsDraft();reflect();
+    let message;
+    if(input.id==='p-on')message=t(input.checked?'notificationsOn':'notificationsOff');
+    else if(input.name==='pc')message=t(input.checked?'topicSelected':'topicRemoved')(categoryLabel(input.value));
+    else if(input.name==='lv')message=t('changedTo')(t('notifications'),t(input.value==='all'?'allNews':input.value==='high'?'nHigh':'nCrit'));
+    else if(input.id==='p-quiet')message=t('settingToggled')(t('quietTitle'),input.checked);
+    else if(input.id==='p-bypass')message=t('settingToggled')(t('quietBypass'),input.checked);
+    else message=t('changedTo')(t(input.id==='p-from'?'quietFrom':'quietTo'),hourText(input.value));
+    savePush(message);
+  }));
+  $('topics-all').disabled=blocked||!draft.enabled;$('topics-all').onclick=()=>{const all=[...document.querySelectorAll('input[name="pc"]')],select=!all.every(input=>input.checked);all.forEach(input=>input.checked=select);readSettingsDraft();reflect();savePush(t(select?'allSelected':'allCleared'))};
+  $('p-area').onchange=()=>{region=$('p-area').value;store.set('kw.region',region);toast(t('changedTo')(t('area'),$('p-area').selectedOptions[0].textContent))};
+  $('p-sound').onchange=()=>{sound=$('p-sound').checked;store.set('kw.sound',sound);$('sound-options').disabled=!sound;alertAudio.stop();if(sound)unlock();toast(t('settingToggled')(t('soundTitle'),sound))};
+  $('p-vibration').onchange=()=>{vibration=$('p-vibration').checked;store.set('kw.vibration',vibration);if(vibration)haptic();toast(t('settingToggled')(t('vibration'),vibration))};
+  $('p-tone').onchange=()=>{tone=$('p-tone').value;store.set('kw.alertTone',tone);alertAudio.stop();toast(t('changedTo')(t('soundType'),t('tone_'+tone)))};
+  $('p-volume').oninput=()=>{volume=Number($('p-volume').value)/100;store.set('kw.volume',volume);$('volume-value').textContent=`${Math.round(volume*100)}%`;$('p-volume').style.setProperty('--volume',`${Math.round(volume*100)}%`);alertAudio.setVolume(volume);toast(t('changedTo')(t('volume'),`${Math.round(volume*100)}%`))};
+  $('p-preview').onclick=()=>playAlert(tone==='airraid'?4.2:2.4);$('p-stop').onclick=()=>alertAudio.stop();
 }
 function changeLanguage(next) {
-  readSettingsDraft();lang=next;store.set('kw.lang',lang);render();openSettings(true);$('l-'+next).focus({preventScroll:true});
+  readSettingsDraft();lang=next;store.set('kw.lang',lang);render();openSettings(true);$('l-'+next).focus({preventScroll:true});toast(t('changedTo')(t('language'),{th:'ไทย',en:'English',ko:'한국어'}[next]));
+  if(push.enabled){subscriptionRevision++;store.set('kw.pushDirty',true);syncSubscription()}
 }
 
-async function savePush() {
-  if(savingSettings)return;
-  const enabled = $("p-on").checked;
-  const level = "critical";
-  const picked = [...document.querySelectorAll("input[name=pc]:checked")].map(i => i.value);
-  if (enabled && !picked.length) { toast(t("pickCat")); return }
-  const quietFrom = Number($('p-from').value), quietTo = Number($('p-to').value);
-  const quietOn = $('p-quiet').checked, quietBypass = $('p-bypass').checked;
-  const btn = $('p-save'); savingSettings = true; btn.disabled = true; btn.textContent = t('saving');
-  try {
-    // ขออนุญาตทันทีตอนกด (iPhone ต้องเรียกจากการกดปุ่มโดยตรง)
-    if (enabled && Notification.permission !== "granted") {
-      const r = await Notification.requestPermission();
-      if (r !== "granted") throw new Error(t("sDenied"));
-    }
-    let token = store.get("kw.token", "");
-    if (enabled) token = await getToken();
-    if (![quietFrom, quietTo].every(h => Number.isInteger(h) && h >= 0 && h <= 23)) throw new Error("Hours must be 0–23");
-    const next = { enabled, level, cats: picked.length ? picked : push.cats, quietOn, quietFrom, quietTo, quietBypass };
-    const wasEnabled = push.enabled;
-    const result = token ? await saveSub(token, next, { testRequested: enabled && !wasEnabled }) : null;
-    push = next;
-    store.set("kw.push", push); if (token) store.set("kw.token", token);
-    settingsDraft = { ...push, cats:[...push.cats] }; render(); updateSettingsStatus();
-    let confirmed = true;
-    if (enabled && (!wasEnabled || result?.enabledNow)) {
-      try { await confirmNotifications(); } catch { confirmed = false; }
-    }
-    toast(!confirmed ? t('localTestFailed') : t('settingsSaved'),2000);
-  } catch (e) {
-    toast(t("errSave") + (e.message || e));
-  } finally {
-    savingSettings = false;
-    const current = $('p-save'); if(current){current.disabled=false;current.textContent=t('saveAlerts')}
+// Persist device choices synchronously. Serialize remote writes so rapid changes
+// and navigation cannot let an older save replace the latest preferences.
+let subscriptionRevision=0,subscriptionSyncing=false,permissionPending=false;
+async function savePush(message) {
+  readSettingsDraft();if(!settingsDraft)return;
+  const version=++subscriptionRevision,next={...settingsDraft,cats:[...settingsDraft.cats]},enabling=next.enabled&&!push.enabled;
+  const permission=enabling&&typeof Notification!=='undefined'&&Notification.permission!=='granted'?Notification.requestPermission():null;
+  visible().filter(n=>!globalThis.KW_NEWS_POLICY.matches(push,n)&&globalThis.KW_NEWS_POLICY.matches(next,n)).forEach(n=>markSeen(n.id));
+  push=next;store.set('kw.push',push);store.set('kw.pushDirty',true);updateSettingsStatus();
+  if(permission){
+    permissionPending=true;
+    try{if(await permission!=='granted')throw Error(t('sDenied'))}
+    catch(error){if(push.enabled){subscriptionRevision++;push={...push,enabled:false};store.set('kw.push',push);settingsDraft={...push,cats:[...push.cats]};if(currentView==='settings')openSettings(true)}toast(error.message);return}
+    finally{permissionPending=false;syncSubscription()}
   }
+  if(version===subscriptionRevision)toast(message);
+  syncSubscription();
 }
+async function syncSubscription() {
+  if(subscriptionSyncing||permissionPending||!fb||navigator.onLine===false||!store.get('kw.pushDirty',false))return;
+  subscriptionSyncing=true;
+  try{
+    while(store.get('kw.pushDirty',false)){
+      const revision=subscriptionRevision;
+      let token=store.get('kw.token','');if(push.enabled){if(typeof Notification==='undefined'||Notification.permission!=='granted')return;token=await getToken()}
+      if(revision!==subscriptionRevision)continue;
+      // With no selected topics, store an inactive server subscription. The local
+      // empty selection stays intact and no topic is silently re-selected.
+      const next={...push,cats:push.cats.length?[...push.cats]:[...DEFAULT_PUSH.cats],enabled:push.enabled&&push.cats.length>0};
+      if(token){await saveSub(token,next);store.set('kw.token',token)}
+      if(revision===subscriptionRevision)store.set('kw.pushDirty',false);
+    }
+  }catch(error){console.warn('settings sync',error.code||error.message);toast(t('settingsPending'))}
+  finally{subscriptionSyncing=false;updateSettingsStatus()}
+}
+addEventListener('online',syncSubscription);
 // token อาจเปลี่ยนเองได้ ตรวจทุกครั้งที่เปิดแอปแล้วสมัครใหม่ถ้าเปลี่ยน
 async function refreshToken() {
   try {
@@ -540,14 +570,13 @@ async function refreshToken() {
     const token = await getToken();
     const old = store.get("kw.token", "");
     if (token && token !== old) {
-      await saveSub(token, push);
-      // The authenticated document is updated in place when FCM rotates the token.
-      store.set("kw.token", token);
+      store.set('kw.token',token);store.set('kw.pushDirty',true);subscriptionRevision++;syncSubscription();
     }
   } catch (e) { console.warn("token refresh", e) }
 }
 $("settings").onclick = () => navigate("settings");
 
+let deferredFeed=null;
 let refreshingNews = false, capsuleRefresh = false, refreshMessage = 'refreshHint';
 function renderRefreshState() {
   const indicator = $('refresh-status');
@@ -582,7 +611,7 @@ function refreshFingerprint() {
 
 let refreshSequence = 0;
 async function refreshNews({capsule = false} = {}) {
-  if (refreshingNews) return {ok:false,busy:true};
+  if (refreshingNews||capsuleRefresh) return {ok:false,busy:true};
   const before = refreshFingerprint(), sequence = ++refreshSequence;
   refreshingNews = true; capsuleRefresh = capsule;
   if (!capsule) renderRefreshState();
@@ -593,15 +622,19 @@ async function refreshNews({capsule = false} = {}) {
       .then(result => { if (sequence === refreshSequence) { status = result.exists() ? result.data() : null; render(); } })
       .catch(error => console.warn('refresh status',error.code || error.message));
     const snapshot = await fb.fs.getDocFromServer(fb.fs.doc(fb.db, 'meta/feed'));
-    applyFeedSnapshot(snapshot); refreshMessage = 'refreshed';
+    if(sequence!==refreshSequence)return {ok:false,busy:true};
+    if(capsule){
+      deferredFeed=snapshot;
+      return {ok:true,commit:()=>{const pending=deferredFeed;deferredFeed=null;capsuleRefresh=false;if(pending)applyFeedSnapshot(pending);refreshMessage='refreshHint';$('refresh-status').hidden=true}};
+    }
+    applyFeedSnapshot(snapshot);refreshMessage='refreshed';
     return {ok:true,changed:before !== refreshFingerprint()};
   } catch (error) {
+    if(sequence!==refreshSequence)return {ok:false,busy:true};
     console.warn('refresh news', error.code || error.message); refreshMessage = 'refreshFailed';
-    return {ok:false};
+    return {ok:false,commit:()=>{deferredFeed=null;capsuleRefresh=false;refreshMessage='refreshHint';$('refresh-status').hidden=true}};
   } finally {
-    refreshingNews = false;
-    if (capsule) { capsuleRefresh = false; refreshMessage = 'refreshHint'; $('refresh-status').hidden = true; }
-    else renderRefreshState();
+    if(sequence===refreshSequence){refreshingNews=false;if(!capsule)renderRefreshState()}
   }
 }
 function scrollHomeTop() {
@@ -609,11 +642,11 @@ function scrollHomeTop() {
   const tick=now=>{const p=Math.min(1,(now-start)/(reduced?100:350));scrollTo(0,from*Math.pow(1-p,3));if(p<1)requestAnimationFrame(tick)};requestAnimationFrame(tick);
 }
 $('home-top').onclick = scrollHomeTop;
-attachPullRefresh({
+const pullController=attachPullRefresh({
   element:$('pull-refresh'), space:$('pull-space'), language:() => lang,
-  threshold:80, onReady:haptic,
+  threshold:64, onRelease:haptic,
   canStart:() => currentView === 'home' && scrollY <= 1 && $('sheet').hidden && $('alert').hidden && !document.hidden,
-  isBusy:() => refreshingNews,
+  isBusy:() => refreshingNews||capsuleRefresh,
   refresh:() => refreshNews({capsule:true}),
   onComplete:result => { if(result?.ok && result.changed) $('bk').querySelectorAll('.bkc').forEach(card => { card.classList.remove('fresh-entrance'); void card.offsetWidth; card.classList.add('fresh-entrance'); }); }
 });
@@ -633,15 +666,29 @@ async function boot() {
     // Live listeners incur reads when feed/status documents change.
     fs.onSnapshot(fs.doc(db, "meta/feed"), snap => {
       if (!snap.metadata.fromCache) clearTimeout(timer);
-      try { applyFeedSnapshot(snap); recoverEmptyFeed(); }
+      try { if(capsuleRefresh)deferredFeed=snap;else{applyFeedSnapshot(snap);recoverEmptyFeed()} }
       catch (error) { console.error(error); refreshMessage = 'refreshFailed'; renderRefreshState(); recoverEmptyFeed(); }
     }, err => { console.error(err); clearTimeout(timer); loaded = true; toast(t("slow")); render() });
     fs.onSnapshot(fs.doc(db, "meta/status"), s => { status = s.exists() ? s.data() : null; render(); recoverEmptyFeed() }, () => { });
-    refreshToken();
+    if(store.get('kw.pushDirty',false))syncSubscription();else refreshToken();
+    if(refreshOnBoot){refreshOnBoot=false;refreshNews()}
   } catch (e) { console.error(e); clearTimeout(timer); loaded = true; toast(t("slow")); render() }
 }
-// กดแจ้งเตือนขณะแอปเปิดอยู่: service worker ส่ง id มาให้เปิดข่าว
-navigator.serviceWorker?.addEventListener("message", e => { if (e.data?.type === "open" && e.data.id) { deepId = e.data.id; openDeepLink() } });
-setInterval(render, 60000);
+// New workers announce their installed release; reload only when opening the app.
+let openingUntil=Date.now()+15000,updatePending='',refreshOnBoot=false,reloading=false;
+function applyAppUpdate() {
+  if(!updatePending||document.hidden||Date.now()>openingUntil||reloading)return;
+  try{const prior=JSON.parse(sessionStorage.getItem('kw.reloadRelease')||'null');if(prior?.release===updatePending&&Date.now()-prior.at<60000)return;sessionStorage.setItem('kw.reloadRelease',JSON.stringify({release:updatePending,at:Date.now()}))}catch{}
+  reloading=true;location.reload();
+}
+navigator.serviceWorker?.addEventListener('message',event=>{
+  if(event.data?.type==='open'&&event.data.id){deepId=event.data.id;openDeepLink()}
+  if(event.data?.type==='app-release'&&event.data.release&&event.data.release!==document.documentElement.dataset.release){updatePending=event.data.release;applyAppUpdate()}
+});
+watchAppResume({
+  onReturn:()=>{pullController.reset();refreshSequence++;refreshingNews=false;capsuleRefresh=false;deferredFeed=null;cat='all';pageScroll.home=0;navigate('home');window.scrollTo(0,0);if(fb)refreshNews();else refreshOnBoot=true;refreshToken();syncSubscription()},
+  onOpen:()=>{openingUntil=Date.now()+15000;applyAppUpdate();getSw().then(reg=>{reg?.active?.postMessage({type:'get-release'});return reg?.update()}).catch(()=>{});syncSubscription()}
+});
+setInterval(render,60000);
 render();
 boot();

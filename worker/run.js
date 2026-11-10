@@ -262,7 +262,7 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
       Object.assign(it, policy.apply(it));
       if (hadText) { it.rich = true; delete it.needsEnrich } else if (!wasNew) it.enrichTries = (it.enrichTries || 0) + 1;
       delete it.snippetKo; delete it.attempts; delete it.lastTry; delete it.titleTries;
-      if (wasNew) { stat.translated++; if (!it.retranslation && policy.incident(it) && now - Date.parse(it.publishedAt) < CFG.PUSH_WINDOW_H * 3600e3) toPush.push(it) }
+      if (wasNew) { stat.translated++; if (!it.retranslation && policy.canNotify(it) && now - Date.parse(it.publishedAt) < CFG.PUSH_WINDOW_H * 3600e3) toPush.push(it) }
       else stat.enriched++;
       delete it.retranslation;
     });
@@ -490,7 +490,7 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
     if(e.expiresAt<Date.now() || !liveIds.has(e.news.id)) { await event.ref.delete(); continue; }
     // Recheck current source/headline, including outbox events from older workers.
     const current = items.find(i => i.id === e.news.id);
-    if (!policy.incident(current)) { await event.ref.delete(); continue; }
+    if (!policy.canNotify(current)) { await event.ref.delete(); continue; }
     readyEvents.push({ ref: event.ref, data: () => ({ ...e, news: current }) });
   }
   pushContext.deferSummary=false;
@@ -584,18 +584,19 @@ async function retryNotifications(db, messaging, log) {
   for(const d of snap.docs) {
     const j=d.data(); if(!j.recipients || !j.msg) continue;
     if(j.expiresAt < Date.now()) { await d.ref.delete(); continue; }
-    // Old queued news/summary payloads have no verifiable incident provenance.
-    // Test notifications remain available for delivery diagnostics.
-    if (j.msg.data?.level !== 'test' && !policy.incident({ titleKo: j.msg.data?.titleKo, publisherUrl: j.msg.data?.publisherUrl })) { await d.ref.delete(); continue; }
+    let categories=[];try {categories=JSON.parse(j.msg.data?.categories || '[]')} catch {}
+    const news={titleKo:j.msg.data?.titleKo,publisherUrl:j.msg.data?.publisherUrl,translated:j.msg.data?.translated==='true',level:j.msg.data?.level==='summary'?j.msg.data.newsLevel:j.msg.data?.level,categories};
+    // Recheck source, rank AND the recipient's latest topic selection on retry.
+    if(j.msg.data?.level!=='test'&&!policy.canNotify(news)){await d.ref.delete();continue}
     if(j.nextAttemptAt > Date.now()) continue;
     const subs=[], deferred=[];
-    let categories=[];try {categories=JSON.parse(j.msg.data?.categories || '[]')} catch {}
     for(const r of j.recipients) {
       const ref=db.doc("subscribers/"+r.id), snap=await ref.get();
       if(!snap.exists) continue;
       const s=snap.data();
       if(!s.enabled || s.token!==r.token || s.subscriptionVersion!==2) continue;
-      if(j.msg.data?.level!=="test" && quietBlocks(s,{categories,level:j.msg.data?.level})) deferred.push(r);
+      if(j.msg.data?.level!=="test"&&!policy.matches(s,news))continue;
+      if(j.msg.data?.level!=="test" && quietBlocks(s,policy.apply(news))) deferred.push(r);
       else subs.push({ref,...s});
     }
     if(!subs.length) {
@@ -627,7 +628,6 @@ function inQuiet(s, ms = Date.now()) {
 }
 const quietBlocks = (s, n, ms) => inQuiet(s, ms) && !(s.quietBypass !== false && (n.categories || []).includes("korwar") && n.level === "critical");
 // ระดับที่ผู้ใช้เลือก: critical = ด่วนมากเท่านั้น / high = ด่วนมาก + สำคัญ / all = ทุกข่าวใหม่ในหมวดที่เลือก
-const levelOk = (s, n) => n.level === "critical" || (s.level === "high" && n.level === "high") || s.level === "all";
 const MAX_PER_DEVICE = 4; // ต่อรอบ: เกินนี้รวมเป็นแจ้งเตือนเดียว "มีข่าวใหม่อีก N ข่าว"
 
 async function sendNews(db, messaging, news, appUrl, log, context = { count: new Map(), subs: null }) {
@@ -640,30 +640,40 @@ async function sendNews(db, messaging, news, appUrl, log, context = { count: new
   const subs = context.subs;
   const count = context.count, extra = context.extra || (context.extra = new Map()), last = new Map();
   for (const raw of news) {
-    if (!policy.incident(raw)) continue;
+    if (!policy.canNotify(raw)) continue;
     const n = policy.apply(raw);
-    const wanted = subs.filter(s => Array.isArray(s.cats) && s.cats.some(c => (n.categories || []).includes(c)) && levelOk(s, n) && !quietBlocks(s, n));
+    const wanted = subs.filter(s => policy.matches(s,n) && !quietBlocks(s,n));
     const targets = wanted.filter(s => (count.get(s.token) || 0) < MAX_PER_DEVICE);
     wanted.filter(s => !targets.includes(s)).forEach(s => extra.set(s.token, (extra.get(s.token) || 0) + 1));
-    context.lastIncident = n;
+    context.lastStory = n;
+    if(!context.extraNews)context.extraNews=new Map();
+    wanted.filter(s=>!targets.includes(s)).forEach(s=>context.extraNews.set(s.token,n));
     if (!targets.length) continue;
     targets.forEach(s => count.set(s.token, (count.get(s.token) || 0) + 1));
     const tag = n.level === "critical" ? "🔴 ด่วนมาก" : n.level === "high" ? "🟠 สำคัญ" : "🆕 ข่าวใหม่";
     try {
       const r = await sendMulticast(db, messaging, targets, {
         notification: { title: `${tag}: ${n.title.th}`.slice(0, 120), body: (n.summary.th || "").slice(0, 240) },
-        data: { id: String(n.id), level: String(n.level), categories: JSON.stringify(n.categories || []), titleKo: n.titleKo, publisherUrl: n.publisherUrl || n.sourceUrl, policy: policy.VERSION }, webpush: webpush(appUrl, n.id, n.level)
+        data: { id: String(n.id), level: String(n.level), categories: JSON.stringify(n.categories || []), titleKo: n.titleKo, publisherUrl: n.publisherUrl || n.sourceUrl, translated:String(n.translated===true), policy: policy.VERSION }, webpush: webpush(appUrl, n.id, n.level)
       }, log);
       merge(r); targets.forEach(s => last.set(s.token, { r: r.perToken.get(s.token), title: n.title.th }));
     } catch (e) { if (!e.deliveryPersisted) throw e; log.warn("push failed", n.id, e.message); out.failed += targets.length; out.errors[e.code || e.message] = (out.errors[e.code || e.message] || 0) + targets.length }
   }
   // ข่าวที่เกินโควตาต่อเครื่อง: รวมเป็นแจ้งเตือนเดียว
   const byN = new Map();
-  for (const [tok, k] of context.deferSummary ? [] : extra) { if (!byN.has(k)) byN.set(k, []); byN.get(k).push(subs.find(s => s.token === tok)) }
-  for (const [k, list] of byN) {
-    try { merge(await sendMulticast(db, messaging, list, { notification: { title: "Korea Watch", body: `มีข่าวใหม่อีก ${k} ข่าว แตะเพื่ออ่าน` }, data: { id: "", level: "summary", titleKo: context.lastIncident.titleKo, publisherUrl: context.lastIncident.publisherUrl || context.lastIncident.sourceUrl, policy: policy.VERSION }, webpush: webpush(appUrl, "", "summary") }, log)) } catch (e) { if(!e.deliveryPersisted) throw e; log.warn("summary push failed", e.message) }
+  for(const [tok,k] of context.deferSummary?[]:extra){
+    const n=context.extraNews?.get(tok)||context.lastStory,subscriber=subs.find(s=>s.token===tok);
+    if(!n||!subscriber||!policy.matches(subscriber,n))continue;
+    const key=JSON.stringify([k,n.id]);if(!byN.has(key))byN.set(key,{k,n,list:[]});byN.get(key).list.push(subscriber);
   }
-  if (!context.deferSummary) extra.clear();
+  for(const {k,n,list} of byN.values()){
+    try { merge(await sendMulticast(db,messaging,list,{
+      notification:{title:'Korea Watch',body:`มีข่าวใหม่อีก ${k} ข่าว แตะเพื่ออ่าน`},
+      data:{id:'',level:'summary',newsLevel:n.level,categories:JSON.stringify(n.categories||[]),titleKo:n.titleKo,publisherUrl:n.publisherUrl||n.sourceUrl,translated:String(n.translated===true),policy:policy.VERSION},
+      webpush:webpush(appUrl,'','summary')
+    },log)) }catch(e){if(!e.deliveryPersisted)throw e;log.warn('summary push failed',e.message)}
+  }
+  if(!context.deferSummary){extra.clear();context.extraNews?.clear()}
   const per = new Map([...last].map(([t, v]) => [t, v.r]));
   await logPush(db, subs, per, "news", [...last.values()].pop()?.title);
   return out;

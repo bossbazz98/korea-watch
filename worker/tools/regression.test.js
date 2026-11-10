@@ -48,8 +48,8 @@ test('runOnce propagates storage failure and does not acknowledge fixes',async()
  assert(db.data.has('fixJobs/f'));assert(!db.data.has('meta/status'));
 });
 test('FCM partial failure retries only failed recipients and retains receipts',async()=>{
- const db=dbFake(),subs=['a','b'].map(id=>({ref:db.doc('subscribers/'+id),token:id,subscriptionVersion:2,enabled:true}));for(const s of subs)await s.ref.set({token:s.token,subscriptionVersion:2,enabled:true});
- const message={notification:{title:'test',body:'body'},data:{id:'news1',level:'critical',titleKo:'북한 탄도미사일 발사',publisherUrl:'https://www.yna.co.kr'}};
+ const db=dbFake(),subs=['a','b'].map(id=>({ref:db.doc('subscribers/'+id),token:id,subscriptionVersion:2,enabled:true,cats:['korwar'],level:'critical'}));for(const s of subs)await s.ref.set({token:s.token,subscriptionVersion:2,enabled:true,cats:s.cats,level:s.level});
+ const message={notification:{title:'test',body:'body'},data:{id:'news1',level:'critical',categories:'["korwar"]',titleKo:'북한 탄도미사일 발사',publisherUrl:'https://www.yna.co.kr'}};
  let first=true,calls=[];const messaging={async sendEachForMulticast(m){calls.push(m.tokens);if(first){first=false;return{successCount:1,responses:[{success:true},{success:false,error:{code:'messaging/server-unavailable'}}]}}return{successCount:m.tokens.length,responses:m.tokens.map(()=>({success:true}))}}};
  await sendMulticast(db,messaging,subs,message,log);
  const job=[...db.data].find(([p,v])=>p.startsWith('notificationJobs/')&&v.status==='pending');assert.deepEqual(job[1].recipients.map(r=>r.id),['b']);job[1].nextAttemptAt=0;
@@ -78,7 +78,7 @@ test('GitHub HTTP denial cannot be reported as an opened issue',async()=>{
 });
 test('retry respects quiet hours without dropping the pending recipient',async()=>{
  const db=dbFake(),hour=new Date(Date.now()+9*3600e3).getUTCHours();
- await db.doc('subscribers/a').set({token:'a',enabled:true,subscriptionVersion:2,quietBypass:false,quietOn:true,quietFrom:hour,quietTo:(hour+1)%24});
+ await db.doc('subscribers/a').set({token:'a',enabled:true,subscriptionVersion:2,cats:['korwar'],level:'critical',quietBypass:false,quietOn:true,quietFrom:hour,quietTo:(hour+1)%24});
  await db.doc('notificationJobs/j').set({status:'pending',attempts:1,nextAttemptAt:0,expiresAt:Date.now()+3600000,recipients:[{id:'a',token:'a'}],msg:{data:{id:'x',level:'critical',categories:'["korwar"]',titleKo:'북한 탄도미사일 발사',publisherUrl:'https://www.yna.co.kr'},notification:{title:'x'}}});
  let calls=0;await retryNotifications(db,{async sendEachForMulticast(){calls++;throw Error('should not send')}},log);
  assert.equal(calls,0);assert.equal(db.data.get('notificationJobs/j').recipients.length,1);assert(db.data.get('notificationJobs/j').nextAttemptAt>Date.now());
@@ -164,18 +164,26 @@ test('nonincident Korean backlog cannot spend the fast lane before tech/foreign 
  }
  assert.equal(stat.aiModelErrors['groq:openai/gpt-oss-120b'].status,429);
 });
-test('all/high preferences and old pending jobs never bypass the incident/source policy',async()=>{
- const db=dbFake();await db.doc('subscribers/a').set({token:'a',enabled:true,subscriptionVersion:2,cats:['oil','disease','korwar'],level:'all'});
- const sent=[],messaging={async sendEachForMulticast(m){sent.push(m);return{successCount:1,responses:[{success:true}]}}};
- const critical=(titleKo,sourceUrl)=>({...story('bad'),titleKo,sourceUrl,level:'critical',categories:['disease','oil']});
- await sendNews(db,messaging,[critical('독감 대유행 긴급','https://www.yna.co.kr'),critical('북한 탄도미사일 발사','https://reuters.com')],'https://example.test',log);
- assert.equal(sent.length,0);
- for(const [id,data] of [['legacy',{level:'high'}],['forged',{level:'critical',titleKo:'북한 미사일 발사',publisherUrl:'https://evil.test'}],['disease',{level:'critical',titleKo:'독감 유행 긴급 경보',publisherUrl:'https://www.yna.co.kr'}]])
-  await db.doc('notificationJobs/'+id).set({status:'pending',nextAttemptAt:0,expiresAt:Date.now()+3600000,recipients:[{id:'a',token:'a'}],msg:{data,notification:{title:'old'}}});
- await retryNotifications(db,messaging,log);
- assert.equal(sent.length,0);assert(![...db.data.keys()].some(p=>p.startsWith('notificationJobs/')));
- await sendNews(db,messaging,[critical('북한 탄도미사일 발사','https://www.yna.co.kr')],'https://example.test',log);
- assert.equal(sent.length,1);assert.equal(sent[0].data.level,'critical');assert.equal(sent[0].data.publisherUrl,'https://www.yna.co.kr');
+test('selected levels include translated topic news while urgent and untrusted jobs stay restricted',async()=>{
+ const db=dbFake();
+ for(const level of ['critical','high','all'])await db.doc('subscribers/'+level).set({token:level,enabled:true,subscriptionVersion:2,cats:['oil','korwar'],level});
+ await db.doc('subscribers/wrong-topic').set({token:'wrong-topic',enabled:true,subscriptionVersion:2,cats:['tech'],level:'all'});
+ const sent=[],messaging={async sendEachForMulticast(m){sent.push(m);return{successCount:m.tokens.length,responses:m.tokens.map(()=>({success:true}))}}};
+ const n=(id,level,titleKo='국제 유가 상승',sourceUrl='https://www.yna.co.kr')=>({...story(id),level,titleKo,sourceUrl});
+ await sendNews(db,messaging,[n('normal','normal')],'https://example.test',log);assert.deepEqual(sent.at(-1).tokens,['all']);
+ await sendNews(db,messaging,[n('high','high')],'https://example.test',log);assert.deepEqual(new Set(sent.at(-1).tokens),new Set(['high','all']));
+ await sendNews(db,messaging,[n('fake-urgent','critical')],'https://example.test',log);assert.equal(sent.at(-1).data.level,'high');assert(!sent.at(-1).tokens.includes('critical'));
+ const before=sent.length;
+ await sendNews(db,messaging,[n('untrusted','high','북한 탄도미사일 발사','https://evil.test'),{...n('pending','high'),translated:false}],'https://example.test',log);assert.equal(sent.length,before);
+ await sendNews(db,messaging,[n('incident','critical','북한 탄도미사일 발사')],'https://example.test',log);assert.deepEqual(new Set(sent.at(-1).tokens),new Set(['critical','high','all']));
+ for(const [id,data] of [['legacy',{level:'high'}],['forged',{level:'critical',titleKo:'북한 미사일 발사',publisherUrl:'https://evil.test'}]])await db.doc('notificationJobs/'+id).set({status:'pending',nextAttemptAt:0,expiresAt:Date.now()+3600000,recipients:[{id:'all',token:'all'}],msg:{data,notification:{title:'old'}}});
+ await retryNotifications(db,messaging,log);assert(!db.data.has('notificationJobs/legacy'));assert(!db.data.has('notificationJobs/forged'));
+});
+test('a retry honors changed levels and topics instead of the original recipient list',async()=>{
+ const db=dbFake();
+ for(const [id,level,cats] of [['keep','all',['oil']],['rank','critical',['oil']],['topic','all',['tech']]])await db.doc('subscribers/'+id).set({token:id,subscriptionVersion:2,enabled:true,level,cats});
+ await db.doc('notificationJobs/retry').set({status:'pending',nextAttemptAt:0,expiresAt:Date.now()+3600000,recipients:['keep','rank','topic'].map(id=>({id,token:id})),msg:{notification:{title:'Oil'},data:{id:'oil',level:'high',categories:'["oil"]',translated:'true',titleKo:'국제 유가 상승',publisherUrl:'https://www.yna.co.kr'}}});
+ const calls=[];await retryNotifications(db,{async sendEachForMulticast(m){calls.push(m.tokens);return{successCount:m.tokens.length,responses:m.tokens.map(()=>({success:true}))}}},log);assert.deepEqual(calls,[['keep']]);
 });
 test('repeat ingestion adds verified trending coverage to an existing translated item without republishing alerts',async()=>{
  const db=dbFake(),now=Date.now(),title='유명 배우 결혼 소식',date=new Date(now-60000).toISOString();

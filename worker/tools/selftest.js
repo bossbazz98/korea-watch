@@ -83,8 +83,8 @@ const log = { log() {}, warn() {} };
   assert.deepStrictEqual(warMsg.tokens.sort(), ["tokA", "tokB"], "critical war → A (critical/war) + B (high/war), not disabled D");
   assert.ok(warMsg.webpush.fcmOptions.link.startsWith("https://kw.web.app/?id="));
   const fluMsg = msg.sent.find(m => m.data.id === feed.find(i => i.level === "high").id);
-  assert.strictEqual(fluMsg, undefined, "disease news never sends push, including high/all subscriptions");
-  assert.ok(db.data.has("subscribers/c"), "a subscriber excluded from news is not contacted or removed");
+  assert.deepStrictEqual(fluMsg.tokens.sort(),["dead","tokB"],"important disease news goes to high subscribers in that topic, never urgent-only A");
+  assert.ok(!db.data.has("subscribers/c"), "a confirmed expired token is removed after its selected topic is sent");
   assert.ok(msg.sent.some(m => m.data.level === "test" && m.tokens.includes("tokA")), "test push sent");
   assert.strictEqual(db.data.get("subscribers/a").testRequested, false, "test flag reset");
 
