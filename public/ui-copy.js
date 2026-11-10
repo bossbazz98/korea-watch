@@ -41,3 +41,7 @@ Object.assign(UI_COPY.ko,{
  savedSearch:'저장한 뉴스 검색',today:'오늘',yesterday:'어제',noSavedResults:'필터에 맞는 저장한 뉴스가 없습니다',
  otherShare:'더 보기',copyLinkHint:'기사 링크 보내기',shareImageHint:'기사 사진과 요약 이미지 만들기',photoUnavailable:'기사 사진을 불러오지 못했습니다. 연결 후 다시 시도하세요.',settingsSaved:'저장됨'
 });
+
+UI_COPY.th.moreTopics=count=>`อีก ${count} หมวด`;
+UI_COPY.en.moreTopics=count=>`${count} more topic${count===1?'':'s'}`;
+UI_COPY.ko.moreTopics=count=>`추가 주제 ${count}개`;

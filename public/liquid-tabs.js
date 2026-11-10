@@ -3,7 +3,7 @@ export function attachLiquidTabs({bar,onSelect}) {
   const lens=bar.querySelector('.tab-lens'),buttons=[...bar.querySelectorAll('.tab')];
   lens.classList.remove('glass');
   const row=document.createElement('div');row.className='tab-real-row';buttons.forEach(b=>row.append(b));bar.append(row);
-  lens.innerHTML='<span class="lens-surface"></span><span class="lens-optics" aria-hidden="true"></span><span class="lens-rim"></span>';
+  lens.innerHTML='<span class="lens-surface"></span><span class="lens-optics" aria-hidden="true"></span><span class="lens-rim"></span><span class="lens-border"></span>';
   const optics=lens.querySelector('.lens-optics'),copies=[];
   for(const color of ['main','pink','blue','yellow','purple']){
     const plane=document.createElement('span');plane.className='lens-plane lens-'+color;
