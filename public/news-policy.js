@@ -1,6 +1,6 @@
 // Shared, deterministic policy: AI urgency cannot authorize an alert.
 (() => {
-  const VERSION = 'korea-incidents-v1';
+  const VERSION = 'selected-levels-v2';
   const publishers = ['yna.co.kr', 'yonhapnewstv.co.kr', 'kbs.co.kr', 'imbc.com', 'sbs.co.kr', 'ytn.co.kr', 'jtbc.co.kr', 'jtbc.com', 'donga.com', 'khan.co.kr', 'hani.co.kr', 'chosun.com', 'joongang.co.kr', 'hankookilbo.com', 'seoul.co.kr', 'segye.com', 'kmib.co.kr', 'munhwa.com', 'newsis.com', 'news1.kr', 'nocutnews.co.kr', 'mbn.co.kr', 'tvchosun.com', 'ichannela.com', 'mk.co.kr', 'hankyung.com', 'sedaily.com', 'edaily.co.kr', 'mt.co.kr', 'fnnews.com', 'asiae.co.kr', 'ohmynews.com', 'pressian.com', 'busan.com', 'imaeil.com', 'koreaherald.com', 'koreatimes.co.kr'];
   function isKoreanPublisher(url) {
     try {
@@ -35,9 +35,18 @@
   function apply(item) {
     const reason = incident(item);
     return { ...item, level: reason ? 'critical' : item.level === 'critical' ? 'high' : item.level,
-      emergency: !!reason, categories: reason ? [...new Set([...(item.categories || []), 'korwar'])] : item.categories };
+      emergency: !!reason, categories: reason ? [...new Set([...(Array.isArray(item.categories)?item.categories:[]), 'korwar'])] : item.categories };
   }
-  const api = { VERSION, isKoreanPublisher, publisherKey, trusted, incident, apply };
+  function canNotify(item) {
+    return !!item && ( !!incident(item) || (trusted(item) && item.translated === true && !!item.titleKo && ['normal','high'].includes(apply(item).level)) );
+  }
+  function matches(preferences,item) {
+    if (!preferences?.enabled || !canNotify(item)) return false;
+    const n=apply(item), selected=Array.isArray(preferences.cats)?preferences.cats:[];
+    if (!(Array.isArray(n.categories)?n.categories:[]).some(c=>selected.includes(c))) return false;
+    return n.level==='critical' || preferences.level==='all' || (preferences.level==='high' && n.level==='high');
+  }
+  const api = { VERSION, isKoreanPublisher, publisherKey, trusted, incident, apply, canNotify, matches };
   if (typeof module !== 'undefined') module.exports = api;
   else globalThis.KW_NEWS_POLICY = api;
 })();

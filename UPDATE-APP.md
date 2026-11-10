@@ -1,23 +1,43 @@
-# อัปเดตแอป KOREA WATCH รุ่น Liquid Glass
+# อัปเดต KOREA WATCH — การรีเฟรช ตั้งค่าอัตโนมัติ และ Liquid Glass
 
-โฟลเดอร์นี้คือ **โค้ดเว็บแอป/PWA ตัวจริง** เชื่อมกับฟีด Firebase เดิม ไม่ใช่ชุดต้นแบบ START-HERE.html
+ดาวน์โหลด [ZIP จาก GitHub](https://github.com/bossbazz98/korea-watch/archive/refs/heads/codex/interaction-polish-2026-11-11.zip) แล้วแตกไฟล์ โค้ดนี้ต่อจาก UI Layout รุ่นก่อนและยังไม่ merge เข้า main
 
-แตก `korea-watch-liquid-glass-app-2026-11-09.zip` แล้วรันใน Terminal บน Mac ที่เคย deploy Firebase:
+## 1. อัปเดตหน้าจอแอป
+
+บน Mac ที่เคย deploy Firebase รัน:
 
 ```sh
-cd ~/Downloads/korea-watch-liquid-glass-app-2026-11-09/worker
-npm ci
-npm run deploy:hosting
+cd ~/Downloads/korea-watch-codex-interaction-polish-2026-11-11
+npm --prefix worker ci
+npm --prefix worker run deploy:hosting
 ```
 
-รอข้อความ `Deploy complete!` แล้วเปิด https://korea-watch01.web.app/ ถ้าติดตั้งแอปไว้บนหน้าจอโฮม ให้ปิดและเปิดแอปใหม่
+รอ `Deploy complete!` แล้วเปิด https://korea-watch01.web.app/ หรือปิดและเปิด PWA ใหม่ รุ่นนี้มี marker `20261111-interactions` ใน HTML
 
-คำสั่งนี้ build แล้ว deploy เฉพาะ Hosting เข้า project เดิม `korea-watch01` ไม่ต้องตั้ง Firebase ใหม่ ไม่ต้อง deploy rules และไม่ต้อง Run workflow Fetch news สำหรับการเปลี่ยนหน้าจอนี้
+ต้องใช้ `--prefix worker` เพราะ package.json และ package-lock.json อยู่ใน worker อย่ารัน `npm ci` เปล่า ๆ จากโฟลเดอร์หลัก หาก CLI แจ้ง `Failed to authenticate` ใช้ `./worker/node_modules/.bin/firebase login` ด้วยบัญชีเดิม แล้วรันคำสั่ง deploy อีกครั้ง ไม่ต้องตั้งค่า Firebase ใหม่หรือ deploy rules
 
-หาก CLI แจ้ง `Failed to authenticate` ให้รัน `./node_modules/.bin/firebase login` แล้วรัน `npm run deploy:hosting` อีกครั้ง โดยใช้บัญชีเดิมที่มีสิทธิ์ใน project
+## 2. อัปเดตตัวส่งแจ้งเตือนด้วย
 
-สิ่งที่เปลี่ยน: หน้าแรก/อ่านข่าว/บันทึกไว้/ตั้งค่าแบบ Liquid Glass, เมนูล่าง 3 แท็บ, บันทึกข่าวบนเครื่อง, แชร์ลิงก์และภาพสรุป, เลือกข่าวเด่น, ขนาดตัวอักษร และดึงลงรีเฟรช 80 px
+รอบนี้มีการเปลี่ยน worker ตามคำยืนยันล่าสุด:
 
-ยังส่ง push เฉพาะ 5 เหตุเดิมตามที่ยืนยัน ตัวเลือกด่วน/ทุกข่าวปิดไว้ พื้นที่เป็นค่าที่บันทึกบนเครื่อง ยังไม่ได้เชื่อม Cell Broadcast เสียง/สั่นเบื้องหลังยังขึ้นกับระบบของมือถือ
+- ด่วนมากเท่านั้น: เฉพาะ 5 เหตุเดิมที่ยืนยันจากสำนักข่าวเกาหลีใต้
+- ด่วนมาก + สำคัญ: สองระดับนี้ เฉพาะหมวดที่เลือก
+- ทุกข่าว: ข่าวใหม่ทุกระดับ เฉพาะหมวดที่เลือก
 
-รายละเอียดและข้อจำกัด: [docs/ui/liquid-glass.md](docs/ui/liquid-glass.md)
+หน้าจอจะบันทึกค่าให้ทันที แต่ตัวส่งข่าวต้องใช้โค้ดรุ่นนี้ด้วย ไปที่ [Actions → Fetch news](https://github.com/bossbazz98/korea-watch/actions/workflows/fetch-news.yml) → Run workflow → เลือก branch `codex/interaction-polish-2026-11-11` → Run workflow เพื่อรันรุ่นนี้หนึ่งรอบ
+
+**รอบอัตโนมัติยังใช้ main** หากต้องการให้เกณฑ์สามระดับทำงานต่อเนื่อง ให้คุณตรวจและ merge branch นี้เข้า main เอง แล้ว Run workflow จาก main อีกครั้ง งานนี้ไม่ได้ merge ให้
+
+## สิ่งที่เปลี่ยน
+
+- ดึงลงแล้วเส้นวงกลมเติมตามระยะ สั่นเบาตอนปล่อย และหมุนหนึ่งรอบ 600 ms ก่อนยุบและแสดงข้อมูลใหม่ ถ้าเครือข่ายยังไม่เสร็จจะรอข้อมูลโดยคงข่าวเดิม
+- การ์ดข่าวแสดงเวลา ข่าวเด่นสูงเท่าข่าวทั้งหมด หัวข้อหมวดใต้ข่าวเด่นอยู่แถวเดียวพร้อม ellipsis
+- กลับเข้าแอปหลังห่างเกิน 10 นาทีไปหน้าแรกและโหลด feed/status ใหม่ ตรวจเวอร์ชันแอปตอนเปิดและกลับเข้าแอป พร้อมป้องกันรีโหลดวน
+- หน้าตั้งค่าไม่มีปุ่มบันทึกหรือออก มีแท็บล่างตลอด ค่าทุกอย่างบันทึกทันที พร้อม toast 2 วินาที การเขียนค่าการแจ้งเตือนเรียงลำดับเพื่อให้ค่าล่าสุดชนะ และซิงก์ต่อเมื่อกลับออนไลน์
+- หน้าบันทึกข่าวมีค้นหา ชิปหมวด กลุ่มตามวันเผยแพร่เวลาเกาหลี รูปจัตุรัส แท็ก 2 อันพร้อม +N และปัดลบที่ 134 CSS px
+- ชีทแชร์ไม่เลื่อนออกด้านข้าง มี LINE / Facebook / KakaoTalk / อื่นๆ พร้อมกล่องรวมคัดลอกลิงก์และสร้างภาพสรุปจากรูปข่าวจริง
+- เมนูล่าง 353×62 px บนหน้าจอที่พอ และย่อให้พอดีบนจอเล็ก มีสำเนาแถวปุ่มในเลนส์ การขยายภาพ ขอบแยกสีเฉพาะตัวอักษร/ไอคอน และสปริงสำหรับแตะ/กดค้าง/ลากตามค่าที่ระบุ รองรับคีย์บอร์ดและ Reduce Motion
+
+การสั่นใช้ Web Vibration API จึงทำงานบนอุปกรณ์/เบราว์เซอร์ที่รองรับเท่านั้น โดยเฉพาะ Safari บน iPhone ไม่มี API นี้ ภาพสรุปจะไม่แทนรูปข่าวด้วยโลโก้หากต้นทางโหลดไม่ได้หรือบล็อก CORS แต่จะแจ้งข้อผิดพลาดให้ลองใหม่แทน KakaoTalk ใช้เมนูแชร์ระบบเพื่อให้ผู้ใช้เลือกแอป; ปุ่มส่งตรงของ Kakao ต้องมี SDK/app key เพิ่ม
+
+รายละเอียดและผลทดสอบ: [docs/ui/interactions.md](docs/ui/interactions.md)

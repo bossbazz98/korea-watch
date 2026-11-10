@@ -1,0 +1,170 @@
+/* Shared sizes for titles, reading text and every floating bottom dock. */
+:root {
+  --heading-size:calc(20px * var(--font-scale,1));
+  --reading-size:calc(16px * var(--font-scale,1));
+  --control-size:calc(14px * var(--font-scale,1));
+  --dock-height:68px;
+  --dock-control-height:54px;
+  --dock-bottom:calc(max(2px,calc(env(safe-area-inset-bottom,0px) - 4px)) + var(--dock-obstruction));
+  --news-high:#F0A34A;
+}
+:root[data-theme="light"] { --news-high:#A35A00; }
+
+/* Logo lettering and numeric counters are separate from story/section titles. */
+.sec-h h2,
+.hero-card .hero-copy h3,
+.article h1,
+.article-body h2,
+.article .summary-box h2,
+.app-page-header .page-title,
+.settings-heading h2,
+.group-title,
+.sheet-heading h2,
+.empty-saved h2,
+.saved-row h3,
+.share-preview h3,
+.alert h2,
+.panel[data-kind="info"] h2,
+.src .k {
+  font-size:var(--heading-size);
+  font-weight:700;
+  line-height:1.5;
+}
+.article .summary-box p,
+.article-body p,
+.src,.src .ko,
+.content-language,
+.article-meta,
+.sec-h .sub,
+.note,
+.saved-at,
+.empty-saved p,
+.settings-state,
+.status-copy,.status-copy strong,.status-copy small,
+.row-body,.row-body small,
+.hint,
+.radio-card b,.radio-card small,
+.check-row b,.check-row small,
+.time-label,.quiet-duration,
+.volume-top,
+.font-example p,
+.steps {
+  font-size:var(--reading-size);
+  line-height:1.8;
+}
+.font-example b { font-size:var(--heading-size);line-height:1.5; }
+.reader-sticky {
+  height:44px;
+  padding:7px 12px;
+  font-size:var(--heading-size);
+  line-height:1.5;
+  top:0;
+}
+
+/* The frame and every inner control keep the same height on every page. */
+.dock-frame {
+  left:50%;
+  right:auto;
+  bottom:var(--dock-bottom);
+  transform:translateX(-50%);
+  width:480px;
+  max-width:calc(100% - 24px);
+  height:var(--dock-height);
+  min-height:var(--dock-height);
+  max-height:var(--dock-height);
+  padding:6px;
+  gap:4px;
+  display:flex;
+  align-items:center;
+  border-radius:28px;
+  border:1px solid rgba(255,255,255,.14);
+  font-family:var(--f-head);
+}
+.dock-frame > button,
+.dock-frame > .tab,
+.reader-actions.dock-frame .back-wide,
+.settings-actions.dock-frame button {
+  height:var(--dock-control-height);
+  min-height:var(--dock-control-height);
+  max-height:var(--dock-control-height);
+  padding:0 10px;
+  border-radius:22px;
+  font-family:var(--f-head);
+  font-size:var(--control-size);
+  line-height:1.25;
+  white-space:nowrap;
+  flex:none;
+}
+.dock-frame .tab { flex:1;min-width:0;gap:2px; }
+.dock-frame svg { width:21px;height:21px;flex:none; }
+.reader-actions.dock-frame .icon-button {
+  width:var(--dock-control-height);
+  padding:0;
+  border-radius:50%;
+}
+.reader-actions.dock-frame .back-wide,
+.settings-actions.dock-frame button {
+  flex:1;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:6px;
+}
+.reader-actions.dock-frame .glass,
+.settings-actions.dock-frame .dock-button {
+  background:transparent;
+  border:1px solid transparent;
+  box-shadow:none;
+  backdrop-filter:none;
+  -webkit-backdrop-filter:none;
+}
+.reader-actions.dock-frame { margin:0; }
+.toast,body[data-overlay="settings"] .toast {
+  bottom:calc(var(--dock-bottom) + var(--dock-height) + 12px);
+}
+
+/* Settings uses IBM throughout, including inputs, captions and status text. */
+.panel[data-kind="settings"] { font-family:var(--f-head); }
+.panel[data-kind="settings"] * { font-family:inherit; }
+.panel[data-kind="settings"] .sheet-content {
+  padding-bottom:calc(var(--dock-bottom) + var(--dock-height) + 24px);
+}
+.settings-heading { justify-content:space-between!important; }
+.settings-heading #settings-close { flex:none;margin-left:auto; }
+.group-title { flex-wrap:wrap;gap:4px 10px; }
+.group-tools { font-size:var(--control-size); }
+.group-tools button { font-size:var(--control-size); }
+.settings-card select,#p-tone,#p-area { font-size:var(--reading-size); }
+.time-box select { font-size:26px; }
+#p-area { max-width:130px; }
+.topic-pick,.segments button,.segments label { font-size:var(--control-size); }
+.font-buttons button:nth-child(1) { font-size:14px; }
+.font-buttons button:nth-child(2) { font-size:18px; }
+.font-buttons button:nth-child(3) { font-size:22px; }
+
+/* Give images the spare carousel height rather than leaving empty card space. */
+.bkc .thumb {
+  height:clamp(220px,62vw,280px);
+  min-height:clamp(220px,62vw,280px);
+  flex:1 0 clamp(220px,62vw,280px);
+}
+.bkc .hero-copy { flex:none; }
+.hero-card[data-level="critical"] {
+  border:2px solid var(--red);
+  box-shadow:inset 0 0 0 1px var(--red);
+}
+.hero-card[data-level="high"] { border:2px solid var(--news-high); }
+
+/* Phone: one column. Wider devices progressively use at most four columns. */
+.all-news-section { max-width:none; }
+#grid { grid-template-columns:minmax(0,1fr);align-items:start; }
+#grid .card .thumb { height:auto;aspect-ratio:16/10;flex:none;min-height:0; }
+@media(min-width:640px) { #grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media(min-width:960px) { #grid { grid-template-columns:repeat(3,minmax(0,1fr)); } }
+@media(min-width:1280px) { #grid { grid-template-columns:repeat(4,minmax(0,1fr)); } }
+@media(hover:none) and (pointer:coarse) and (max-height:500px) {
+  #grid { grid-template-columns:minmax(0,1fr); }
+}
+body { font-size:var(--reading-size); }
+.head-count,.share-preview small { font-size:var(--reading-size);line-height:1.8; }
+.chip,.hero-card .chip,.saved-row .chip { font-size:var(--control-size); }

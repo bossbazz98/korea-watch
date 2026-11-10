@@ -1,7 +1,7 @@
 import './categories.js';
 import './news-text.js';
-import './news-policy.js?v=20261109-feed2';
-import './category-policy.js?v=20261109-feed2';
+import './news-policy.js?v=20261111-interactions';
+import './category-policy.js?v=20261111-interactions';
 
 const list = value => Array.isArray(value) ? value : [];
 const objects = value => list(value).filter(item => item && typeof item === 'object');

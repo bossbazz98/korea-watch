@@ -3,3 +3,12 @@
 @media(min-width:640px){.panel[data-kind="settings"] .sheet-content{padding-inline:24px}.settings-actions{left:24px;right:24px}.topic-pick{font-size:12px}.group-title{margin-top:28px}.row-body{font-size:15px}}
 @media(max-width:359px){.settings-heading h2{font-size:28px}.setting-row{padding-inline:12px;gap:8px}.row-body{font-size:13px}.topic-picks{padding-inline:12px;gap:7px}.topic-pick{font-size:10px;padding-inline:8px}.settings-actions button{font-size:12px}.check-row b{font-size:10px}#p-area{max-width:105px}}
 @media(prefers-reduced-motion:reduce){.sw i::after{transition:none}}
+
+/* Settings has one bottom dock with Save/Test, and a header back action. */
+.settings-heading { justify-content:flex-start!important;gap:12px!important; }
+.settings-heading #settings-back { flex:none; }
+.panel[data-kind="settings"] .sheet-content {
+  padding-bottom:calc(var(--dock-bottom) + 84px);
+}
+.settings-actions { bottom:var(--dock-bottom); }
+body[data-overlay="settings"] .toast { bottom:calc(var(--dock-bottom) + 66px); }

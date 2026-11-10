@@ -8,3 +8,36 @@ export const UI_COPY = {
 Object.assign(UI_COPY.ko, {
   setup:'Firebase 설정이 완료되지 않았습니다.',slow:'뉴스에 연결하지 못했습니다. 아래로 당겨 다시 시도해 주세요.',sDenied:'알림이 차단되어 있습니다. 브라우저나 기기 설정에서 알림을 허용하세요.',sIos:'iPhone에서는 홈 화면에 추가한 뒤 해당 아이콘으로 앱을 열어 알림을 설정하세요 (iOS 16.4 이상).',sNo:'이 브라우저는 알림을 지원하지 않습니다.',sNoKey:'알림 설정이 준비되지 않았습니다.',nOnS:'앱을 닫아도 기기로 알림 수신',installH:'Korea Watch 설치',installed:'앱이 설치되었습니다',ios:'iPhone / iPad (Safari)',ios1:'Safari에서 이 사이트를 여세요',ios2:'공유 버튼을 누르세요',ios3:'홈 화면에 추가를 선택한 뒤 추가를 누르세요',ios4:'홈 화면 아이콘으로 앱을 열어 설정에서 알림을 켜세요',and:'Android (Chrome)',and1:'Chrome에서 이 사이트를 여세요',and2:'오른쪽 위 메뉴를 누르세요',and3:'앱 설치 또는 홈 화면에 추가를 선택하세요',and4:'앱을 열어 설정에서 알림을 켜세요',testLocal:'이 기기에서 알림을 표시할 수 있습니다',testLocalB:'서버 테스트 알림은 5–15분 안에 전송됩니다',tested:'테스트 알림을 요청했습니다. 5–15분 정도 걸릴 수 있습니다.',testPending:'서버 테스트 요청이 이미 대기 중입니다.',testCooldown:'다음 서버 테스트는 5분 후에 요청해 주세요.',localTestFailed:'설정을 저장했지만 이 기기에서 테스트 알림을 표시하지 못했습니다.',alertK:'긴급 뉴스 알림',read:'기사 읽기',ack:'확인',refreshFailed:'새로고침하지 못했습니다. 연결을 확인하세요.',translationPending:'번역 준비 중'
 });
+
+UI_COPY.th.savedTab='บันทึก';
+UI_COPY.en.savedTab='Saved';
+UI_COPY.ko.savedTab='저장';
+
+Object.assign(UI_COPY.th,{
+ nOn:'เปิดแจ้งเตือน',notificationsOn:'เปิดแจ้งเตือนแล้ว',notificationsOff:'ปิดแจ้งเตือนแล้ว',
+ changedTo:(name,value)=>`${name}: ${value}`,settingToggled:(name,on)=>`${on?'เปิด':'ปิด'}${name}แล้ว`,
+ topicSelected:name=>`เลือก ${name} แล้ว`,topicRemoved:name=>`ยกเลิก ${name} แล้ว`,allSelected:'เลือกทุกหัวข้อแล้ว',allCleared:'ยกเลิกทุกหัวข้อแล้ว',
+ fontSmall:'เล็ก',fontMedium:'กลาง',fontLarge:'ใหญ่',settingsPending:'บันทึกในเครื่องแล้ว จะซิงก์การแจ้งเตือนเมื่อเชื่อมต่อได้',
+ policyNote:'ข่าวด่วนมากใช้เฉพาะ 5 เหตุอันตรายต่อเกาหลีใต้ ข่าวสำคัญรวมระดับด่วนมากและสำคัญ ทุกข่าวรวมข่าวใหม่ทั้งหมด เฉพาะหมวดที่เลือก',
+ savedSearch:'ค้นหาข่าวที่บันทึกไว้',today:'วันนี้',yesterday:'เมื่อวาน',noSavedResults:'ไม่พบข่าวที่บันทึกไว้ตามตัวกรองนี้',
+ otherShare:'อื่นๆ',copyLinkHint:'ส่งลิงก์ข่าวนี้ให้คนอื่น',shareImageHint:'สร้างภาพพร้อมรูปข่าวและสรุป',photoUnavailable:'โหลดรูปข่าวไม่ได้ ลองสร้างภาพอีกครั้งเมื่อเชื่อมต่อได้',
+ settingsSaved:'บันทึกแล้ว'
+});
+Object.assign(UI_COPY.en,{
+ nOn:'Enable notifications',notificationsOn:'Notifications enabled',notificationsOff:'Notifications disabled',
+ changedTo:(name,value)=>`${name}: ${value}`,settingToggled:(name,on)=>`${name} ${on?'enabled':'disabled'}`,
+ topicSelected:name=>`${name} selected`,topicRemoved:name=>`${name} removed`,allSelected:'All topics selected',allCleared:'All topics cleared',
+ fontSmall:'Small',fontMedium:'Medium',fontLarge:'Large',settingsPending:'Saved on this device. Notification settings will sync when connected.',
+ policyNote:'Urgent alerts cover only the five confirmed South Korea incidents. Important includes urgent and important news. All includes every new story, in your selected topics only.',
+ savedSearch:'Search saved news',today:'Today',yesterday:'Yesterday',noSavedResults:'No saved stories match these filters',
+ otherShare:'More',copyLinkHint:'Send a link to this story',shareImageHint:'Create an image with the story photo and summary',photoUnavailable:'Could not load the news photo. Reconnect and try again.',settingsSaved:'Saved'
+});
+Object.assign(UI_COPY.ko,{
+ nOn:'알림 켜기',notificationsOn:'알림을 켰습니다',notificationsOff:'알림을 껐습니다',
+ changedTo:(name,value)=>`${name}: ${value}`,settingToggled:(name,on)=>`${name} ${on?'켬':'끔'}`,
+ topicSelected:name=>`${name} 선택됨`,topicRemoved:name=>`${name} 선택 해제됨`,allSelected:'모든 주제 선택됨',allCleared:'모든 주제 해제됨',
+ fontSmall:'작게',fontMedium:'보통',fontLarge:'크게',settingsPending:'기기에 저장했습니다. 연결되면 알림 설정을 동기화합니다.',
+ policyNote:'긴급 알림은 기존 한국 관련 5가지 사건만 포함합니다. 중요는 긴급과 중요 뉴스를, 전체는 선택한 주제의 모든 새 뉴스를 포함합니다.',
+ savedSearch:'저장한 뉴스 검색',today:'오늘',yesterday:'어제',noSavedResults:'필터에 맞는 저장한 뉴스가 없습니다',
+ otherShare:'더 보기',copyLinkHint:'기사 링크 보내기',shareImageHint:'기사 사진과 요약 이미지 만들기',photoUnavailable:'기사 사진을 불러오지 못했습니다. 연결 후 다시 시도하세요.',settingsSaved:'저장됨'
+});

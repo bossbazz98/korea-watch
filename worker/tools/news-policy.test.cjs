@@ -21,7 +21,7 @@ test('only confirmed incidents in the five requested classes can become critical
   assert.equal(policy.apply(item).level,'critical',title);
  }
 });
-test('drills, plans, anniversaries, threats, false reports and other emergencies cannot authorize alerts',()=>{
+test('drills, plans, anniversaries, threats, false reports and other emergencies cannot authorize urgent alerts',()=>{
  for (const title of [
   '북한 미사일 발사 가능성 경고', '북한 미사일 발사 준비 징후',
   '북한 미사일 발사 계획', '북한 미사일 발사하지 않겠다', '북한 미사일 발사설', '북한 발사체 포착', '북한 미사일 발사 안 했다', '북한 미사일 발사 사실무근',

@@ -1,5 +1,7 @@
 # Liquid Glass app update — 2026-11-09
 
+Latest UI adjustments: [Liquid Lens and vertical feed](liquid-lens.md).
+
 This change applies the reviewed four-screen design to the real Firebase web app. It uses the existing feed and subscription services. It does not add sample news, recreate Firebase, change Firestore rules, or broaden the five-incident push policy.
 
 - Home: floating glass tab bar, selected featured topics in selection order, photo/category/headline-only feature cards, and a 350 ms logo scroll-to-top.

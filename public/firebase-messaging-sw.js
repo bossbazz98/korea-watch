@@ -31,8 +31,18 @@ try {
 self.addEventListener("install", e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));
 });
+async function appRelease() {
+  const cache=await caches.open(CACHE),html=await cache.match('/index.html');
+  return html?(await html.text()).match(/data-release="([^"]+)"/)?.[1]:null;
+}
+async function announceRelease(target) {
+  const release=await appRelease();if(!release)return;
+  const windows=target?[target]:await self.clients.matchAll({type:'window'});
+  windows.forEach(client=>client.postMessage({type:'app-release',release}));
+}
+self.addEventListener('message',event=>{if(event.data?.type==='get-release')event.waitUntil(announceRelease(event.source))});
 self.addEventListener("activate", e => {
-  e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k.startsWith("kw-shell-") && k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim()));
+  e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k.startsWith("kw-shell-") && k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim()).then(()=>announceRelease()));
 });
 // เปิดหน้าใหม่จากเน็ตก่อนเสมอ ถ้าออฟไลน์ค่อยใช้ของที่เก็บไว้
 self.addEventListener("fetch", e => {
