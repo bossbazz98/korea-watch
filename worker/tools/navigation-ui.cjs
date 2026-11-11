@@ -26,7 +26,7 @@ async function touch(page,type,x,y,count=1){await page.evaluate(({type,x,y,count
   await context.route('**/vendor/firebase/**',r=>r.fulfill({contentType:'text/javascript',body:sdk[r.request().url().split('/').pop()]||''}));
   const page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
   try{
-   await page.goto('http://127.0.0.1:8808');await page.waitForSelector('.card');
+   await page.goto('http://127.0.0.1:8808');await page.waitForSelector('.card');for(const theme of ['light','dark']){await page.evaluate(theme=>document.documentElement.dataset.theme=theme,theme);assert.equal(await page.locator('.lens-surface').evaluate(el=>getComputedStyle(el).backgroundColor),theme==='light'?'rgb(236, 236, 239)':'rgb(54, 58, 67)','resting lens follows a theme change without another gesture')}
    assert.deepEqual(await page.locator('#tiles [data-cat]').evaluateAll(nodes=>nodes.map(n=>n.dataset.cat)),['all',...Object.keys(labels)]);
    assert.equal(await page.locator('#grid .card').count(),stories.length,'All includes legacy published stories');
    for(const key of Object.keys(labels)){await page.locator('#tiles [data-cat="'+key+'"]').evaluate(el=>el.click());assert(await page.locator('#grid .card').count()>0,key+' is selectable')}
