@@ -2,7 +2,7 @@
 // ถ้าเจ้าไหนยุ่ง/โควตาเต็ม/ตอบช้า จะสลับไปตัวถัดไปเอง และไม่นับเป็นการแปลล้มเหลว
 const { CATS, CAT_KEYS } = require("../feeds");
 const { publicationCategories } = require("./categories");
-const { isThai, completeThai } = require("../../public/news-text");
+const { isThai, completeThai, complete, languages, pick, body: languageBody } = require("../../public/news-text");
 
 const SYSTEM = `You are the news editor of "Korea Watch", an app for Thai people living in South Korea.
 You receive Korean news items: headline, an RSS snippet, and often "article" = text taken from the publisher's page. For each item return JSON.
@@ -15,11 +15,13 @@ Rules:
 - Multiple categories may apply. Preserve specific topics supported by original source facts; never replace a specific topic with a generic label. Only use the current listed category keys.
 - "korwar" and "war" are different: use "korwar" only for the Korean Peninsula; use "war" for conflicts elsewhere.
 - "level": "critical" only for a confirmed North Korean attack on South Korea, a North Korean missile/rocket launch or test, an attack on South Korea, a missile falling near South Korea, or a South Korean soldier stepping on an antipersonnel mine. Threats, plans, drills, old anniversaries and speculation are not critical. "high" for important developments in those categories or major policy changes affecting foreign workers. Otherwise "normal".
-- "title" and "summary" in natural Thai ("th", written in Thai script) and English ("en"). summary: 2-3 sentences with the key facts.
+- "title" and "summary" in natural Thai ("th", written in Thai script), English ("en") and Korean ("ko"). summary: 2-3 sentences with the key facts.
 - "body_th": a detailed Thai summary as an array of paragraphs. When "article" has enough text, write 4-6 paragraphs covering: what happened, where and when, who is involved, key numbers, causes and reactions, impact, and what happens next (only parts the article actually covers). When only a headline/snippet is available, write 1-2 short paragraphs.
+- "body_en" and "body_ko": arrays containing the same factual summary as body_th, written entirely in English and Korean respectively. Keep paragraphs concise so all three languages fit in the response. Do not omit these fields.
+- "tips_en" and "tips_ko": the same points as tips_th, in English and Korean.
 - "tips_th": 0-3 short practical points in Thai for Thai people living in Korea (e.g. what to watch out for, what to do), ONLY when the news clearly affects them (work, visas, health, prices, safety). Otherwise an empty array. Never invent advice that the facts do not support.
 Reply with ONLY this JSON object, one entry per input item, same "i":
-{"items":[{"i":0,"relevant":true,"categories":["war"],"level":"high","title":{"th":"","en":""},"summary":{"th":"","en":""},"body_th":[""],"tips_th":[]}]}`;
+{"items":[{"i":0,"relevant":true,"categories":["war"],"level":"high","title":{"th":"","en":"","ko":""},"summary":{"th":"","en":"","ko":""},"body_th":[""],"body_en":[""],"body_ko":[""],"tips_th":[],"tips_en":[],"tips_ko":[]}]}`;
 
 const SYSTEM_TITLES = `Translate Korean news headlines for a news app read by Thai people in South Korea.
 For each input item give a natural, concise Thai headline ("th", in Thai script) and English headline ("en").
@@ -44,7 +46,7 @@ class QuotaError extends Error { constructor(m, code = 429) { super(m); this.cod
 const str = v => (typeof v === "string" ? v.trim() : "");
 // ข้อความภาษาไทยต้องมีตัวอักษรไทยจริง (บางครั้ง AI ใส่ภาษาอังกฤษในช่องภาษาไทย)
 const hasThai = isThai;
-const pair = o => ({ th: str(o?.th), en: str(o?.en) });
+const pair = o => Object.fromEntries(languages.map(language => [language, str(o?.[language])]));
 const paras = v => (Array.isArray(v) ? v.map(str).filter(Boolean) : str(v) ? [str(v)] : []);
 
 // อ่าน JSON (array หรือ {"items":[...]}) ถ้าคำตอบถูกตัดกลางทาง เก็บเฉพาะรายการที่ครบ
@@ -238,6 +240,7 @@ async function translate(items, opts) {
       if (results[i] !== null) continue;
       const cats = (Array.isArray(o.categories) ? o.categories : []).filter(c => CAT_KEYS.includes(c));
       const title = pair(o.title), summary = pair(o.summary);
+      const rawBody=Object.fromEntries(languages.map(l=>[l,paras(o['body_'+l] ?? o.body?.[l])]));
       // Only an explicit editorial rejection can drop an item. Empty structured
       // responses are translation failures, not evidence that a topic is irrelevant.
       const relevant = o.relevant !== false;
@@ -245,7 +248,10 @@ async function translate(items, opts) {
       results[i] = {
         relevant: relevant && cats.length > 0 && !!title.th,
         categories: relevant ? publicationCategories(items[i], cats) : cats, level: ["critical", "high"].includes(o.level) ? o.level : "normal",
-        title: {th:title.th.slice(0,300),en:title.en.slice(0,300)}, summary: {th:summary.th.slice(0,1800),en:summary.en.slice(0,1800)}, body: { th: paras(o.body_th ?? o.body?.th).slice(0,8).map(p=>p.slice(0,2200)) }, tips: { th: paras(o.tips_th).slice(0, 3).map(p=>p.slice(0,500)) }
+        title: Object.fromEntries(languages.map(l=>[l,pick(title,l).slice(0,300)])),
+        summary: Object.fromEntries(languages.map(l=>[l,pick(summary,l).slice(0,1800)])),
+        body: Object.fromEntries(languages.map(l=>[l,complete({title,summary,body:rawBody},l)?rawBody[l].slice(0,8).map(p=>p.slice(0,2200)):[]])),
+        tips: Object.fromEntries(languages.map(l=>[l,languageBody({[l]:paras(o['tips_'+l] ?? o.tips?.[l])},l).slice(0,3).map(p=>p.slice(0,500))]))
       };
     }
     // Preserve completed entries while trying another model for missing/invalid entries.
@@ -258,6 +264,29 @@ async function translate(items, opts) {
     if (partial) log.warn(`${model} reply cut off (${finish}); kept ${results.filter(Boolean).length}/${items.length}`);
     return { results, model, partial };
   }
+}
+
+// Repair published editions from the existing factual summary. Never reclassify or republish.
+async function localize(item, opts) {
+  const wanted = languages.filter(l => !complete(item,l));
+  if (!wanted.length || !completeThai(item)) return item;
+  const system = `Translate this already published factual news summary into the requested languages only.
+Preserve its facts, names, numbers and paragraph meaning. Do not add information, advice or editorial decisions.
+Use natural English for en and Korean script for ko. Include title, summary and the complete body as paragraphs in each language.
+Return ONLY JSON: {"items":[{"i":0,"title":{"en":"","ko":""},"summary":{"en":"","ko":""},"body":{"en":[""],"ko":[""]},"tips":{"en":[],"ko":[]}}]}.`;
+  const input = {languages:wanted, originalHeadline:item.titleKo, title:item.title.th,summary:item.summary.th,body:item.body.th,tips:item.tips?.th||[]};
+  const {text} = await runChain(system,JSON.stringify(input),8192,opts);
+  const response = parseItems(text).items.find(row=>row.i===0);
+  if (!response) throw new Error('missing language editions');
+  const result = {...item,title:{...item.title},summary:{...item.summary},body:{...item.body},tips:{...item.tips}};
+  for (const language of wanted) {
+    if (!complete(response,language)) continue;
+    result.title[language]=pick(response.title,language).slice(0,300);
+    result.summary[language]=pick(response.summary,language).slice(0,1800);
+    result.body[language]=languageBody(response.body,language).slice(0,8).map(p=>p.slice(0,2200));
+    result.tips[language]=languageBody(response.tips,language).slice(0,3).map(p=>p.slice(0,500));
+  }
+  return result;
 }
 
 // แปลเฉพาะหัวข้อ ทีละมาก (ให้การ์ดทุกใบเป็นภาษาที่เลือกเร็วที่สุด)
@@ -309,4 +338,4 @@ async function race(fn, items, opts, valid, max = 3) {
 const raceTranslate = (items, opts) => race(translate, items, opts, r => r.results.some(Boolean), 3);
 const raceTitles = (items, opts) => race(translateTitles, items, opts, r => r.results.some(Boolean), 2);
 
-module.exports = { translate, translateTitles, raceTranslate, raceTitles, raceLanes, waitHint, parseItems, QuotaError, DEFAULT_MODELS, GROQ_MODELS, GITHUB_MODELS, hasThai, chainOf };
+module.exports = { localize, translate, translateTitles, raceTranslate, raceTitles, raceLanes, waitHint, parseItems, QuotaError, DEFAULT_MODELS, GROQ_MODELS, GITHUB_MODELS, hasThai, chainOf };

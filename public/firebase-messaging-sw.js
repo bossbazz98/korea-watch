@@ -7,16 +7,35 @@ const SHELL = self.KW_PRECACHE;
 self.addEventListener("notificationclick", event => {
   const data = event.notification.data || {};
   const fcm = data.FCM_MSG || {};
-  const id = fcm.data?.id || data.id;
-  let url = new URL(id ? "/?id=" + encodeURIComponent(id) : "/", self.location.origin).href;
-  try { const candidate=new URL(fcm.fcmOptions?.link || fcm.notification?.click_action || url, self.location.origin); if(candidate.origin===self.location.origin) url=candidate.href; } catch {}
+  let id = fcm.data?.id || data.id || fcm.data?.storyId || data.storyId;
+  let url = new URL('/', self.location.origin);
+  try { const candidate=new URL(fcm.fcmOptions?.link || fcm.fcm_options?.link || fcm.notification?.click_action || data.url || '/', self.location.origin); if(candidate.origin===self.location.origin) url=candidate; } catch {}
+  id ||= url.searchParams.get('id');
+  if(id)url=new URL('/?id='+encodeURIComponent(id),self.location.origin);
   event.notification.close();
   event.stopImmediatePropagation();
   event.waitUntil((async () => {
     const wins = await clients.matchAll({ type: "window", includeUncontrolled: true });
-    const same = wins.find(w => new URL(w.url).origin === self.location.origin);
-    if (same) { await same.focus(); if (id) same.postMessage({ type: "open", id }); return }
-    await clients.openWindow(url);
+    const same = wins.find(w => {const u=new URL(w.url);return u.origin===self.location.origin&&['/','/index.html'].includes(u.pathname)});
+    if (same) {
+      try {
+        await same.focus();
+        if (!id) return;
+        // An already-running app opens without reloading. If it is still starting,
+        // navigate to the article URL so a message sent before its listener is not lost.
+        const opened = await new Promise(resolve => {
+          if(typeof MessageChannel==='undefined'){resolve(false);return}
+          const channel=new MessageChannel();
+          const timer=setTimeout(()=>finish(false),500);
+          const finish=value=>{clearTimeout(timer);channel.port1.close();resolve(value)};
+          channel.port1.onmessage=event=>finish(event.data?.opened===true);
+          same.postMessage({type:'open',id},[channel.port2]);
+        });
+        if(!opened){const navigated=await same.navigate(url.href);if(!navigated)await clients.openWindow(url.href)}
+        return;
+      } catch { /* A window can close between matching it and focusing it. */ }
+    }
+    await clients.openWindow(url.href);
   })());
 });
 

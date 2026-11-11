@@ -62,7 +62,7 @@ test('four-news budget is shared across fast calls; remainder has one summary',a
  const context={count:new Map(),subs:null,extra:new Map(),deferSummary:true};
  for(let i=0;i<7;i++)await sendNews(db,messaging,[{...story('n'+i),titleKo:'북한 탄도미사일 발사',sourceUrl:'https://www.yna.co.kr'}],'https://example.test',log,context);
  context.deferSummary=false;await sendNews(db,messaging,[],'https://example.test',log,context);
- assert.equal(sent.filter(m=>m.data.level!=='summary').length,4);assert.equal(sent.filter(m=>m.data.level==='summary').length,1);assert.match(sent.at(-1).notification.body,/3/);
+ assert.equal(sent.filter(m=>m.data.level!=='summary').length,4);assert.equal(sent.filter(m=>m.data.level==='summary').length,1);assert.equal(sent.at(-1).data.count,'3');assert.equal(sent.at(-1).notification.title,'KOREA WATCH');assert.equal(new URL(sent.at(-1).webpush.fcmOptions.link).searchParams.get('id'),sent.at(-1).data.id);
 });
 test('identity uses full headline, link, and date; differing numbers never merge',()=>{
  const title='북'.repeat(50);assert.notEqual(newsId(title+'1'),newsId(title+'2'));

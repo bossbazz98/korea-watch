@@ -23,7 +23,7 @@ const { translate, parseItems } = require("../lib/translate");
   const out = await translate(items, { apiKey: "k", fetchImpl: f, log: { warn() {} }, waitMs: 0 });
   assert.deepStrictEqual(bodies, [{ thinkingLevel: "low" }, null], "retried same model without thinking config");
   assert.strictEqual(out.model, "gemini:gemini-flash-lite-latest");
-  assert.deepStrictEqual(out.results[1].body, { th: ["บ"] });
+  assert.deepStrictEqual(out.results[1].body, { th: ["บ"], en: [], ko: [] });
   // 2.5 models use thinkingBudget 0
   const b2 = [];
   await translate(items, { apiKey: "k", models: ["gemini-2.5-flash-lite"], fetchImpl: async (u, o) => { b2.push(JSON.parse(o.body).generationConfig.thinkingConfig); return f(u, { body: JSON.stringify({ ...JSON.parse(o.body), generationConfig: {} }) }) }, log: { warn() {} }, waitMs: 0 });

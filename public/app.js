@@ -6,6 +6,7 @@ import { createReadingList } from "./reading-list.js";
 import { openShareMenu } from "./share-news.js";
 import { UI_COPY, CATEGORY_KO } from "./ui-copy.js";
 import { watchAppResume } from "./app-lifecycle.js";
+import { attachSlidingSegments } from "./segmented-controls.js";
 import { attachLiquidTabs, attachDockViewport } from "./liquid-tabs.js";
 // Korea Watch: หน้าแอป (อ่านข่าวจาก Firestore, ตั้งค่าแจ้งเตือน, ติดตั้งแอป)
 const SDK = "/vendor/firebase/";
@@ -21,7 +22,7 @@ const T = {
     close: "ปิด", ack: "รับทราบ", read: "อ่านข่าวนี้", alertK: "แจ้งเตือนข่าวด่วน", count: n => n + " ข่าว", upd: t => "อัปเดต " + t, loading: "กำลังโหลดข่าว…",
     none: "ยังไม่มีข่าวในหมวดนี้ภายใน 30 วัน", setup: "ยังไม่ได้ตั้งค่า Firebase: ใส่ค่าในไฟล์ firebase-config.js ตามคู่มือ", slow: "เชื่อมต่อฐานข้อมูลข่าวไม่ได้ ลองดึงหน้าจอลงเพื่อโหลดใหม่",
     offline: "ออฟไลน์อยู่ กำลังแสดงข่าวที่โหลดไว้ล่าสุด", aiNote: "สรุปและแปลโดย AI อาจคลาดเคลื่อน ตรวจสอบกับข่าวต้นฉบับเสมอ",
-    foot: "ค้นข่าวอัตโนมัติทุกประมาณ 5 นาทีจากสำนักข่าวเกาหลี เช่น KBS, MBC, SBS, YTN, 연합뉴스, JTBC แล้วสรุปและแปลเป็นภาษาไทยด้วย AI เก็บข่าวได้สูงสุด 30 วัน ภายใต้ขีดจำกัดจำนวนและขนาดข้อมูล กดลิงก์ต้นฉบับเพื่อตรวจสอบเสมอ",
+    foot: "ค้นข่าวอัตโนมัติทุกประมาณ 5 นาทีจากสำนักข่าวเกาหลี เช่น KBS, MBC, SBS, YTN, 연합뉴스, JTBC แล้วสรุปและแปลตามภาษาที่เลือกด้วย AI เก็บข่าวได้สูงสุด 30 วัน ภายใต้ขีดจำกัดจำนวนและขนาดข้อมูล กดลิงก์ต้นฉบับเพื่อตรวจสอบเสมอ",
     now: "เมื่อสักครู่", m: "นาทีที่แล้ว", h: "ชม.ที่แล้ว", d: "วันที่แล้ว", kst: "เวลาเกาหลี",
     nH: "ตั้งค่าแจ้งเตือน", nOn: "รับแจ้งเตือนข่าวด่วน", nOnS: "เด้งเข้ามือถือแม้ปิดแอปอยู่", nLevel: "ระดับข่าวที่จะแจ้ง", nCrit: "ด่วนมากเท่านั้น", nHigh: "ด่วนมาก + สำคัญ",
     nCats: "หมวดที่จะแจ้ง", nSound: "เสียงไซเรนขณะเปิดแอป", nSoundS: "ดังเมื่อมีข่าวด่วนมากระหว่างที่เปิดแอปอยู่", save: "บันทึก", saving: "กำลังบันทึก…", test: "ส่งแจ้งเตือนทดสอบ",
@@ -75,7 +76,7 @@ Object.assign(T.en, {
   quietTitle: 'Quiet hours', quietHint: 'Pause notifications using Korean time (KST)', quietFrom: 'From', quietTo: 'Until',
   quietBypass: 'Allow urgent Korean Peninsula alerts', saveAlerts: 'Save notifications', audioError: 'Audio is unavailable. Try tapping Preview again.'
 });
-T.ko = { ...T.en };
+T.ko = {};
 for (const key of ['th', 'en', 'ko']) Object.assign(T[key], UI_COPY[key]);
 function uiIcon(name) {
   const paths = {
@@ -134,12 +135,15 @@ document.documentElement.style.setProperty('--font-scale', fontScale);
 let region = store.get('kw.region', 'seoul-gyeonggi');
 const readingList = createReadingList({ getItem:key => localStorage.getItem(key), setItem:(key,value) => localStorage.setItem(key,value) });
 function haptic() { if (vibration) { try { navigator.vibrate?.(15); } catch {} } }
-function categoryLabel(key) { return lang === 'ko' ? CATEGORY_KO[key] || CATS[key]?.th || '' : CATS[key]?.[lang] || ''; }
-function headlineOf(n) { return lang === 'ko' && n.titleKo ? n.titleKo : L(n.title); }
-function categoryBadges(n) { return cats(n).filter(c => CATS[c]).map(c => `<span class="chip">${esc(categoryLabel(c))}</span>`).join(''); }
+function categoryLabel(key) { return lang === 'ko' ? CATEGORY_KO[key] || '' : CATS[key]?.[lang] || ''; }
+function headlineOf(n) { return globalThis.KW_NEWS_TEXT.pick(n.title,lang) || (lang==='ko' ? globalThis.KW_NEWS_TEXT.pick(n.titleKo,'ko') : '') || t('translationPending'); }
+function categoryBadges(n,limit=Infinity) {
+  const keys=[...new Set(cats(n).filter(c=>CATS[c]))],extra=keys.length-limit;
+  return keys.slice(0,limit).map(c=>`<span class="chip">${esc(categoryLabel(c))}</span>`).join('')+(extra>0?`<span class="chip chip-overflow" aria-label="${esc(t('moreTopics')(extra))}" title="${esc(keys.slice(limit).map(categoryLabel).join(', '))}">+${extra}</span>`:'');
+}
 let items = [], status = null, loaded = false, notReady = false;
 let fb = null; // { app, fs, db }
-let deepId = new URLSearchParams(location.search).get("id");
+let deepId = new URLSearchParams(location.search).get("id"), notificationOpen = null;
 const seen = new Set(store.get("kw.seenUrgent", []));
 const lastVisit = store.get("kw.lastVisit", 0); store.set("kw.lastVisit", Date.now());
 let primed = lastVisit > 0;
@@ -147,7 +151,7 @@ const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 const isStandalone = () => matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
 
-const L = value => globalThis.KW_NEWS_TEXT.pick(value, lang === 'ko' ? 'th' : lang) || t("translationPending");
+const L = value => globalThis.KW_NEWS_TEXT.pick(value, lang) || t("translationPending");
 const t = k => T[lang][k];
 function ago(ms) { const s = (Date.now() - ms) / 1000; if (s < 90) return t("now"); if (s < 3600) return Math.round(s / 60) + " " + t("m"); if (s < 86400) return Math.round(s / 3600) + " " + t("h"); return Math.round(s / 86400) + " " + t("d") }
 function kst(ms) { try { return new Intl.DateTimeFormat(lang === 'th' ? 'th-TH' : lang === 'ko' ? 'ko-KR' : 'en-GB', { timeZone: "Asia/Seoul", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(ms)) + " " + t("kst") } catch (e) { return new Date(ms).toLocaleString() } }
@@ -171,16 +175,18 @@ function emptyMsg(def) {
 function newsCard(n,kind='card') {
   const level=['critical','high'].includes(n.level)?n.level:'normal';
   const accessible=[level==='critical'?t('crit'):level==='high'?t('high'):'',headlineOf(n),...cats(n).filter(c=>CATS[c]).map(categoryLabel)].filter(Boolean).join(' · ');
-  return `<button class="${kind} hero-card" data-level="${level}" aria-label="${esc(accessible)}" data-id="${esc(n.id)}">${picture(n)}<div class="hero-copy"><div class="chips">${categoryBadges(n)}</div><h3>${esc(headlineOf(n))}</h3><time class="news-time" datetime="${esc(n.publishedAt)}">${uiIcon('clock')}${esc(kst(ts(n)))}</time></div></button>`;
+  return `<button class="${kind} hero-card" data-level="${level}" aria-label="${esc(accessible)}" data-id="${esc(n.id)}">${picture(n)}<div class="hero-copy"><div class="chips">${categoryBadges(n,2)}</div><h3>${esc(headlineOf(n))}</h3><time class="news-time" datetime="${esc(n.publishedAt)}">${uiIcon('clock')}${esc(kst(ts(n)))}</time></div></button>`;
 }
 
 function renderStatic() {
   document.documentElement.lang = lang;
+  $('app-tabs').setAttribute('aria-label',t('mainMenu'));$('bk-prev').setAttribute('aria-label',t('previous'));$('bk-next').setAttribute('aria-label',t('next'));document.querySelector('.pull-ring').setAttribute('aria-label',t('pullProgress'));
+  document.querySelector('meta[name=description]').content=t('description');
   $('nav-home-label').textContent=t('home');$('nav-saved-label').textContent=t('savedTab');
   $('nav-home').setAttribute('aria-label',t('home'));$('nav-saved').setAttribute('aria-label',t('savedTab'));
   updateAppChrome();
   renderRefreshState();
-  $('home-top').setAttribute('aria-label', lang === 'th' ? 'กลับด้านบนสุด' : 'Back to top');
+  $('home-top').setAttribute('aria-label', t('backToTop'));
   $("settings").setAttribute("aria-label", t("settings")); $("settings-l").textContent = t("settings");
   $("install").hidden = isStandalone(); $("install-l").textContent = t("install"); $("install").setAttribute("aria-label", t("install"));
   $("t-bk").textContent = t("bk"); $("t-bksub").textContent = featured.length ? featured.map(categoryLabel).join(" · ") : t("chooseFeatured");
@@ -202,9 +208,9 @@ function render() {
   updDots(); updHint();
   if (currentView === "saved") renderSaved();
   const counts = {}, crit = {}; all.forEach(n => cats(n).forEach(c => { counts[c] = (counts[c] || 0) + 1; if (n.level === "critical") crit[c] = 1 }));
-  let tiles = `<button class="tile" data-cat="all" aria-pressed="${cat === "all"}"><span class="n">${all.length}</span><span class="l">${t("allcat")}</span></button>`;
-  for (const k in CATS) tiles += `<button class="tile ${crit[k] ? "has-crit" : ""}" data-cat="${k}" aria-pressed="${cat === k}"><span class="n">${counts[k] || 0}</span><span class="l">${categoryLabel(k)}</span></button>`;
-  const tl = $("tiles"); tl.style.setProperty("--cols", Math.ceil((Object.keys(CATS).length + 1) / 2)); setHTML(tl, tiles);
+  const tiles = [`<button class="tile" data-cat="all" aria-pressed="${cat === "all"}"><span class="l">${t("allcat")}</span><span class="n">${all.length}</span></button>`];
+  for (const k in CATS) tiles.push(`<button class="tile ${crit[k] ? "has-crit" : ""}" data-cat="${k}" aria-pressed="${cat === k}"><span class="l">${categoryLabel(k)}</span><span class="n">${counts[k] || 0}</span></button>`);
+  const split=Math.ceil(tiles.length/2);setHTML($("tiles"),`<div class="topic-row">${tiles.slice(0,split).join('')}</div><div class="topic-row">${tiles.slice(split).join('')}</div>`);updHint();
   const list = cat === "all" ? all : all.filter(n => cats(n).includes(cat));
   $("t-filter").textContent = cat === "all" ? (loaded ? t("count")(all.length) : "") : categoryLabel(cat);
   setHTML($("grid"), list.length ? list.map(n => newsCard(n)).join("")
@@ -228,6 +234,10 @@ addEventListener("online", render); addEventListener("offline", render);
 
 /* Full-screen reader and three persistent app tabs. */
 let lastFocus = null, currentArticle = null, closeShare = null, settingsReturnView = 'home';
+let settingsSegments=[];
+function clearSettingsSegments(){settingsSegments.forEach(({control})=>control.destroy());settingsSegments=[]}
+function syncSettingsSegments(){settingsSegments.forEach(({control})=>control.sync())}
+function snapshotSettingsSegments(){return Object.fromEntries(settingsSegments.map(({key,control})=>[key,control.snapshot()]))}
 const pageScroll = { home:0, saved:0 };
 function updateAppChrome() {
   const overlay = !$('sheet').hidden, modal = overlay && $('panel').dataset.kind !== 'settings';
@@ -245,6 +255,7 @@ function updateAppChrome() {
 function showSheet(html, kind = 'reader') {
   if ($('sheet').hidden) lastFocus = document.activeElement;
   alertAudio.stop();
+  clearSettingsSegments();
   const panel=$('panel');panel.innerHTML=html;panel.dataset.kind=kind;$('sheet').dataset.kind=kind;
   const header=panel.querySelector(kind==='reader'?'.reader-top':'.bar'),footer=panel.querySelector(kind==='reader'?'.reader-actions':'.settings-footer');
   header?.remove();footer?.remove();
@@ -260,7 +271,9 @@ function showSheet(html, kind = 'reader') {
   else {panel.querySelector('h2')?.setAttribute('tabindex','-1');panel.querySelector('h2')?.focus({preventScroll:true})}
 }
 function closeSheet({restore=true}={}) {
+  clearSettingsSegments();
   if(closeShare){closeShare();closeShare=null}$('panel').inert=false;
+  if(currentArticle){const url=new URL(location.href);url.searchParams.delete('id');history.replaceState(null,'',url.pathname+url.search);}
   alertAudio.stop();$('sheet').hidden=true;document.body.style.overflow='';delete document.body.dataset.overlay;
   settingsDraft=null;currentArticle=null;
   if(currentView==='settings')currentView=settingsReturnView;updateAppChrome();if(currentView==='saved')renderSaved();
@@ -281,13 +294,13 @@ function bookmarkButton() {
   button.classList.toggle('bookmarked',!!selected);button.setAttribute('aria-pressed',String(!!selected));button.setAttribute('aria-label',t(selected?'unbookmark':'bookmark'));
 }
 function openItem(id) {
-  const n=items.find(x=>String(x.id)===String(id))||readingList.get(id);if(!n)return false;
-  const paras=globalThis.KW_NEWS_TEXT.body(n.body,lang==='ko'?'th':lang);
+  const n=readingList.get(id)||items.find(x=>String(x.id)===String(id));if(!n)return false;
+  const paras=globalThis.KW_NEWS_TEXT.body(n.body,lang);
   const links=(Array.isArray(n.links)&&n.links.length?n.links:(n.sourceUrl?[{label:n.source,url:n.sourceUrl}]:[])).filter(Boolean).map(l=>({label:l.label,url:safeUrl(l.url)})).filter(l=>l.url);
   const headline=headlineOf(n);
   showSheet(`<div class="reader-top"><div class="reader-sticky glass" aria-hidden="true"><span>${esc(headline)}</span><div class="read-progress"><i></i></div></div><button class="icon-button glass" id="close" aria-label="${t('close')}">${uiIcon('close')}</button></div>
-    <div class="reader-hero">${picture(n,true)}</div><article class="article"><div class="chips">${categoryBadges(n)}</div><h1 id="article-title">${esc(headline)}</h1><div class="article-meta"><img class="mini-logo" src="/icons/icon-192.png" alt=""><span>${esc(n.source||'')} · ${kst(ts(n))}</span></div>${lang==='ko'?`<p class="content-language">${t('koreanContent')}</p>`:''}<div class="summary-box"><h2>${t('summary')}</h2><p>${esc(L(n.summary))}</p></div>${paras.length?`<div class="article-body body">${paras.map(p=>`<p>${esc(p)}</p>`).join('')}</div>`:''}<div class="src"><div class="k">${t('source')}</div>${n.titleKo?`<div class="ko">${t('orig')}: ${esc(n.titleKo)}</div>`:''}${links.map(l=>`<a href="${esc(l.url)}" target="_blank" rel="noopener noreferrer">${esc(l.label||t('open'))}${uiIcon('external')}</a>`).join('')}<p class="ko">${t('aiNote')}</p></div></article>
-    <div class="reader-actions dock-frame glass"><button class="back-wide glass" id="reader-back">${uiIcon('back')}${t('back')}</button><button class="icon-button glass" id="reader-save" aria-label="${t('bookmark')}">${uiIcon('bookmark')}</button><button class="icon-button glass" id="reader-share" aria-label="${t('share')}">${uiIcon('share')}</button></div>`,'reader');
+    <div class="reader-hero">${picture(n,true)}</div><article class="article"><div class="chips">${categoryBadges(n)}</div><h1 id="article-title">${esc(headline)}</h1><div class="article-meta"><span class="article-publisher"><img class="mini-logo" src="/icons/icon-192.png" alt=""><span class="source-name">${esc(n.source||'')}</span></span><time datetime="${esc(n.publishedAt)}">${esc(kst(ts(n)))}</time></div><div class="summary-box"><h2>${t('summary')}</h2><p>${esc(L(n.summary))}</p></div><div class="article-body body">${paras.length?paras.map(p=>`<p>${esc(p)}</p>`).join(''):`<p class="translation-pending">${esc(t('translationPending'))}</p>`}</div><div class="src"><div class="k">${t('source')}</div>${lang==='ko'&&n.titleKo?`<div class="ko">${t('orig')}: ${esc(n.titleKo)}</div>`:''}${links.map(l=>`<a href="${esc(l.url)}" target="_blank" rel="noopener noreferrer">${esc(t('open'))}${links.length>1?' '+(links.indexOf(l)+1):''}${uiIcon('external')}</a>`).join('')}<p class="ko">${t('aiNote')}</p></div></article>
+    <div class="reader-actions dock-frame"><button class="back-wide glass" id="reader-back">${uiIcon('back')}${t('back')}</button><button class="icon-button glass" id="reader-save" aria-label="${t('bookmark')}">${uiIcon('bookmark')}</button><button class="icon-button glass" id="reader-share" aria-label="${t('share')}">${uiIcon('share')}</button></div>`,'reader');
   currentArticle=n;bookmarkButton();
   $('reader-back').onclick=()=>closeSheet();
   $('reader-save').onclick=()=>{try{if(readingList.has(n.id)){readingList.remove(n.id);toast(t('unbookmark'),1500)}else{readingList.save(n);haptic();toast(t('bookmarked'),1500,'bookmark')}bookmarkButton();if(currentView==='saved')renderSaved()}catch{toast(t('storageFailed'))}};
@@ -303,10 +316,8 @@ function savedDayLabel(ms) {
   const key=dateKey(ms),date=new Intl.DateTimeFormat(lang==='th'?'th-TH':lang==='ko'?'ko-KR':'en-GB',{timeZone:'Asia/Seoul',day:'numeric',month:'short'}).format(new Date(ms));
   return `${key===dateKey(Date.now())?t('today')+', ':key===dateKey(Date.now()-DAY)?t('yesterday')+', ':''}${date}`;
 }
-function storyClock(ms) { return new Intl.DateTimeFormat(lang==='th'?'th-TH':lang==='ko'?'ko-KR':'en-GB',{timeZone:'Asia/Seoul',hour:'2-digit',minute:'2-digit'}).format(new Date(ms)); }
-function savedBadges(n) {
-  const keys=cats(n).filter(c=>CATS[c]);return keys.slice(0,2).map(c=>`<span class="chip">${esc(categoryLabel(c))}</span>`).join('')+(keys.length>2?`<span class="chip">+${keys.length-2}</span>`:'');
-}
+function storyDateTime(ms) { return new Intl.DateTimeFormat(lang==='th'?'th-TH':lang==='ko'?'ko-KR':'en-GB',{timeZone:'Asia/Seoul',day:'numeric',month:'long',hour:'2-digit',minute:'2-digit'}).format(new Date(ms))+' '+t('kst'); }
+function savedBadges(n) { return categoryBadges(n,2); }
 function renderSaved() {
   const entries=readingList.all();$('saved-title').textContent=t('readingList');$('saved-count').textContent=t('count')(entries.length);
   $('saved-search-toggle').setAttribute('aria-label',t('savedSearch'));$('saved-search').placeholder=t('savedSearch');$('saved-search').setAttribute('aria-label',t('savedSearch'));
@@ -315,7 +326,7 @@ function renderSaved() {
   const filters=`<div class="saved-filters" aria-label="${t('topics')}">${['all',...available].map(key=>`<button data-saved-filter="${key}" aria-pressed="${savedCategory===key}">${key==='all'?t('allcat'):esc(categoryLabel(key))}</button>`).join('')}</div>`;
   const query=savedQuery.trim().toLocaleLowerCase(),filtered=entries.filter(({article:n})=>(savedCategory==='all'||cats(n).includes(savedCategory))&&(!query||[headlineOf(n),n.titleKo,n.source,...cats(n).map(categoryLabel)].join(' ').toLocaleLowerCase().includes(query))).sort((a,b)=>(ts(b.article)||b.savedAt)-(ts(a.article)||a.savedAt));
   const groups=new Map();for(const entry of filtered){const ms=ts(entry.article)||entry.savedAt,key=dateKey(ms);if(!groups.has(key))groups.set(key,{ms,entries:[]});groups.get(key).entries.push(entry)}
-  const rows=[...groups.values()].map(group=>`<section class="saved-day-group"><h2 class="saved-day">${esc(savedDayLabel(group.ms))}</h2><div class="saved-rows">${group.entries.map(({id,article:n,savedAt})=>`<div class="saved-item-wrap"><button class="delete-saved" data-delete="${esc(id)}" aria-label="${t('deleteSaved')}: ${esc(headlineOf(n))}">${uiIcon('trash')}${t('delete')}</button><button class="saved-row" data-id="${esc(id)}">${picture(n)}<span><span class="chips">${savedBadges(n)}</span><h3>${esc(headlineOf(n))}</h3><time class="saved-at" datetime="${esc(n.publishedAt)}">${uiIcon('clock')}${esc(storyClock(ts(n)||savedAt))}</time></span></button></div>`).join('')}</div></section>`).join('');
+  const rows=[...groups.values()].map(group=>`<section class="saved-day-group"><h2 class="saved-day">${esc(savedDayLabel(group.ms))}</h2><div class="saved-rows">${group.entries.map(({id,article:n,savedAt})=>`<div class="saved-item-wrap"><button class="delete-saved" data-delete="${esc(id)}" aria-label="${t('deleteSaved')}: ${esc(headlineOf(n))}">${uiIcon('trash')}${t('delete')}</button><button class="saved-row" data-id="${esc(id)}">${picture(n)}<span><span class="chips">${savedBadges(n)}</span><h3>${esc(headlineOf(n))}</h3><time class="saved-at" datetime="${esc(n.publishedAt)}">${uiIcon('clock')}<span>${esc(storyDateTime(ts(n)||savedAt))}</span></time></span></button></div>`).join('')}</div></section>`).join('');
   setHTML($('saved-content'),entries.length?filters+(filtered.length?rows:`<p class="empty">${t('noSavedResults')}</p>`):`<div class="empty-saved"><div class="empty-icon">${uiIcon('bookmark')}</div><h2>${t('emptySaved')}</h2><p>${t('emptySavedHint')}</p></div>`);
 }
 $('saved-search-toggle').onclick=()=>{const input=$('saved-search');input.hidden=!input.hidden;$('saved-search-toggle').setAttribute('aria-expanded',String(!input.hidden));if(!input.hidden)input.focus();else{savedQuery='';input.value='';renderSaved()}};
@@ -365,8 +376,19 @@ $("install").onclick = async () => {
 /* alerts inside the app */
 function toast(msg, duration=2000, mark='check') {
   const el=$('toast');clearTimeout(toast.t);clearTimeout(toast.hide);el.className='toast glass';el.innerHTML=uiIcon(mark)+`<span>${esc(msg)}</span>`;el.hidden=false;
-  toast.t=setTimeout(()=>{el.classList.add('leaving');toast.hide=setTimeout(()=>el.hidden=true,150)},duration);
+  syncSettingsFeedbackSpace();
+  toast.t=setTimeout(()=>{el.classList.add('leaving');toast.hide=setTimeout(()=>{el.hidden=true;syncSettingsFeedbackSpace()},150)},duration);
 }
+function syncSettingsFeedbackSpace() {
+  const content=$('panel').dataset.kind==='settings'&&!$('sheet').hidden?$('panel').querySelector('.sheet-content'):null;
+  if(!content)return;
+  const atBottom=content.scrollHeight-content.clientHeight-content.scrollTop<=2;
+  const space=$('toast').hidden?0:Math.ceil($('toast').getBoundingClientRect().height)+12;
+  if(content.style.getPropertyValue('--settings-feedback-space')===`${space}px`)return;
+  content.style.setProperty('--settings-feedback-space',`${space}px`);
+  if(atBottom)content.scrollTop=content.scrollHeight;
+}
+new ResizeObserver(syncSettingsFeedbackSpace).observe($('toast'));
 function unlock() { alertAudio.unlock().catch(() => {}); }
 document.addEventListener('pointerdown', () => { if (sound) unlock(); }, { once: true });
 async function playAlert(duration = 3) {
@@ -386,10 +408,9 @@ function inAppEligible(n) {
 function raiseAlert(n) {
   if (!inAppEligible(n)) return;
   markSeen(n.id);
-  $("alert-box").innerHTML = `<div class="ak">${t("alertK")}</div><h2>${esc(headlineOf(n))}</h2><p style="margin:0;color:var(--fg-2)">${esc(L(n.summary))}</p>
-    <div class="meta"><span>${esc(n.source || "")}</span><span>${kst(ts(n))}</span></div>
+  $("alert-box").innerHTML = `<div class="alert-brand">KOREA WATCH</div><div class="ak">${t(n.level==='critical'?'crit':n.level==='high'?'high':'normal')}</div><h2>${esc(headlineOf(n))}</h2>
     <div class="row"><button class="btn primary" id="a-read">${t("read")}</button><button class="btn" id="a-ok">${t("ack")}</button></div>`;
-  $("alert").hidden = false; $("a-ok").onclick = () => $("alert").hidden = true; $("a-read").onclick = () => { $("alert").hidden = true; openItem(n.id) }; $("a-ok").focus();
+  $("alert").hidden = false; $("a-ok").onclick = () => $("alert").hidden = true; $("a-read").onclick = () => { $("alert").hidden = true; openItem(n.id) }; $("a-ok").focus();$('alert-box').onclick=event=>{if(!event.target.closest('button')){$('alert').hidden=true;openItem(n.id)}};
   if (sound && n.level === "critical") playAlert(4);
   try { vibration && navigator.vibrate && navigator.vibrate([400, 200, 400, 200, 600]) } catch (e) { }
 }
@@ -416,7 +437,7 @@ async function getMessagingMod() {
   messaging = msgMod.getMessaging(fb.app);
   msgMod.onMessage(messaging, p => { // แจ้งเตือนที่มาตอนเปิดแอปอยู่
     const id = p?.data?.id, n = id && items.find(x => x.id === id);
-    if (n && globalThis.KW_NEWS_POLICY.canNotify(n)) { if (!seen.has(n.id)) raiseAlert(n) } else if (p?.data?.level === 'test' && p?.notification?.title) toast(p.notification.title);
+    if (n && globalThis.KW_NEWS_POLICY.canNotify(n)) { if (!seen.has(n.id)) raiseAlert(n) } else if (p?.data?.level === 'test' && p?.notification?.title) toast(t('testLocal'));
   });
   return msgMod;
 }
@@ -436,7 +457,7 @@ async function subscriptionId() {
 }
 async function saveSub(token, preferences, extra = {}) {
   const uid = await subscriptionId();
-  return writeSubscription({ fs: fb.fs, db: fb.db, uid, token, preferences, language: lang === 'ko' ? 'th' : lang, requestTest: extra.testRequested === true });
+  return writeSubscription({ fs: fb.fs, db: fb.db, uid, token, preferences, language: lang, requestTest: extra.testRequested === true });
 }
 function pushState() {
   if (notReady) return ["warn", t("setup")];
@@ -472,7 +493,7 @@ function updateSettingsStatus() {
   $('status-title').innerHTML=`<i class="live-dot"></i>${t(active?'statusOn':'statusOff')}`;
   $('status-summary').textContent=`${t(push.level==='all'?'allNews':push.level==='high'?'nHigh':'nCrit')} · ${t('topicCount')(push.cats.length)} · ${push.quietOn?`${hourText(push.quietFrom??22)}–${hourText(push.quietTo??10)} KST`:t('quietNone')}`;
 }
-function openSettings(keepDraft=false) {
+function openSettings(keepDraft=false,segmentState=null) {
   if(keepDraft!==true||!settingsDraft)settingsDraft={...push,cats:[...push.cats]};
   currentView='settings';const draft=settingsDraft,scroll=keepDraft===true?$('panel').querySelector('.sheet-content')?.scrollTop||0:0;
   const [statusClass,statusMessage]=pushState(),blocked=statusClass==='warn';
@@ -483,18 +504,19 @@ function openSettings(keepDraft=false) {
   const hourOptions=value=>Array.from({length:24},(_,hour)=>`<option value="${hour}" ${Number(value)===hour?'selected':''}>${hourText(hour)}</option>`).join('');
   showSheet(`<div class="bar settings-heading glass"><h2 id="sheet-title">${t('settings')}</h2></div>
     <section class="status-card glass ${push.enabled?'':'off'}" id="notification-status"><span class="status-kw glass"><img src="/icons/icon-192.png" alt="KW"></span><div class="status-copy"><strong id="status-title"></strong><small id="status-summary"></small></div></section><p class="settings-state" id="p-state" role="status" ${blocked?'':'hidden'}>${blocked?esc(statusMessage):''}</p>
-    ${heading(t('appearance'))}<section class="settings-card">${row('language',t('language'))}<div class="setting-block"><div class="segments language-choices">${[['th','ไทย'],['en','English'],['ko','한국어']].map(([key,label])=>`<button type="button" id="l-${key}" class="${lang===key?'selected':''}" aria-pressed="${lang===key}">${label}</button>`).join('')}</div>${lang==='ko'?`<p class="hint">${t('koreanPush')}</p>`:''}</div>${row('system',t('theme'))}<div class="setting-block"><div class="segments theme-choices">${['system','light','dark'].map(mode=>`<label><input type="radio" name="theme" value="${mode}" ${themeMode===mode?'checked':''}>${uiIcon(mode)}<span>${t('theme_'+mode)}</span></label>`).join('')}</div></div>${row('type',t('fontSize'))}<div class="setting-block"><div class="segments font-buttons">${[.9,1,1.14].map((value,i)=>`<button type="button" data-font="${value}" class="${fontScale===value?'selected':''}" aria-label="${t('fontSize')} ${i+1}" aria-pressed="${fontScale===value}">${lang==='th'?'ก':lang==='ko'?'가':'A'}</button>`).join('')}</div><div class="font-example"><b>${t('fontPreviewTitle')}</b><p>${t('fontPreviewBody')}</p></div></div></section>
+    ${heading(t('appearance'))}<section class="settings-card">${row('language',t('language'))}<div class="setting-block"><div class="segments language-choices">${['th','en','ko'].map(key=>`<button type="button" id="l-${key}" class="${lang===key?'selected':''}" aria-pressed="${lang===key}">${t('language_'+key)}</button>`).join('')}</div></div>${row('system',t('theme'))}<div class="setting-block"><div class="segments theme-choices">${['system','light','dark'].map(mode=>`<label><input type="radio" name="theme" value="${mode}" ${themeMode===mode?'checked':''}>${uiIcon(mode)}<span>${t('theme_'+mode)}</span></label>`).join('')}</div></div>${row('type',t('fontSize'))}<div class="setting-block"><div class="segments font-buttons">${[.9,1,1.14].map((value,i)=>`<button type="button" data-font="${value}" class="${fontScale===value?'selected':''}" aria-label="${t('fontSize')} ${i+1}" aria-pressed="${fontScale===value}">${lang==='th'?'ก':lang==='ko'?'가':'A'}</button>`).join('')}</div><div class="font-example"><b>${t('fontPreviewTitle')}</b><p>${t('fontPreviewBody')}</p></div></div></section>
     ${heading(t('featured'),tools('featured-count',featured.length,'featured-all'))}<section class="settings-card">${row('star',t('featuredTopics'),'','') }<div class="topic-picks" id="featured-choices">${featureChoices()}</div></section><p class="hint">${t('featuredHint')}</p>
     ${heading(t('soundTitle'))}<section class="settings-card">${row('volume',t('soundTitle'),toggle('p-sound',sound,t('soundTitle')))}<fieldset id="sound-options" ${sound?'':'disabled'}>${row('bell',`<label class="sr-only" for="p-tone">${t('soundType')}</label><select id="p-tone">${SOUND_PRESETS.map(preset=>`<option value="${preset}" ${tone===preset?'selected':''}>${t('tone_'+preset)}</option>`).join('')}</select>`,`<button type="button" class="icon-button glass" id="p-preview" aria-label="${t('preview')}">${uiIcon('play')}</button><button type="button" class="icon-button glass" id="p-stop" aria-label="${t('stopSound')}" disabled>${uiIcon('stop')}</button>`)}<div class="volume-wrap"><div class="volume-top"><label for="p-volume">${t('volume')}</label><output id="volume-value" for="p-volume">${Math.round(volume*100)}%</output></div><div class="volume-line">${uiIcon('volume')}<input type="range" id="p-volume" min="0" max="100" step="1" value="${Math.round(volume*100)}" style="--volume:${Math.round(volume*100)}%" aria-label="${t('volume')}">${uiIcon('volume')}</div></div></fieldset>${row('vibrate',t('vibration'),toggle('p-vibration',vibration,t('vibration')),t('vibrationHint'))}</section><p class="hint">${t('soundShort')}</p>
-    ${heading(t('notifications'))}<section class="settings-card">${row('bell',t('nOn'),toggle('p-on',draft.enabled,t('nOn'),blocked&&!draft.enabled))}<fieldset id="p-opts" ${blocked||!draft.enabled?'disabled':''}><div class="radio-list level-choices">${[['critical','nCrit','criticalHint'],['high','nHigh','highHint'],['all','allNews','allHint']].map(([value,label,hint])=>`<label class="radio-card ${value===draft.level?'selected':''}"><input type="radio" name="lv" value="${value}" ${value===draft.level?'checked':''}><span class="radio-indicator"></span><span><b>${value==='critical'?'<i class="live-dot"></i>':''}${t(label)}</b><small>${t(hint)}</small></span></label>`).join('')}</div>${row('pin',`<label for="p-area">${t('area')}</label>`,`<select id="p-area" aria-label="${t('area')}">${REGIONS.map(entry=>`<option value="${entry[0]}" ${entry[0]===region?'selected':''}>${entry[lang==='ko'?3:lang==='en'?2:1]}</option>`).join('')}</select>`,t('areaHint'))}</fieldset></section><p class="hint policy-hint">${t('policyNote')}</p>
+    ${heading(t('notifications'))}<section class="settings-card">${row('bell',t('nOn'),toggle('p-on',draft.enabled,t('nOn'),blocked&&!draft.enabled))}<fieldset id="p-opts" ${blocked||!draft.enabled?'disabled':''}><div class="radio-list level-choices">${[['critical','nCrit','criticalHint'],['high','nHigh','highHint'],['all','allNews','allHint']].map(([value,label,hint])=>`<label class="radio-card ${value===draft.level?'selected':''}"><input type="radio" name="lv" value="${value}" ${value===draft.level?'checked':''}><span class="radio-indicator"></span><span><b>${value==='critical'?'<i class="live-dot"></i>':''}${t(label)}</b>${value==='critical'?'':`<small>${t(hint)}</small>`}</span></label>`).join('')}</div>${row('pin',`<label for="p-area">${t('area')}</label>`,`<select id="p-area" aria-label="${t('area')}">${REGIONS.map(entry=>`<option value="${entry[0]}" ${entry[0]===region?'selected':''}>${entry[lang==='ko'?3:lang==='en'?2:1]}</option>`).join('')}</select>`,t('areaHint'))}</fieldset></section><p class="hint policy-hint">${t('policyNote')}</p>
     ${heading(t('nCats'),tools('category-count',draft.cats.length,'topics-all'))}<section class="settings-card"><fieldset id="category-options" ${blocked||!draft.enabled?'disabled':''}><div class="topic-picks topic-choices">${Object.keys(CATS).map(key=>`<label class="topic-pick"><input type="checkbox" name="pc" value="${key}" ${draft.cats.includes(key)?'checked':''}><span>${esc(categoryLabel(key))}</span></label>`).join('')}</div></fieldset></section>
     ${heading(t('quietTitle')+(lang==='ko'?'':' (KST)'))}<section class="settings-card">${row('moon',t('quietTitle'),toggle('p-quiet',draft.quietOn,t('quietTitle')))}<fieldset id="quiet-options" ${draft.quietOn?'':'disabled'}><div class="time-grid"><label class="time-box"><span class="time-label">${uiIcon('moon')}${t('quietFrom')}</span><select id="p-from" aria-label="${t('quietFrom')}">${hourOptions(draft.quietFrom??22)}</select></label><label class="time-box"><span class="time-label">${uiIcon('light')}${t('quietTo')}</span><select id="p-to" aria-label="${t('quietTo')}">${hourOptions(draft.quietTo??10)}</select></label></div><div class="quiet-duration"><span id="quiet-duration-label"></span><i class="quiet-timeline"></i></div><label class="check-row"><input type="checkbox" id="p-bypass" ${draft.quietBypass!==false?'checked':''}><span><b><i class="live-dot"></i>${t('quietBypass')}</b><small>${t('quietNote')}</small></span></label></fieldset></section>
 `,'settings');
   const content=$('panel').querySelector('.sheet-content');content.scrollTop=scroll;
-  updateQuietDuration();updateSettingsStatus();
+  settingsSegments=[['language','.language-choices'],['theme','.theme-choices'],['font','.font-buttons']].map(([key,selector])=>({key,control:attachSlidingSegments($('panel').querySelector(selector),{initial:segmentState?.[key]})}));
+  updateQuietDuration();updateSettingsStatus();syncSettingsFeedbackSpace();
   for(const key of ['th','en','ko'])$('l-'+key).onclick=()=>changeLanguage(key);
-  document.querySelectorAll('input[name="theme"]').forEach(input=>input.onchange=()=>{themeMode=input.value;store.set('kw.theme',themeMode);applyTheme();tabLens.sync();toast(t('changedTo')(t('theme'),t('theme_'+themeMode)))});
-  document.querySelectorAll('[data-font]').forEach(button=>button.onclick=()=>{fontScale=Number(button.dataset.font);document.documentElement.style.setProperty('--font-scale',fontScale);store.set('kw.fontScale',fontScale);document.querySelectorAll('[data-font]').forEach(b=>{const active=b===button;b.classList.toggle('selected',active);b.setAttribute('aria-pressed',String(active))});toast(t('changedTo')(t('fontSize'),t(['fontSmall','fontMedium','fontLarge'][[.9,1,1.14].indexOf(fontScale)])))});
+  document.querySelectorAll('input[name="theme"]').forEach(input=>input.onchange=()=>{themeMode=input.value;store.set('kw.theme',themeMode);applyTheme();tabLens.sync();syncSettingsSegments();toast(t('changedTo')(t('theme'),t('theme_'+themeMode)))});
+  document.querySelectorAll('[data-font]').forEach(button=>button.onclick=()=>{fontScale=Number(button.dataset.font);document.documentElement.style.setProperty('--font-scale',fontScale);store.set('kw.fontScale',fontScale);document.querySelectorAll('[data-font]').forEach(b=>{const active=b===button;b.classList.toggle('selected',active);b.setAttribute('aria-pressed',String(active))});syncSettingsSegments();toast(t('changedTo')(t('fontSize'),t(['fontSmall','fontMedium','fontLarge'][[.9,1,1.14].indexOf(fontScale)])))});
   $('featured-choices').onclick=e=>{const button=e.target.closest('[data-featured]');if(!button)return;const key=button.dataset.featured,adding=!featured.includes(key);featured=adding?[...featured,key]:featured.filter(c=>c!==key);updateFeatureChoices();toast(t(adding?'topicSelected':'topicRemoved')(categoryLabel(key)))};
   $('featured-all').onclick=()=>{featured=featured.length===12?[]:Object.keys(CATS);updateFeatureChoices();toast(t(featured.length?'allSelected':'allCleared'))};
   const reflect=()=>{
@@ -523,7 +545,7 @@ function openSettings(keepDraft=false) {
   $('p-preview').onclick=()=>playAlert(tone==='airraid'?4.2:2.4);$('p-stop').onclick=()=>alertAudio.stop();
 }
 function changeLanguage(next) {
-  readSettingsDraft();lang=next;store.set('kw.lang',lang);render();openSettings(true);$('l-'+next).focus({preventScroll:true});toast(t('changedTo')(t('language'),{th:'ไทย',en:'English',ko:'한국어'}[next]));
+  const segments=snapshotSettingsSegments();readSettingsDraft();lang=next;store.set('kw.lang',lang);render();openSettings(true,segments);$('l-'+next).focus({preventScroll:true});toast(t('changedTo')(t('language'),{th:'ไทย',en:'English',ko:'한국어'}[next]));
   if(push.enabled){subscriptionRevision++;store.set('kw.pushDirty',true);syncSubscription()}
 }
 
@@ -588,8 +610,9 @@ function applyFeedSnapshot(snapshot) {
   const normalized = normalizeFeed(list);
   if (normalized.errors.length) console.warn('Feed records could not be displayed', normalized.errors);
   items = normalized.items;
+  try { readingList.refresh(items); } catch { /* Storage limits must not interrupt the live feed. */ }
   if (items.length) refreshMessage = 'refreshed';
-  loaded = true; render(); openDeepLink();
+  loaded = true; render(); openDeepLink({final:!snapshot.metadata?.fromCache});
   if (!snapshot.metadata?.fromCache) checkAlerts();
 }
 let recoveredStatus = null;
@@ -602,7 +625,7 @@ function recoverEmptyFeed() {
 }
 
 function refreshFingerprint() {
-  const content = value => typeof value === 'string' || Array.isArray(value) ? value : [value?.th ?? null, value?.en ?? null];
+  const content = value => typeof value === 'string' || Array.isArray(value) ? value : [value?.th ?? null, value?.en ?? null, value?.ko ?? null];
   return JSON.stringify(visible().map(n => [String(n.id), n.publishedAt, n.titleKo,
     content(n.title), content(n.summary), content(n.body), content(n.tips), [...cats(n)].sort(),
     n.level, n.image, n.source, n.sourceUrl, (n.links || []).map(link => [link.label,link.url])])
@@ -652,7 +675,18 @@ const pullController=attachPullRefresh({
 });
 
 /* data */
-function openDeepLink() { if (deepId && openItem(deepId)) { deepId = null; history.replaceState(null, "", location.pathname) } }
+function openDeepLink({final=false}={}) {
+  if(!deepId)return false;
+  const url=new URL(location.href);url.searchParams.set('id',String(deepId));history.replaceState(null,'',url.pathname+url.search);
+  $('alert').hidden=true;
+  if(closeShare){closeShare();closeShare=null;}
+  if(!openItem(deepId)){
+    if(currentArticle){closeSheet({restore:false});history.replaceState(null,'',url.pathname+url.search);}
+    if(final){deepId=null;url.searchParams.delete('id');history.replaceState(null,'',url.pathname+url.search);toast(t('newsUnavailable'));}
+    return false;
+  }
+  deepId=null;return true;
+}
 async function boot() {
   getSw().catch(e => console.warn("sw", e));
   const c = CFG.firebase || {};
@@ -682,11 +716,11 @@ function applyAppUpdate() {
   reloading=true;location.reload();
 }
 navigator.serviceWorker?.addEventListener('message',event=>{
-  if(event.data?.type==='open'&&event.data.id){deepId=event.data.id;openDeepLink()}
+  if(event.data?.type==='open'&&event.data.id){notificationOpen={id:String(event.data.id),at:Date.now()};deepId=notificationOpen.id;const opened=openDeepLink();event.ports?.[0]?.postMessage({opened:true});if(!opened&&fb)refreshNews()}
   if(event.data?.type==='app-release'&&event.data.release&&event.data.release!==document.documentElement.dataset.release){updatePending=event.data.release;applyAppUpdate()}
 });
 watchAppResume({
-  onReturn:()=>{pullController.reset();refreshSequence++;refreshingNews=false;capsuleRefresh=false;deferredFeed=null;cat='all';pageScroll.home=0;navigate('home');window.scrollTo(0,0);if(fb)refreshNews();else refreshOnBoot=true;refreshToken();syncSubscription()},
+  onReturn:()=>{const target=notificationOpen&&Date.now()-notificationOpen.at<10000?notificationOpen.id:null;pullController.reset();refreshSequence++;refreshingNews=false;capsuleRefresh=false;deferredFeed=null;cat='all';pageScroll.home=0;navigate('home');window.scrollTo(0,0);if(target){deepId=target;openDeepLink()}if(fb)refreshNews();else refreshOnBoot=true;refreshToken();syncSubscription()},
   onOpen:()=>{openingUntil=Date.now()+15000;applyAppUpdate();getSw().then(reg=>{reg?.active?.postMessage({type:'get-release'});return reg?.update()}).catch(()=>{});syncSubscription()}
 });
 setInterval(render,60000);

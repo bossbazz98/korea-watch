@@ -32,9 +32,9 @@ const H = "a".repeat(64), H2 = "b".repeat(64), H3 = "c".repeat(64), H4 = "d".rep
   assert.strictEqual(st.korwar, 6, "fast-lane incident limit remains bounded");
   const toAll = sent.filter(m => m.tokens.includes("ALL") && m.data.level !== "test");
   assert.strictEqual(toAll.filter(m => m.data.level !== "summary").length, 4, "level 'all': max 4 notifications per device per round");
-  assert.ok(toAll.some(m => m.data.level === "summary" && /อีก 2 ข่าว/.test(m.notification.body)), "two remaining translated incidents are grouped; the seventh waits for the next round");
+  assert.ok(toAll.some(m => m.data.level === "summary" && m.data.count==='2'), "two remaining translated incidents are grouped; the seventh waits for the next round");
   const toCrit = sent.filter(m => m.tokens.includes("CRIT"));
-  assert.strictEqual(toCrit.filter(m => m.data.level === "critical").length, 4, "critical subscribers receive only qualified incidents, with the shared cap"); assert.ok(toCrit[0].notification.title.startsWith("🔴"));
+  assert.strictEqual(toCrit.filter(m => m.data.level === "critical").length, 4, "critical subscribers receive only qualified incidents, with the shared cap"); assert.strictEqual(toCrit[0].notification.title,"KOREA WATCH");assert.ok(toCrit[0].notification.body.startsWith("🔴"));
   assert.ok(!sent.some(m => m.tokens.includes("QUIET")), "quiet hours respected");
   assert.ok(db.data.has(`subscribers/${H3}`), "invalid-argument does NOT delete the device anymore");
   assert.ok(st.pushFailed >= 1 && st.pushErrors["messaging/invalid-argument"] >= 1, "failures counted with their error code");
