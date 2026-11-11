@@ -11,6 +11,7 @@ fixture[0].title.th+=' หัวข้อข่าวที่ยาวมาก
 fixture.push({...fixture[0],id:'important',level:'high',publishedAt:new Date(Date.now()-60000).toISOString(),title:{th:'ข่าวสำคัญเพื่อทดสอบกรอบสีและคอลัมน์',en:'An important story for checking the grid'},titleKo:'남북 군사 긴장 강화'});
 fixture.push({...fixture[0],id:'critical',level:'critical',publishedAt:new Date(Date.now()-120000).toISOString(),title:{th:'เกาหลีเหนือยิงขีปนาวุธ ข่าวด่วนมากสำหรับทดสอบ',en:'North Korea launches a missile'},titleKo:'북한 탄도미사일 발사'});
 fixture.push({...fixture[0],id:'multiple',level:'high',publishedAt:new Date(Date.now()-180000).toISOString(),categories:['korwar','tech','oil'],titleKo:'북한 군사 위협, 한국 AI 반도체 및 에너지 정책 발표'});
+for(const item of fixture){item.title={...item.title,ko:item.titleKo};item.summary={...item.summary,ko:'기사 요약을 확인합니다.'};item.body={...item.body,ko:Array(10).fill('한국어 기사 본문입니다. 올바른 언어로 표시되는지 확인합니다.')};}
 const scripts = {
   'firebase-app.js': 'export const initializeApp=c=>({c});',
   'firebase-firestore.js': `export const persistentLocalCache=()=>({}),initializeFirestore=()=>({}),getFirestore=()=>({}),doc=(d,...p)=>p.join('/'),serverTimestamp=()=>'TS';export async function setDoc(){throw Error('Unexpected subscription write')}export async function getDoc(){return {exists:()=>false}};export async function runTransaction(db,fn){window.__subDocs||={};await new Promise(r=>setTimeout(r,50));return fn({get:async ref=>({exists:()=>!!window.__subDocs[ref],data:()=>window.__subDocs[ref]}),set:(ref,value)=>{window.__subDocs[ref]=value;(window.__writes||=[]).push({ref,value})}})};export async function getDocFromServer(ref){window.__refreshReads=(window.__refreshReads||0)+1;return {exists:()=>true,data:()=>ref==='meta/feed'?{items:${JSON.stringify(fixture)}}:{lastRun:new Date().toISOString()},metadata:{fromCache:false}};}export function onSnapshot(ref,ok){setTimeout(()=>ok({exists:()=>true,data:()=>ref==='meta/feed'?{items:${JSON.stringify(fixture)}}:{lastRun:new Date().toISOString()},metadata:{fromCache:false}}),10);return()=>{}}`,
@@ -29,7 +30,7 @@ const server = http.createServer((request, response) => {
 (async()=>{
  await new Promise(resolve=>server.listen(port,'127.0.0.1',resolve));fs.mkdirSync(out,{recursive:true});
  const browser=await chromium.launch({executablePath:process.env.AGENT_CHROMIUM||chromium.executablePath()});
- try{for(const viewport of [{width:390,height:844},{width:320,height:640},{width:1280,height:900},{width:390,height:844,standalone:true}]){
+ try{for(const viewport of (process.argv.includes('--language-only')?[]:[{width:390,height:844},{width:320,height:640},{width:1280,height:900},{width:390,height:844,standalone:true}])){
   const context=await browser.newContext({viewport,isMobile:viewport.width<800,hasTouch:true,deviceScaleFactor:viewport.standalone?3:1,colorScheme:'dark',permissions:['notifications','clipboard-read','clipboard-write'],serviceWorkers:'block'});
   await context.addInitScript(standalone=>{if(standalone)Object.defineProperty(navigator,'standalone',{value:true});const realNow=Date.now;window.__timeOffset=0;Date.now=()=>realNow()+window.__timeOffset;const sw=new EventTarget(),reg={active:{postMessage:()=>{}},update:async()=>{window.__updates=(window.__updates||0)+1}};Object.assign(sw,{register:async()=>reg,ready:Promise.resolve(reg)});Object.defineProperty(navigator,'serviceWorker',{value:sw});navigator.share=async value=>{window.__shared=value};navigator.canShare=()=>true;},viewport.standalone===true);
   await context.route('**/vendor/firebase/**',route=>route.fulfill({contentType:'text/javascript',body:scripts[route.request().url().split('/').pop()]||''}));
@@ -122,6 +123,70 @@ const server = http.createServer((request, response) => {
    }
    console.log(`PWA/segments UI ${viewport.width}${viewport.standalone?' standalone @3x':''}: optical lens, news times, saved groups/search/swipe, real-photo sharing, serial/offline autosave, typography and contrast passed`);
   }catch(error){await page.screenshot({path:path.join(out,`interactions-failure-${viewport.width}.png`)}).catch(()=>{});console.error('Runtime errors:',errors);throw error}finally{await context.close()}
+ }
+ for(const width of [320,390]){
+  const context=await browser.newContext({viewport:{width,height:844},isMobile:true,hasTouch:true,serviceWorkers:'block'});
+  await context.addInitScript(f=>{localStorage.setItem('kw.readingList',JSON.stringify([{id:f.id,savedAt:Date.now(),article:{...f,title:{th:f.title.th},summary:{th:f.summary.th},body:{th:f.body.th}}}]));navigator.share=async value=>window.__shared=value;navigator.canShare=()=>true;},fixture[0]);
+  await context.route('**/vendor/firebase/**',route=>route.fulfill({contentType:'text/javascript',body:scripts[route.request().url().split('/').pop()]||''}));
+  const page=await context.newPage(),errors=[];page.on('pageerror',error=>errors.push(error.message));
+  try{
+   await page.goto(origin);await page.waitForSelector('.card');
+   for(const lang of ['en','ko','th']){
+    await page.locator('#settings').click();await page.locator('#l-'+lang).click();await page.waitForTimeout(320);
+    assert.equal(await page.locator('html').getAttribute('lang'),lang);assert.equal(await page.locator('#sheet-title').textContent(),{th:'ตั้งค่า',en:'Settings',ko:'설정'}[lang]);
+    if(lang==='ko')assert(!/[ก-๙]/.test(await page.locator('#panel').innerText()),'Korean settings never inherit Thai copy');
+    await page.locator('#nav-home').click();
+    assert.equal(await page.locator('#grid [data-id=reader] h3').textContent(),fixture[0].title[lang]);
+    await page.locator('#grid [data-id=reader]').click();
+    assert.equal(await page.locator('#article-title').textContent(),fixture[0].title[lang]);
+    assert.equal(await page.locator('.summary-box p').textContent(),fixture[0].summary[lang]);
+    assert.equal(await page.locator('.article-body p').first().textContent(),fixture[0].body[lang][0]);
+    if(lang!=='ko')assert.equal(await page.locator('.src .ko').filter({hasText:fixture[0].titleKo}).count(),0,'source headline does not introduce another language');
+    const buttons=await page.locator('.reader-actions>button').evaluateAll(nodes=>nodes.map(node=>{const r=node.getBoundingClientRect(),s=getComputedStyle(node);return{x:r.x,width:r.width,height:r.height,background:s.backgroundColor}}));
+    assert.equal(buttons.length,3);assert(buttons[0].width>buttons[1].width&&buttons[0].width>buttons[2].width,'Back is the widest control');
+    assert.equal(buttons[0].height,buttons[1].height);assert.equal(buttons[1].height,buttons[2].height);
+    for(let i=1;i<buttons.length;i++)assert(buttons[i].x-buttons[i-1].x-buttons[i-1].width>=8,'controls have independent surfaces separated by a gap');
+    assert(buttons.every(b=>b.background!=='rgba(0, 0, 0, 0)'),'each control has its own glass background');
+    await page.screenshot({path:path.join(out,`reader-language-${lang}-${width}.png`)});
+    await page.locator('#reader-share').click();await page.locator('[data-share=other]').click();assert.equal((await page.evaluate(()=>window.__shared)).title,fixture[0].title[lang]);await page.keyboard.press('Escape');
+    await page.locator('#reader-back').click();await page.locator('#nav-saved').click();assert.equal(await page.locator('.saved-row h3').textContent(),fixture[0].title[lang],'legacy saved snapshots use current translated editions');
+    await page.locator('#nav-home').click();
+   }
+   await page.reload();await page.waitForSelector('.card');assert.equal(await page.locator('html').getAttribute('lang'),'th');assert.deepEqual(errors,[]);
+   console.log(`Languages ${width}: Thai, English and Korean headlines, summaries, full bodies, saved stories, shares and separate reader buttons passed`);
+  }finally{await context.close()}
+ }
+ for(const lang of ['th','en','ko']){
+  const context=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,serviceWorkers:'block'});
+  await context.addInitScript(lang=>{
+    const realNow=Date.now;window.__timeOffset=0;Date.now=()=>realNow()+window.__timeOffset;
+    for(const [key,value] of Object.entries({'kw.lang':lang,'kw.sound':false,'kw.vibration':false,'kw.lastVisit':Date.now()-60000,'kw.push':{enabled:true,level:'all',cats:['korwar'],quietOn:false}}))localStorage.setItem(key,JSON.stringify(value));
+    const sw=new EventTarget(),reg={active:{postMessage(){}},update:async()=>{}};Object.assign(sw,{register:async()=>reg,ready:Promise.resolve(reg)});Object.defineProperty(navigator,'serviceWorker',{value:sw});
+  },lang);
+  await context.route('**/vendor/firebase/**',route=>route.fulfill({contentType:'text/javascript',body:scripts[route.request().url().split('/').pop()]||''}));
+  const page=await context.newPage();
+  try{
+   await page.goto(origin);await page.waitForSelector('#alert:not([hidden])');
+   const alert=await page.locator('#alert-box').evaluate(el=>[...el.children].slice(0,3).map(child=>child.textContent));
+   assert.deepEqual(alert,['KOREA WATCH',{th:'ข่าวทั่วไป',en:'News',ko:'일반 뉴스'}[lang],fixture[0].title[lang]]);assert.equal(await page.locator('#alert-box p').count(),0,'notification has no summary');
+   await page.screenshot({path:path.join(out,`notification-${lang}.png`)});await page.locator('#alert-box h2').click();assert.equal(await page.locator('#article-title').textContent(),fixture[0].title[lang]);
+   await page.evaluate(()=>{Object.defineProperty(document,'hidden',{configurable:true,value:true});document.dispatchEvent(new Event('visibilitychange'));window.__timeOffset=601000;navigator.serviceWorker.dispatchEvent(new MessageEvent('message',{data:{type:'open',id:'important'}}));Object.defineProperty(document,'hidden',{configurable:true,value:false});document.dispatchEvent(new Event('visibilitychange'))});
+   await page.waitForFunction(()=>document.querySelector('#panel')?.dataset.kind==='reader');assert.equal(await page.locator('#article-title').textContent(),fixture[1].title[lang]);assert.equal(new URL(page.url()).searchParams.get('id'),'important');
+   await page.reload();await page.waitForSelector('#article-title');assert.equal(await page.locator('#article-title').textContent(),fixture[1].title[lang],'notification route survives an app update or reload');
+   await page.locator('#reader-back').click();assert.equal(new URL(page.url()).searchParams.get('id'),null);
+   await page.evaluate(()=>navigator.serviceWorker.dispatchEvent(new MessageEvent('message',{data:{type:'open',id:'not-in-feed'}})));
+   await page.waitForFunction(()=>document.querySelector('#toast').textContent.includes({th:'ข่าวนี้ไม่อยู่ในฟีดแล้ว',en:'This story is no longer in the feed',ko:'이 기사는 더 이상 피드에 없습니다'}[document.documentElement.lang]));assert(await page.locator('#sheet').isHidden(),'an expired notification never shows an unrelated reader');
+   await page.goto(origin+'/?id=critical');await page.waitForSelector('#article-title');assert.equal(await page.locator('#article-title').textContent(),fixture[2].title[lang],'cold notification link opens its own news');
+   console.log(`Notifications ${lang}: brand, priority and headline only; click, background resume, reload and cold launch open the matching article`);
+  }finally{await context.close()}
+ }
+ for(const lang of ['en','ko']){
+  const context=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,serviceWorkers:'block'});
+  await context.addInitScript(value=>localStorage.setItem('kw.lang',JSON.stringify(value)),lang);
+  const legacy=structuredClone(fixture);for(const n of legacy){delete n.summary[lang];delete n.body[lang];}
+  await context.route('**/vendor/firebase/**',route=>route.fulfill({contentType:'text/javascript',body:(scripts[route.request().url().split('/').pop()]||'').split(JSON.stringify(fixture)).join(JSON.stringify(legacy))}));
+  const page=await context.newPage();
+  try{await page.goto(origin);await page.waitForSelector('.card');await page.locator('#grid [data-id=reader]').click();const pending=lang==='ko'?'번역 준비 중':'English translation is pending';assert.equal(await page.locator('.summary-box p').textContent(),pending);assert.equal(await page.locator('.article-body p').textContent(),pending);assert(!/[ก-๙]/.test(await page.locator('.article').innerText()),'a missing translation never falls back to Thai');console.log(`Missing ${lang}: localized pending state, no mixed-language body`)}finally{await context.close()}
  }
  for(const viewport of [{width:768,height:1024,columns:2},{width:1024,height:768,columns:3},{width:1440,height:900,columns:4},{width:844,height:390,columns:1}]){
   const context=await browser.newContext({viewport,hasTouch:true,isMobile:viewport.width===844,serviceWorkers:'block'});await context.route('**/vendor/firebase/**',route=>route.fulfill({contentType:'text/javascript',body:scripts[route.request().url().split('/').pop()]||''}));const page=await context.newPage();

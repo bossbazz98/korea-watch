@@ -11,7 +11,7 @@ service cloud.firestore {
         && d.token is string && d.token.size() > 20 && d.token.size() < 4096
         && d.cats is list && d.cats.size() > 0 && d.cats.size() <= 15
         && d.cats.hasOnly(['korwar','war','disease','tech','crypto','foreign','wage','fx','oil','thai','president','hot','food','korea','law'])
-        && d.level in ['critical','high','all'] && d.lang in ['th','en']
+        && d.level in ['critical','high','all'] && d.lang in ['th','en','ko']
         && d.enabled is bool && d.testRequested is bool && d.subscriptionVersion == 2
         && d.quietOn is bool && d.quietBypass is bool
         && d.quietFrom is int && d.quietFrom >= 0 && d.quietFrom <= 23

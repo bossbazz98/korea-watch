@@ -1,5 +1,5 @@
 import './categories.js';
-import './news-text.js';
+import './news-text.js?v=20261112-language';
 import './news-policy.js?v=20261111-interactions';
 import './category-policy.js?v=20261111-interactions';
 

@@ -13,6 +13,8 @@ const {doc,setDoc,getDoc,serverTimestamp,Timestamp,updateDoc}=client;
     await assertSucceeds(setDoc(doc(alice,'subscribers/alice'),data()));
     await assertSucceeds(getDoc(doc(alice,'subscribers/alice')));
     await assertFails(getDoc(doc(bob,'subscribers/alice')));
+    await assertSucceeds(setDoc(doc(alice,'subscribers/alice'),{...data(),lang:'ko'}));
+    await assertFails(setDoc(doc(alice,'subscribers/alice'),{...data(),lang:'xx'}));
     await assertFails(setDoc(doc(alice,'subscribers/alice'),{...data(),cats:['unknown']}));
     await assertSucceeds(setDoc(doc(alice,'subscribers/alice'),{...data(),cats:['tech','crypto','hot','foreign']}));
     await assertSucceeds(setDoc(doc(alice,'subscribers/alice'),{...data(),cats:['food','korea','law']})); // Older installed clients remain compatible.

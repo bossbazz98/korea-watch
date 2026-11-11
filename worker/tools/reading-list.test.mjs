@@ -16,3 +16,15 @@ test('damaged local data does not crash the feed and storage-full errors preserv
   const storage=memory(),list=createReadingList(storage);list.save(article);storage.setItem=()=>{throw Error('QuotaExceededError')};
   assert.throws(()=>list.remove(article.id));assert(list.has(article.id));assert.throws(()=>list.save({...article,id:'new'}));assert(!list.has('new'));
 });
+
+test('saved snapshots acquire new language editions without changing their order or save dates',()=>{
+ const data=new Map(),storage={getItem:key=>data.get(key),setItem:(key,value)=>data.set(key,value)};
+ const list=createReadingList(storage);
+ list.save({id:'one',title:{th:'ข่าวที่บันทึกไว้'},summary:{th:'สรุปข่าว'},body:{th:['เนื้อข่าว']}});
+ const savedAt=list.all()[0].savedAt;
+ const translated={id:'one',title:{th:'ข่าวที่บันทึกไว้',en:'Saved story',ko:'저장한 기사'},summary:{th:'สรุปข่าว',en:'Summary',ko:'요약'},body:{th:['เนื้อข่าว'],en:['Article text'],ko:['기사 본문']}};
+ list.refresh([translated]);assert.equal(list.all()[0].savedAt,savedAt);
+ list.refresh([{...translated,title:{th:translated.title.th},summary:{th:translated.summary.th},body:{th:translated.body.th}}]);
+ const offline=createReadingList(storage);assert.equal(offline.get('one').summary.ko,'요약');assert.deepEqual(offline.get('one').body.en,['Article text']);
+ list.refresh([]);assert.equal(list.get('one').title.en,'Saved story');
+});

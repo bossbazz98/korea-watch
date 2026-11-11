@@ -43,7 +43,7 @@ function geminiReply(input) {
   return input.map(x => x.headline.includes("탄도") ? { i: x.i, relevant: true, categories: ["war"], level: "critical", title: { th: "เกาหลีเหนือยิงขีปนาวุธ", en: "NK missile" }, summary: { th: "สรุปขีปนาวุธ", en: "s" }, body: { th: ["ย่อหน้า"], en: ["p"] } }
     : x.headline.includes("독감") ? { i: x.i, relevant: true, categories: ["disease"], level: "high", title: { th: "ประกาศเตือนไข้หวัดใหญ่ระบาด", en: "Flu advisory" }, summary: { th: "สรุปไข้หวัด", en: "s" }, body: { th: ["ย่อหน้า"], en: ["p"] } }
     : x.headline.includes("우크라이나") ? { i: x.i, relevant: true, categories: ["war"], level: "normal", title: { th: "ข่าวชุด", en: "b" }, summary: { th: "ส", en: "s" }, body_th: ["บ"] }
-    : { i: x.i, relevant: false, categories: [], level: "normal", title: { th: "", en: "" }, summary: {}, body: {} });
+    : { i: x.i, relevant: false, categories: [], level: "normal", title: { th: "", en: "" }, summary: {}, body: {} }).map(item=>item.relevant?{...item,title:{...item.title,ko:"한국어 기사 제목"},summary:{...item.summary,ko:"한국어 기사 요약"},body_en:["English article text."],body_ko:["한국어 기사 본문"]}:item);
 }
 const fetchImpl = async (url, opt) => {
   if (url.startsWith("https://generativelanguage")) {
@@ -133,7 +133,7 @@ const log = { log() {}, warn() {} };
   assert.strictEqual(db.data.get("meta/feed").v, 10);
   geminiMode = "ok";
 
-  // แปลเป็นชุดละ 5: 12 ข่าว = 3 ชุด ชุดที่เสีย 1 ชุดไม่ทำให้ชุดอื่นเสีย
+  // A malformed pair cannot prevent other batches from completing.
   const distinct = ["키이우 정전 협상 재개", "가자지구 구호품 반입 확대", "이란 핵시설 사찰 논의", "대만해협 해상 순찰 강화", "흑해 곡물 수송로 위협", "시리아 국경 난민 증가", "홍해 상선 우회 항로", "레바논 남부 주민 대피", "나토 정상회의 공동성명", "러시아 국경 병력 이동", "예멘 항구 봉쇄 장기화", "수단 내전 사상자 집계"];
   feeds = { gn_war: rss(distinct.map((t, k) => ({ t: (k === 6 ? "BAD " : "") + t + " 우크라이나 전쟁", s: "KBS", d: d(0.01 * (k + 1)) }))) };
   { const f2 = db.data.get("meta/feed"); f2.items = f2.items.filter(i => i.translated); db.data.set("meta/pending", {items:[]}); }
