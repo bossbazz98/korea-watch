@@ -18,11 +18,12 @@
 .article-publisher .source-name { overflow-wrap:anywhere; }
 .article-meta .mini-logo { width:18px;height:18px;margin-top:0; }
 .article-meta time { font:inherit; }
-.tiles { --tw:clamp(148px,42vw,180px);grid-template-rows:repeat(2,minmax(104px,auto)); }
-.tile { min-height:104px;padding:12px;gap:8px; }
-.tile .l { font-size:calc(16px * var(--font-scale));line-height:1.5;font-weight:600; }
+.tiles { display:flex;flex-direction:column;align-items:flex-start;gap:6px;scroll-snap-type:none; }
+.topic-row { display:flex;gap:6px;width:max-content; }
+.tile { width:max-content;flex:none;min-height:70px;min-width:0;padding:8px 12px;gap:4px;align-items:flex-start; }
+.tile .l { font-size:calc(16px * var(--font-scale));line-height:1.5;font-weight:600;white-space:nowrap; }
 .tile .n { font-size:calc(16px * var(--font-scale));line-height:1.2;font-weight:500; }
-@media(min-width:1000px) { .tiles { --tw:calc((100% - 5 * 8px) / 6); } }
+
 @media(min-width:640px) { .hero-card { --news-image-height:210px; } }
 
 /* The same navigation stays accessible on Home, Saved and Settings. */
@@ -41,17 +42,15 @@
 #app-tabs .tab-lens { z-index:3;border:0;border-radius:999px;box-shadow:none;background:transparent;backdrop-filter:none;-webkit-backdrop-filter:none;overflow:visible;transition:none;will-change:transform,width,height; }
 .lens-surface,.lens-optics,.lens-plane,.lens-rim,.lens-border { position:absolute;inset:0;border-radius:inherit;pointer-events:none; }
 .lens-optics { overflow:hidden; }
-.lens-rim { z-index:3;opacity:var(--lens-edge,0);backdrop-filter:blur(1.2px) saturate(1.5);-webkit-backdrop-filter:blur(1.2px) saturate(1.5);mask-image:radial-gradient(ellipse at center,transparent 80%,#000 96%);-webkit-mask-image:radial-gradient(ellipse at center,transparent 80%,#000 96%); }
+.lens-rim { z-index:3;opacity:var(--lens-outline,0);backdrop-filter:blur(1.2px) saturate(1.5);-webkit-backdrop-filter:blur(1.2px) saturate(1.5);mask-image:radial-gradient(ellipse at center,transparent 80%,#000 96%);-webkit-mask-image:radial-gradient(ellipse at center,transparent 80%,#000 96%); }
 /* Keep a real capsule stroke separate from the masked optical rim. */
-.lens-border { z-index:4;border:1.25px solid rgba(255,255,255,.94);box-shadow:0 0 0 1px rgba(0,0,0,.58),inset 0 1px 0 rgba(255,255,255,.5),0 2px 7px rgba(0,0,0,.16);opacity:calc(.55 + var(--lens-edge,0) * .45); }
+.lens-border { z-index:4;border:1.25px solid rgba(255,255,255,.94);box-shadow:0 0 0 1px rgba(0,0,0,.58),inset 0 1px 0 rgba(255,255,255,.5),0 2px 7px rgba(0,0,0,.16);opacity:var(--lens-outline,0); }
 :root[data-theme="light"] .lens-border { border-color:rgba(255,255,255,.98);box-shadow:0 0 0 1px rgba(43,49,60,.62),inset 0 1px 0 rgba(255,255,255,.8),0 2px 7px rgba(0,0,0,.12); }
 .lens-copy-track { top:0;color:var(--fg); }
-.lens-plane:not(.lens-main) .lens-copy-track { color:inherit; }
-.lens-plane:not(.lens-main) { mask-image:radial-gradient(ellipse at center,transparent 66%,#000 96%);-webkit-mask-image:radial-gradient(ellipse at center,transparent 66%,#000 96%);mix-blend-mode:screen; }
-.lens-plane:not(.lens-main) .lens-tab { color:inherit; }
-.lens-pink { color:rgb(255,120,190); }.lens-blue { color:rgb(110,195,255); }.lens-yellow { color:rgb(255,225,120); }.lens-purple { color:rgb(180,140,255); }
-:root[data-theme="light"] .lens-plane:not(.lens-main) { mix-blend-mode:multiply; }
-:root[data-theme="light"] .lens-pink { color:rgb(255,110,180); }:root[data-theme="light"] .lens-blue { color:rgb(90,180,255); }:root[data-theme="light"] .lens-yellow { color:rgb(255,210,90); }:root[data-theme="light"] .lens-purple { color:rgb(165,125,255); }
+/* Color stays on glyph alpha, never on a full masked/blended colored plane. */
+.lens-tab>span { text-shadow:none; }
+.tabbar.is-engaged .lens-tab>span { text-shadow:.55px 0 rgba(255,120,190,.3),-.55px 0 rgba(110,195,255,.3),0 .35px rgba(255,225,120,.12),0 -.35px rgba(180,140,255,.12); }
+.tabbar.is-engaged .lens-tab svg { filter:drop-shadow(.55px 0 0 rgba(255,120,190,.3)) drop-shadow(-.55px 0 0 rgba(110,195,255,.3)); }
 #app-tabs:focus-within { outline:1px solid color-mix(in srgb,var(--fg) 35%,transparent);outline-offset:3px; }
 #app-tabs:has(.tab:focus-visible) .tab-real-row { mask-image:none!important;-webkit-mask-image:none!important; }
 #app-tabs:has(.tab:focus-visible) .tab-lens .lens-optics { visibility:hidden; }
@@ -140,3 +139,20 @@ fieldset:disabled .radio-card { opacity:1; }
 .delete-saved { opacity:0;pointer-events:none; }
 .saved-item-wrap.swiped .delete-saved,.saved-item-wrap.dragging .delete-saved { opacity:1;pointer-events:auto; }
 .saved-day { font-size:var(--heading-size); }
+
+/* The reader shows the unshaded original photograph. */
+.reader-hero::after { content:none;background:none; }
+.reader-hero .news-photo { filter:none;opacity:1;transform:none;object-position:center; }
+/* Capsule selectors share a single sliding selection surface per group. */
+.segments.sliding-segments { position:relative;isolation:isolate;overflow:hidden;height:54px;min-height:54px;padding:4px;gap:4px;border-radius:999px; }
+.sliding-segments>button,.sliding-segments>label { position:relative;z-index:1;flex:1;min-width:0;height:44px;min-height:44px;padding:0 2px;border-radius:999px;gap:3px; }
+.segments.sliding-segments>button,.segments.sliding-segments>label { background:transparent!important;color:var(--fg)!important; }
+.segments.sliding-segments>.segment-ink { color:var(--ink-fg)!important; }
+.segment-thumb { position:absolute;top:0;left:0;z-index:0;pointer-events:none;border-radius:999px;background:var(--ink);border:1px solid var(--ink);transition:transform 280ms cubic-bezier(.22,.61,.36,1),width 280ms cubic-bezier(.22,.61,.36,1),height 280ms cubic-bezier(.22,.61,.36,1); }
+.segment-no-motion .segment-thumb { transition:none; }
+.font-buttons.sliding-segments button:nth-of-type(1) { font-size:14px; }
+.font-buttons.sliding-segments button:nth-of-type(2) { font-size:18px; }
+.font-buttons.sliding-segments button:nth-of-type(3) { font-size:22px; }
+@media(prefers-reduced-motion:reduce) { .segment-thumb { transition:none; } }
+
+@media(max-height:500px) { .home-main { padding-top:10px; }.topics-section .sec-h { margin-bottom:8px; }.topic-row .tile { min-height:60px;padding-block:6px;gap:2px; } }

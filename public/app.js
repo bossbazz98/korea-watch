@@ -6,6 +6,7 @@ import { createReadingList } from "./reading-list.js";
 import { openShareMenu } from "./share-news.js";
 import { UI_COPY, CATEGORY_KO } from "./ui-copy.js";
 import { watchAppResume } from "./app-lifecycle.js";
+import { attachSlidingSegments } from "./segmented-controls.js";
 import { attachLiquidTabs, attachDockViewport } from "./liquid-tabs.js";
 // Korea Watch: หน้าแอป (อ่านข่าวจาก Firestore, ตั้งค่าแจ้งเตือน, ติดตั้งแอป)
 const SDK = "/vendor/firebase/";
@@ -205,9 +206,9 @@ function render() {
   updDots(); updHint();
   if (currentView === "saved") renderSaved();
   const counts = {}, crit = {}; all.forEach(n => cats(n).forEach(c => { counts[c] = (counts[c] || 0) + 1; if (n.level === "critical") crit[c] = 1 }));
-  let tiles = `<button class="tile" data-cat="all" aria-pressed="${cat === "all"}"><span class="n">${all.length}</span><span class="l">${t("allcat")}</span></button>`;
-  for (const k in CATS) tiles += `<button class="tile ${crit[k] ? "has-crit" : ""}" data-cat="${k}" aria-pressed="${cat === k}"><span class="n">${counts[k] || 0}</span><span class="l">${categoryLabel(k)}</span></button>`;
-  const tl = $("tiles"); tl.style.setProperty("--cols", Math.ceil((Object.keys(CATS).length + 1) / 2)); setHTML(tl, tiles);
+  const tiles = [`<button class="tile" data-cat="all" aria-pressed="${cat === "all"}"><span class="l">${t("allcat")}</span><span class="n">${all.length}</span></button>`];
+  for (const k in CATS) tiles.push(`<button class="tile ${crit[k] ? "has-crit" : ""}" data-cat="${k}" aria-pressed="${cat === k}"><span class="l">${categoryLabel(k)}</span><span class="n">${counts[k] || 0}</span></button>`);
+  const split=Math.ceil(tiles.length/2);setHTML($("tiles"),`<div class="topic-row">${tiles.slice(0,split).join('')}</div><div class="topic-row">${tiles.slice(split).join('')}</div>`);updHint();
   const list = cat === "all" ? all : all.filter(n => cats(n).includes(cat));
   $("t-filter").textContent = cat === "all" ? (loaded ? t("count")(all.length) : "") : categoryLabel(cat);
   setHTML($("grid"), list.length ? list.map(n => newsCard(n)).join("")
@@ -231,6 +232,10 @@ addEventListener("online", render); addEventListener("offline", render);
 
 /* Full-screen reader and three persistent app tabs. */
 let lastFocus = null, currentArticle = null, closeShare = null, settingsReturnView = 'home';
+let settingsSegments=[];
+function clearSettingsSegments(){settingsSegments.forEach(({control})=>control.destroy());settingsSegments=[]}
+function syncSettingsSegments(){settingsSegments.forEach(({control})=>control.sync())}
+function snapshotSettingsSegments(){return Object.fromEntries(settingsSegments.map(({key,control})=>[key,control.snapshot()]))}
 const pageScroll = { home:0, saved:0 };
 function updateAppChrome() {
   const overlay = !$('sheet').hidden, modal = overlay && $('panel').dataset.kind !== 'settings';
@@ -248,6 +253,7 @@ function updateAppChrome() {
 function showSheet(html, kind = 'reader') {
   if ($('sheet').hidden) lastFocus = document.activeElement;
   alertAudio.stop();
+  clearSettingsSegments();
   const panel=$('panel');panel.innerHTML=html;panel.dataset.kind=kind;$('sheet').dataset.kind=kind;
   const header=panel.querySelector(kind==='reader'?'.reader-top':'.bar'),footer=panel.querySelector(kind==='reader'?'.reader-actions':'.settings-footer');
   header?.remove();footer?.remove();
@@ -263,6 +269,7 @@ function showSheet(html, kind = 'reader') {
   else {panel.querySelector('h2')?.setAttribute('tabindex','-1');panel.querySelector('h2')?.focus({preventScroll:true})}
 }
 function closeSheet({restore=true}={}) {
+  clearSettingsSegments();
   if(closeShare){closeShare();closeShare=null}$('panel').inert=false;
   alertAudio.stop();$('sheet').hidden=true;document.body.style.overflow='';delete document.body.dataset.overlay;
   settingsDraft=null;currentArticle=null;
@@ -484,7 +491,7 @@ function updateSettingsStatus() {
   $('status-title').innerHTML=`<i class="live-dot"></i>${t(active?'statusOn':'statusOff')}`;
   $('status-summary').textContent=`${t(push.level==='all'?'allNews':push.level==='high'?'nHigh':'nCrit')} · ${t('topicCount')(push.cats.length)} · ${push.quietOn?`${hourText(push.quietFrom??22)}–${hourText(push.quietTo??10)} KST`:t('quietNone')}`;
 }
-function openSettings(keepDraft=false) {
+function openSettings(keepDraft=false,segmentState=null) {
   if(keepDraft!==true||!settingsDraft)settingsDraft={...push,cats:[...push.cats]};
   currentView='settings';const draft=settingsDraft,scroll=keepDraft===true?$('panel').querySelector('.sheet-content')?.scrollTop||0:0;
   const [statusClass,statusMessage]=pushState(),blocked=statusClass==='warn';
@@ -503,10 +510,11 @@ function openSettings(keepDraft=false) {
     ${heading(t('quietTitle')+(lang==='ko'?'':' (KST)'))}<section class="settings-card">${row('moon',t('quietTitle'),toggle('p-quiet',draft.quietOn,t('quietTitle')))}<fieldset id="quiet-options" ${draft.quietOn?'':'disabled'}><div class="time-grid"><label class="time-box"><span class="time-label">${uiIcon('moon')}${t('quietFrom')}</span><select id="p-from" aria-label="${t('quietFrom')}">${hourOptions(draft.quietFrom??22)}</select></label><label class="time-box"><span class="time-label">${uiIcon('light')}${t('quietTo')}</span><select id="p-to" aria-label="${t('quietTo')}">${hourOptions(draft.quietTo??10)}</select></label></div><div class="quiet-duration"><span id="quiet-duration-label"></span><i class="quiet-timeline"></i></div><label class="check-row"><input type="checkbox" id="p-bypass" ${draft.quietBypass!==false?'checked':''}><span><b><i class="live-dot"></i>${t('quietBypass')}</b><small>${t('quietNote')}</small></span></label></fieldset></section>
 `,'settings');
   const content=$('panel').querySelector('.sheet-content');content.scrollTop=scroll;
+  settingsSegments=[['language','.language-choices'],['theme','.theme-choices'],['font','.font-buttons']].map(([key,selector])=>({key,control:attachSlidingSegments($('panel').querySelector(selector),{initial:segmentState?.[key]})}));
   updateQuietDuration();updateSettingsStatus();syncSettingsFeedbackSpace();
   for(const key of ['th','en','ko'])$('l-'+key).onclick=()=>changeLanguage(key);
-  document.querySelectorAll('input[name="theme"]').forEach(input=>input.onchange=()=>{themeMode=input.value;store.set('kw.theme',themeMode);applyTheme();tabLens.sync();toast(t('changedTo')(t('theme'),t('theme_'+themeMode)))});
-  document.querySelectorAll('[data-font]').forEach(button=>button.onclick=()=>{fontScale=Number(button.dataset.font);document.documentElement.style.setProperty('--font-scale',fontScale);store.set('kw.fontScale',fontScale);document.querySelectorAll('[data-font]').forEach(b=>{const active=b===button;b.classList.toggle('selected',active);b.setAttribute('aria-pressed',String(active))});toast(t('changedTo')(t('fontSize'),t(['fontSmall','fontMedium','fontLarge'][[.9,1,1.14].indexOf(fontScale)])))});
+  document.querySelectorAll('input[name="theme"]').forEach(input=>input.onchange=()=>{themeMode=input.value;store.set('kw.theme',themeMode);applyTheme();tabLens.sync();syncSettingsSegments();toast(t('changedTo')(t('theme'),t('theme_'+themeMode)))});
+  document.querySelectorAll('[data-font]').forEach(button=>button.onclick=()=>{fontScale=Number(button.dataset.font);document.documentElement.style.setProperty('--font-scale',fontScale);store.set('kw.fontScale',fontScale);document.querySelectorAll('[data-font]').forEach(b=>{const active=b===button;b.classList.toggle('selected',active);b.setAttribute('aria-pressed',String(active))});syncSettingsSegments();toast(t('changedTo')(t('fontSize'),t(['fontSmall','fontMedium','fontLarge'][[.9,1,1.14].indexOf(fontScale)])))});
   $('featured-choices').onclick=e=>{const button=e.target.closest('[data-featured]');if(!button)return;const key=button.dataset.featured,adding=!featured.includes(key);featured=adding?[...featured,key]:featured.filter(c=>c!==key);updateFeatureChoices();toast(t(adding?'topicSelected':'topicRemoved')(categoryLabel(key)))};
   $('featured-all').onclick=()=>{featured=featured.length===12?[]:Object.keys(CATS);updateFeatureChoices();toast(t(featured.length?'allSelected':'allCleared'))};
   const reflect=()=>{
@@ -535,7 +543,7 @@ function openSettings(keepDraft=false) {
   $('p-preview').onclick=()=>playAlert(tone==='airraid'?4.2:2.4);$('p-stop').onclick=()=>alertAudio.stop();
 }
 function changeLanguage(next) {
-  readSettingsDraft();lang=next;store.set('kw.lang',lang);render();openSettings(true);$('l-'+next).focus({preventScroll:true});toast(t('changedTo')(t('language'),{th:'ไทย',en:'English',ko:'한국어'}[next]));
+  const segments=snapshotSettingsSegments();readSettingsDraft();lang=next;store.set('kw.lang',lang);render();openSettings(true,segments);$('l-'+next).focus({preventScroll:true});toast(t('changedTo')(t('language'),{th:'ไทย',en:'English',ko:'한국어'}[next]));
   if(push.enabled){subscriptionRevision++;store.set('kw.pushDirty',true);syncSubscription()}
 }
 

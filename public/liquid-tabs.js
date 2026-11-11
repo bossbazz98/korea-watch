@@ -4,11 +4,9 @@ export function attachLiquidTabs({bar,onSelect}) {
   lens.classList.remove('glass');
   const row=document.createElement('div');row.className='tab-real-row';buttons.forEach(b=>row.append(b));bar.append(row);
   lens.innerHTML='<span class="lens-surface"></span><span class="lens-optics" aria-hidden="true"></span><span class="lens-rim"></span><span class="lens-border"></span>';
-  const optics=lens.querySelector('.lens-optics'),copies=[];
-  for(const color of ['main','pink','blue','yellow','purple']){
-    const plane=document.createElement('span');plane.className='lens-plane lens-'+color;
-    const track=document.createElement('span');track.className='lens-copy-track';plane.append(track);optics.append(plane);copies.push({color,plane,track});
-  }
+  // Keep color on glyph edges instead of stacking full tinted compositing layers.
+  const optics=lens.querySelector('.lens-optics'),plane=document.createElement('span'),track=document.createElement('span');
+  plane.className='lens-plane lens-main';track.className='lens-copy-track';plane.append(track);optics.append(plane);
   const reduced=matchMedia('(prefers-reduced-motion: reduce)'),clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
   const values={x:0,w:125,h:52,surface:1,milk:0,icon:1,hold:0,stretch:0};
   const velocity=Object.fromEntries(Object.keys(values).map(k=>[k,0]));
@@ -19,7 +17,7 @@ export function attachLiquidTabs({bar,onSelect}) {
   const measure=()=>{width=bar.clientWidth;ratio=width/353;rowWidth=330*ratio;rowLeft=(width-rowWidth)/2;centers=[0,1,2].map(i=>rowLeft+(i+.5)*rowWidth/3);row.style.width=rowWidth+'px';row.style.left=rowLeft+'px'};
   const copyLabels=()=>{
     const next=buttons.map(b=>b.innerHTML).join('|');if(next===signature)return;signature=next;
-    for(const {track} of copies){track.innerHTML=buttons.map(b=>`<span class="lens-tab">${b.innerHTML.replace(/\sid="[^"]*"/g,'')}</span>`).join('');track.style.width=rowWidth+'px'}
+    track.innerHTML=buttons.map(b=>`<span class="lens-tab">${b.innerHTML.replace(/\sid="[^"]*"/g,'')}</span>`).join('');track.style.width=rowWidth+'px';
   };
   const rest=()=>({x:centers[selected()],w:125*ratio,h:52,surface:1,milk:0,icon:1,hold:0,stretch:0});
   const setState=state=>{bar.dataset.lensPhase=state};
@@ -31,16 +29,12 @@ export function attachLiquidTabs({bar,onSelect}) {
     lens.style.width=w+'px';lens.style.height=h+'px';lens.style.transform=`translate3d(${x-w/2}px,${y-h/2}px,0)`;
     const dark=document.documentElement.dataset.theme!=='light',rgb=dark?'54,58,67':'236,236,239';
     lens.querySelector('.lens-surface').style.cssText=`background:rgba(${rgb},${clamp(values.surface,0,1)});backdrop-filter:blur(${Math.max(0,values.milk)*10}px);-webkit-backdrop-filter:blur(${Math.max(0,values.milk)*10}px)`;
-    lens.style.setProperty('--lens-edge',String(clamp(1-values.surface,0,1)));
-    const k=clamp((h-56)/20,0,1),active=nearest(x);
-    for(const {color,plane,track} of copies){
-      const scale={main:1,pink:1.022+.026*k,blue:.982-.02*k,yellow:1.011+.013*k,purple:.991-.01*k}[color];
-      const opacity={main:1,pink:.4,blue:.4,yellow:.28*k,purple:.28*k}[color];
-      plane.style.opacity=String(opacity);plane.style.filter=`blur(${Math.max(0,values.milk)*.6+(color==='main'?0:.3+.8*k)}px)`;
-      track.style.width=rowWidth+'px';track.style.left=(rowLeft-x+w/2)+'px';track.style.top=(h/2-26)+'px';
-      track.style.transformOrigin=`${x-rowLeft}px 26px`;track.style.transform=`scale(${values.icon*scale})`;
-      [...track.children].forEach((child,i)=>child.classList.toggle('active',i===active));
-    }
+    const pressed=!!pointer?.engaged;
+    lens.style.setProperty('--lens-outline',pressed?'1':'0');
+    plane.style.filter=`blur(${Math.max(0,values.milk)*.6}px)`;
+    track.style.width=rowWidth+'px';track.style.left=(rowLeft-x+w/2)+'px';track.style.top=(h/2-26)+'px';
+    track.style.transformOrigin=`${x-rowLeft}px 26px`;track.style.transform=`scale(${values.icon})`;
+    [...track.children].forEach((child,i)=>child.classList.toggle('active',i===nearest(x)));
     const mask=`radial-gradient(ellipse ${w/2}px ${h/2}px at ${x-rowLeft}px 26px,transparent 98%,#000 100%)`;
     row.style.maskImage=mask;row.style.webkitMaskImage=mask;
     const stretch=clamp(values.stretch,-12,12);
