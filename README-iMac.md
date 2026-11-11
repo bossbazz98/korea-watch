@@ -1,6 +1,8 @@
 # Korea Watch — รุ่นปรับปรุงสำหรับ iMac
 
-รุ่นภาษาทั้งระบบและปุ่มหน้าอ่านข่าว: ดู [ขั้นตอนอัปเดตล่าสุด](docs/system-language-update.md) ซึ่งต้อง deploy rules ก่อน Hosting และใช้ worker จาก branch ใหม่ด้วย
+รุ่นหมวดข่าว ฟอนต์ และเลนส์แถบเมนู: ดู [ขั้นตอนอัปเดตหน้าจอล่าสุด](docs/topic-pills-and-lens-update.md) ซึ่ง deploy เฉพาะ Hosting
+
+คู่มือระบบภาษาและปุ่มหน้าอ่านข่าว: ดู [ขั้นตอนอัปเดตระบบภาษา](docs/system-language-update.md) สำหรับการอัปเดต rules และ worker
 
 เริ่มที่ไฟล์นี้ คู่มือติดตั้งเดิมอธิบายโครงสร้างรุ่นก่อนและไม่ได้ครอบคลุม Anonymous Auth หรือ rules รุ่นใหม่
 

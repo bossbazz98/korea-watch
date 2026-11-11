@@ -1,25 +1,22 @@
-// A spring-driven optical lens. Only the original three buttons are interactive.
+// A neutral spring-driven lens magnifies the three real buttons without filtered copies.
 export function attachLiquidTabs({bar,onSelect}) {
   const lens=bar.querySelector('.tab-lens'),buttons=[...bar.querySelectorAll('.tab')];
   lens.classList.remove('glass');
-  const row=document.createElement('div');row.className='tab-real-row';buttons.forEach(b=>row.append(b));bar.append(row);
-  lens.innerHTML='<span class="lens-surface"></span><span class="lens-optics" aria-hidden="true"></span><span class="lens-rim"></span><span class="lens-border"></span>';
-  // Keep color on glyph edges instead of stacking full tinted compositing layers.
-  const optics=lens.querySelector('.lens-optics'),plane=document.createElement('span'),track=document.createElement('span');
-  plane.className='lens-plane lens-main';track.className='lens-copy-track';plane.append(track);optics.append(plane);
+  const row=document.createElement('div');row.className='tab-real-row';
+  const content=buttons.map(button=>{const span=document.createElement('span');span.className='tab-content';span.append(...button.childNodes);button.append(span);row.append(button);return span});bar.append(row);
+  // Avoid the nested masks and colored filters that were active during the
+  // recorded iPhone artifact. Keep a single neutral surface and real glyphs.
+  lens.innerHTML='<span class="lens-surface"></span><span class="lens-border"></span>';
+  const surface=lens.querySelector('.lens-surface');
   const reduced=matchMedia('(prefers-reduced-motion: reduce)'),clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
-  const values={x:0,w:125,h:52,surface:1,milk:0,icon:1,hold:0,stretch:0};
+  const values={x:0,w:125,h:52,surface:1,icon:1,hold:0,stretch:0};
   const velocity=Object.fromEntries(Object.keys(values).map(k=>[k,0]));
-  let targets={...values},frame=0,previous=0,pointer=null,sequence=null,visible=false,disposed=false,signature='',suppressed=0;
+  let targets={...values},frame=0,previous=0,pointer=null,sequence=null,visible=false,disposed=false,suppressed=0;
   let width=353,ratio=1,rowWidth=330,rowLeft=11.5,centers=[66.5,176.5,286.5];
   const selected=()=>Math.max(0,buttons.findIndex(b=>b.getAttribute('aria-current')==='page'));
   const nearest=x=>centers.reduce((best,c,i)=>Math.abs(c-x)<Math.abs(centers[best]-x)?i:best,0);
   const measure=()=>{width=bar.clientWidth;ratio=width/353;rowWidth=330*ratio;rowLeft=(width-rowWidth)/2;centers=[0,1,2].map(i=>rowLeft+(i+.5)*rowWidth/3);row.style.width=rowWidth+'px';row.style.left=rowLeft+'px'};
-  const copyLabels=()=>{
-    const next=buttons.map(b=>b.innerHTML).join('|');if(next===signature)return;signature=next;
-    track.innerHTML=buttons.map(b=>`<span class="lens-tab">${b.innerHTML.replace(/\sid="[^"]*"/g,'')}</span>`).join('');track.style.width=rowWidth+'px';
-  };
-  const rest=()=>({x:centers[selected()],w:125*ratio,h:52,surface:1,milk:0,icon:1,hold:0,stretch:0});
+  const rest=()=>({x:centers[selected()],w:125*ratio,h:52,surface:1,icon:1,hold:0,stretch:0});
   const setState=state=>{bar.dataset.lensPhase=state};
   const paint=()=>{
     const speed=Math.abs(velocity.x),shrink=Math.min(.26,speed/2600),held=pointer?(pointer.engaged||performance.now()-pointer.started>=80):sequence?.kind==='release';
@@ -27,16 +24,15 @@ export function attachLiquidTabs({bar,onSelect}) {
     const h=held?Math.max(1,values.h*(1+shrink*.25)):clamp(values.h*(1+shrink*.25),1,56/(1+Math.max(0,values.hold)*.03));
     const x=held?values.x:clamp(values.x,3+w/2,width-3-w/2),y=31;
     lens.style.width=w+'px';lens.style.height=h+'px';lens.style.transform=`translate3d(${x-w/2}px,${y-h/2}px,0)`;
-    const dark=document.documentElement.dataset.theme!=='light',rgb=dark?'54,58,67':'236,236,239';
-    lens.querySelector('.lens-surface').style.cssText=`background:rgba(${rgb},${clamp(values.surface,0,1)});backdrop-filter:blur(${Math.max(0,values.milk)*10}px);-webkit-backdrop-filter:blur(${Math.max(0,values.milk)*10}px)`;
+    surface.style.background=`rgba(var(--lens-rgb),${clamp(values.surface,0,1)})`;
     const pressed=!!pointer?.engaged;
     lens.style.setProperty('--lens-outline',pressed?'1':'0');
-    plane.style.filter=`blur(${Math.max(0,values.milk)*.6}px)`;
-    track.style.width=rowWidth+'px';track.style.left=(rowLeft-x+w/2)+'px';track.style.top=(h/2-26)+'px';
-    track.style.transformOrigin=`${x-rowLeft}px 26px`;track.style.transform=`scale(${values.icon})`;
-    [...track.children].forEach((child,i)=>child.classList.toggle('active',i===nearest(x)));
-    const mask=`radial-gradient(ellipse ${w/2}px ${h/2}px at ${x-rowLeft}px 26px,transparent 98%,#000 100%)`;
-    row.style.maskImage=mask;row.style.webkitMaskImage=mask;
+    const closest=nearest(x);
+    content.forEach((element,i)=>{
+      const influence=clamp(1-Math.abs(centers[i]-x)/(w/2+24),0,1);
+      element.style.transform=`scale(${1+(values.icon-1)*influence})`;
+      buttons[i].classList.toggle('lens-nearest',i===closest);
+    });
     const stretch=clamp(values.stretch,-12,12);
     bar.style.setProperty('--bar-scale-x',String(1+values.hold*.035+Math.abs(stretch)/width));
     bar.style.setProperty('--bar-scale-y',String(1+values.hold*.03));
@@ -47,21 +43,21 @@ export function attachLiquidTabs({bar,onSelect}) {
       const elapsed=time-pointer.started;
       if(pointer.dragging||elapsed>=170){
         pointer.engaged=true;bar.classList.add('is-engaged');const fast=pointer.dragging&&Math.abs(velocity.x)>240;
-        targets={...targets,w:(fast?164:152)*ratio,h:fast?58:76,surface:0,milk:0,icon:fast?1.1:1.2,hold:1};setState(fast?'travel':'glass');
-      }else if(elapsed>=80){targets={...targets,w:138*ratio,h:60,surface:.72,milk:1,icon:1.06,hold:.12};setState('milky')}
+        targets={...targets,w:(fast?164:152)*ratio,h:fast?58:76,surface:0,icon:fast?1.1:1.2,hold:1};setState(fast?'travel':'glass');
+      }else if(elapsed>=80){targets={...targets,w:138*ratio,h:60,surface:.72,icon:1.06,hold:.12};setState('milky')}
       return true;
     }
     if(!sequence)return false;
     const elapsed=time-sequence.started;
     if(sequence.kind==='release'){
-      if(elapsed<110){targets={...targets,w:152*ratio,h:76,surface:0,milk:0,icon:1.2,hold:1};setState('glass')}
-      else if(elapsed<260){targets={...targets,w:138*ratio,h:60,surface:.72,milk:1,icon:1.06,hold:0};setState('milky')}
+      if(elapsed<110){targets={...targets,w:152*ratio,h:76,surface:0,icon:1.2,hold:1};setState('glass')}
+      else if(elapsed<260){targets={...targets,w:138*ratio,h:60,surface:.72,icon:1.06,hold:0};setState('milky')}
       else{targets=rest();sequence=null;setState('rest')}
     }else{
       const milkAt=sequence.same?240:330,restAt=sequence.same?380:470;
-      if(elapsed<150){targets={...targets,w:142*ratio,h:50,surface:0,milk:0,icon:1,hold:0};setState('travel')}
-      else if(elapsed<milkAt){targets={...targets,w:128*ratio,h:56,surface:0,milk:0,icon:1.1,hold:0};setState('glass')}
-      else if(elapsed<restAt){targets={...targets,w:138*ratio,h:56,surface:.72,milk:1,icon:1.06,hold:0};setState('milky')}
+      if(elapsed<150){targets={...targets,w:142*ratio,h:50,surface:0,icon:1,hold:0};setState('travel')}
+      else if(elapsed<milkAt){targets={...targets,w:128*ratio,h:56,surface:0,icon:1.1,hold:0};setState('glass')}
+      else if(elapsed<restAt){targets={...targets,w:138*ratio,h:56,surface:.72,icon:1.06,hold:0};setState('milky')}
       else{targets=rest();sequence=null;setState('rest')}
     }
     return !!sequence;
@@ -84,7 +80,7 @@ export function attachLiquidTabs({bar,onSelect}) {
   const cancel=()=>{const gesture=pointer;pointer=null;releaseCapture(gesture);sequence=null;targets=rest();bar.classList.remove('is-engaged');bar.dataset.lensState='settling';setState('rest');animate()};
   const sync=({instant=false}={})=>{
     if(disposed)return;if(bar.hidden){cancel();visible=false;cancelAnimationFrame(frame);frame=0;return}
-    measure();copyLabels();if(!pointer)targets.x=centers[selected()];
+    measure();if(!pointer)targets.x=centers[selected()];
     if(!visible||instant||reduced.matches){sequence=null;targets=rest();Object.assign(values,targets);Object.keys(velocity).forEach(k=>velocity[k]=0);paint();bar.dataset.lensState='idle';setState('rest')}else animate();visible=true;
   };
   const local=event=>{const r=bar.getBoundingClientRect();return (event.clientX-r.left)/r.width*width};

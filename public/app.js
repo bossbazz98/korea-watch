@@ -7,7 +7,7 @@ import { openShareMenu } from "./share-news.js";
 import { UI_COPY, CATEGORY_KO } from "./ui-copy.js";
 import { watchAppResume } from "./app-lifecycle.js";
 import { attachSlidingSegments } from "./segmented-controls.js";
-import { attachLiquidTabs, attachDockViewport } from "./liquid-tabs.js";
+import { attachLiquidTabs, attachDockViewport } from "./liquid-tabs.js?v=20261112-neutral-lens";
 // Korea Watch: หน้าแอป (อ่านข่าวจาก Firestore, ตั้งค่าแจ้งเตือน, ติดตั้งแอป)
 const SDK = "/vendor/firebase/";
 const CFG = self.KW_CONFIG || {};
@@ -208,8 +208,8 @@ function render() {
   updDots(); updHint();
   if (currentView === "saved") renderSaved();
   const counts = {}, crit = {}; all.forEach(n => cats(n).forEach(c => { counts[c] = (counts[c] || 0) + 1; if (n.level === "critical") crit[c] = 1 }));
-  const tiles = [`<button class="tile" data-cat="all" aria-pressed="${cat === "all"}"><span class="l">${t("allcat")}</span><span class="n">${all.length}</span></button>`];
-  for (const k in CATS) tiles.push(`<button class="tile ${crit[k] ? "has-crit" : ""}" data-cat="${k}" aria-pressed="${cat === k}"><span class="l">${categoryLabel(k)}</span><span class="n">${counts[k] || 0}</span></button>`);
+  const tiles = [`<button class="tile topic-pill" data-cat="all" aria-pressed="${cat === "all"}"><span class="l">${t("allcat")}</span><span class="n">${all.length}</span></button>`];
+  for (const k in CATS) tiles.push(`<button class="tile topic-pill ${crit[k] ? "has-crit" : ""}" data-cat="${k}" aria-pressed="${cat === k}"><span class="l">${categoryLabel(k)}</span><span class="n">${counts[k] || 0}</span></button>`);
   const split=Math.ceil(tiles.length/2);setHTML($("tiles"),`<div class="topic-row">${tiles.slice(0,split).join('')}</div><div class="topic-row">${tiles.slice(split).join('')}</div>`);updHint();
   const list = cat === "all" ? all : all.filter(n => cats(n).includes(cat));
   $("t-filter").textContent = cat === "all" ? (loaded ? t("count")(all.length) : "") : categoryLabel(cat);
@@ -323,7 +323,8 @@ function renderSaved() {
   $('saved-search-toggle').setAttribute('aria-label',t('savedSearch'));$('saved-search').placeholder=t('savedSearch');$('saved-search').setAttribute('aria-label',t('savedSearch'));
   const available=Object.keys(CATS).filter(key=>entries.some(({article:n})=>cats(n).includes(key)));
   if(!available.includes(savedCategory))savedCategory='all';
-  const filters=`<div class="saved-filters" aria-label="${t('topics')}">${['all',...available].map(key=>`<button data-saved-filter="${key}" aria-pressed="${savedCategory===key}">${key==='all'?t('allcat'):esc(categoryLabel(key))}</button>`).join('')}</div>`;
+  const counts={all:entries.length};for(const {article} of entries)for(const key of new Set(cats(article)))counts[key]=(counts[key]||0)+1;
+  const filters=`<div class="saved-filters" role="group" aria-label="${t('topics')}">${['all',...available].map(key=>{const label=key==='all'?t('allcat'):categoryLabel(key);return `<button class="topic-pill" data-saved-filter="${key}" aria-pressed="${savedCategory===key}" aria-label="${esc(label+', '+t('count')(counts[key]||0))}"><span class="l">${esc(label)}</span><span class="n" aria-hidden="true">${counts[key]||0}</span></button>`}).join('')}</div>`;
   const query=savedQuery.trim().toLocaleLowerCase(),filtered=entries.filter(({article:n})=>(savedCategory==='all'||cats(n).includes(savedCategory))&&(!query||[headlineOf(n),n.titleKo,n.source,...cats(n).map(categoryLabel)].join(' ').toLocaleLowerCase().includes(query))).sort((a,b)=>(ts(b.article)||b.savedAt)-(ts(a.article)||a.savedAt));
   const groups=new Map();for(const entry of filtered){const ms=ts(entry.article)||entry.savedAt,key=dateKey(ms);if(!groups.has(key))groups.set(key,{ms,entries:[]});groups.get(key).entries.push(entry)}
   const rows=[...groups.values()].map(group=>`<section class="saved-day-group"><h2 class="saved-day">${esc(savedDayLabel(group.ms))}</h2><div class="saved-rows">${group.entries.map(({id,article:n,savedAt})=>`<div class="saved-item-wrap"><button class="delete-saved" data-delete="${esc(id)}" aria-label="${t('deleteSaved')}: ${esc(headlineOf(n))}">${uiIcon('trash')}${t('delete')}</button><button class="saved-row" data-id="${esc(id)}">${picture(n)}<span><span class="chips">${savedBadges(n)}</span><h3>${esc(headlineOf(n))}</h3><time class="saved-at" datetime="${esc(n.publishedAt)}">${uiIcon('clock')}<span>${esc(storyDateTime(ts(n)||savedAt))}</span></time></span></button></div>`).join('')}</div></section>`).join('');
