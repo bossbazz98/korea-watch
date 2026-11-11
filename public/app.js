@@ -7,7 +7,7 @@ import { openShareMenu } from "./share-news.js";
 import { UI_COPY, CATEGORY_KO } from "./ui-copy.js";
 import { watchAppResume } from "./app-lifecycle.js";
 import { attachSlidingSegments } from "./segmented-controls.js";
-import { attachLiquidTabs, attachDockViewport } from "./liquid-tabs.js?v=20261112-neutral-lens";
+import { attachLiquidTabs, attachDockViewport } from "./liquid-tabs.js?v=20261112-first-paint";
 // Korea Watch: หน้าแอป (อ่านข่าวจาก Firestore, ตั้งค่าแจ้งเตือน, ติดตั้งแอป)
 const SDK = "/vendor/firebase/";
 const CFG = self.KW_CONFIG || {};

@@ -32,7 +32,8 @@
 :root { --dock-height:62px;--dock-control-height:52px; }
 #app-tabs { --lens-rgb:54,58,67;position:fixed;display:block;width:353px;max-width:calc(100% - 24px);height:62px;min-height:62px;max-height:62px;padding:0;border:0;border-radius:999px;overflow:visible;background:rgba(34,37,44,.72);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);box-shadow:inset 0 1px 0 rgba(255,255,255,.10),0 10px 28px rgba(0,0,0,.45);transform:translate(calc(-50% + var(--bar-shift,0px)),var(--bar-lift,0px)) scale(var(--bar-scale-x,1),var(--bar-scale-y,1));touch-action:none;isolation:isolate; }
 :root[data-theme="light"] #app-tabs { --lens-rgb:236,236,239;background:rgba(255,255,255,.82);box-shadow:inset 0 0 0 1px rgba(0,0,0,.11),0 10px 28px rgba(0,0,0,.12); }
-.tab-real-row { position:absolute;top:5px;height:52px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0; }
+/* First paint matches the 330px row and 125px lens inside a 353px dock. */
+.tab-real-row { position:absolute;left:3.2577903683%;width:93.4844192634%;top:5px;height:52px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0; }
 .tab-real-row { z-index:3; }
 #app-tabs .tab { height:52px;min-height:52px;max-height:52px;padding:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;color:var(--muted);font:500 11.5px/1.2 var(--f-head);border:0;background:transparent;white-space:nowrap;touch-action:none; }
 #app-tabs .tab.active { color:var(--fg);font-weight:700; }
@@ -41,8 +42,9 @@
 #app-tabs .tab.active svg>circle { fill:var(--bg); }
 #nav-home::after { content:"";position:absolute;left:calc(50% + 7px);top:3px;width:8px;height:8px;border-radius:50%;background:#ff2d55; }
 .tab-content { display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;transform-origin:center; }
-#app-tabs .tab-lens { z-index:2;border:0;border-radius:999px;box-shadow:none;background:transparent;backdrop-filter:none;-webkit-backdrop-filter:none;overflow:visible;transition:none;will-change:transform; }
+#app-tabs .tab-lens { width:35.4107648725%;height:52px;transform:translate3d(3.2%,5px,0);z-index:2;border:0;border-radius:999px;box-shadow:none;background:transparent;backdrop-filter:none;-webkit-backdrop-filter:none;overflow:visible;transition:none;will-change:transform; }
 .lens-surface,.lens-border { position:absolute;inset:0;border-radius:inherit;pointer-events:none; }
+.lens-surface { background:rgb(var(--lens-rgb)); }
 /* A neutral capsule stroke stays visible only during a hold or drag. */
 .lens-border { z-index:4;border:1.25px solid rgba(255,255,255,.94);box-shadow:0 0 0 1px rgba(0,0,0,.58),inset 0 1px 0 rgba(255,255,255,.5),0 2px 7px rgba(0,0,0,.16);opacity:var(--lens-outline,0); }
 :root[data-theme="light"] .lens-border { border-color:rgba(255,255,255,.98);box-shadow:0 0 0 1px rgba(43,49,60,.62),inset 0 1px 0 rgba(255,255,255,.8),0 2px 7px rgba(0,0,0,.12); }
