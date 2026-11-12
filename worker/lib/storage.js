@@ -1,6 +1,6 @@
 const { retainItems } = require('./scheduler');
 // Publish only reader-visible items; retain the translation backlog privately.
-const visible = i => i.translated === true || (i.categories || []).includes('korwar');
+const visible = i => !i.categoryReview && (i.translated === true || (i.categories || []).includes('korwar'));
 function prepare(items, maxBytes = 800000, maxItems = 250) {
   const ordered = retainItems(items, maxItems);
   const fit = list => { while (list.length && Buffer.byteLength(JSON.stringify(list)) > maxBytes) list.pop(); return list; };

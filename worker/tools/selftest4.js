@@ -18,8 +18,8 @@ const web = async (url, opt = {}) => {
     return res(`)]}'\n\n${JSON.stringify([["wrb.fr", "Fbv4je", inner, null, null, null, "generic"], ["di", 12]])}\n\n25\n[["e",4,null,null,123]]`);
   }
   if (url === REAL) return res(`<html><head><meta content="https://img.yna.co.kr/photo/AKR1.jpg?a=1&amp;b=2" property="og:image"/></head></html>`, { url: REAL });
-  if (url === "https://broken.example/news") return res("", { status: 403 });
-  if (url === "https://nometa.example/news") return res("<html><head><title>x</title></head></html>");
+  if (url === "https://news.kbs.co.kr/broken") return res("", { status: 403 });
+  if (url === "https://news.sbs.co.kr/nometa") return res("<html><head><title>x</title></head></html>");
   throw new Error("unexpected " + url);
 };
 
@@ -42,7 +42,7 @@ const web = async (url, opt = {}) => {
   assert.strictEqual(a.url, REAL); assert.strictEqual(a.image, "https://img.yna.co.kr/photo/AKR1.jpg?a=1&b=2");
 
   // ภาพที่แนบมากับ RSS
-  const xml = `<rss xmlns:media="http://search.yahoo.com/mrss/"><channel><item><title>북한 미사일 발사</title><link>https://www.yonhapnewstv.co.kr/news/1</link><pubDate>${new Date().toUTCString()}</pubDate><description>설명</description><media:content url="http://img.yonhapnewstv.co.kr/1.jpg" medium="image"/></item></channel></rss>`;
+  const xml = `<rss xmlns:media="http://search.yahoo.com/mrss/"><channel><item><title>북한 미사일 발사</title><link>https://www.yna.co.kr/news/1</link><pubDate>${new Date().toUTCString()}</pubDate><description>설명</description><media:content url="http://img.yonhapnewstv.co.kr/1.jpg" medium="image"/></item></channel></rss>`;
   const items = parseFeed(xml, { id: "yonhaptv", keywordOnly: true, take: 5 }, Date.now());
   assert.strictEqual(items[0].image, "https://img.yonhapnewstv.co.kr/1.jpg", "media:content picked, upgraded to https");
 
@@ -51,12 +51,12 @@ const web = async (url, opt = {}) => {
   const ref = p => ({ async get() { const d = data.get(p); return { exists: !!d, data: () => JSON.parse(JSON.stringify(d)) } }, async set(v) { data.set(p, JSON.parse(JSON.stringify(v))) }, async update() { }, async delete() { } });
   const db = { doc: ref, collection: () => ({ where() { return this }, limit() { return this }, async get() { return { empty: true, docs: [] } } }) };
   const now = Date.now();
-  const base = { titleKo: "x", title: { th: "ก", en: "a" }, summary: {th:"สรุปข่าว"}, body: {}, categories: ["war"], level: "normal", translated: true, publishedAt: new Date(now - 6e5).toISOString(), source: "연합뉴스" };
+  const base = { titleKo: "우크라이나 전쟁 휴전 협상", publisherUrl:"https://www.yna.co.kr", title: { th: "ก", en: "a" }, summary: {th:"สรุปข่าว"}, body: {}, categories: ["war"], level: "normal", translated: true, publishedAt: new Date(now - 6e5).toISOString(), source: "연합뉴스" };
   data.set("meta/feed", { v: 8, items: [
     { ...base, id: "g", sourceUrl: GLINK, links: [{ label: "연합뉴스", url: GLINK }] },
-    { ...base, id: "b", sourceUrl: "https://broken.example/news", links: [] },
-    { ...base, id: "n", sourceUrl: "https://nometa.example/news", links: [], imgTries: 2 },
-    { ...base, id: "done", sourceUrl: "https://broken.example/news", links: [], imgTries: 3, imgLastTry: now - 3600e3 },
+    { ...base, id: "b", sourceUrl: "https://news.kbs.co.kr/broken", links: [] },
+    { ...base, id: "n", sourceUrl: "https://news.sbs.co.kr/nometa", links: [], imgTries: 2 },
+    { ...base, id: "done", sourceUrl: "https://news.kbs.co.kr/broken", links: [], imgTries: 3, imgLastTry: now - 3600e3 },
     { ...base, id: "retry12h", sourceUrl: GLINK, links: [], imgTries: 3, imgLastTry: now - 13 * 3600e3 }
   ] });
   const fetchAll = async (url, opt) => url.includes("news.google.com/rss/search") || url.includes("rss?hl") || url.includes("yonhapnewstv") ? res("<rss><channel></channel></rss>") : web(url, opt);

@@ -10,7 +10,7 @@ function dbFake() {
  const doc=p=>({path:p,id:p.split('/').pop(),async get(){return{exists:data.has(p),data:()=>structuredClone(data.get(p))}},async set(v){data.set(p,structuredClone(v))},async delete(){data.delete(p)},async update(v){data.set(p,{...data.get(p),...v})}});
  return {data,doc,set failCommit(v){failCommit=v},batch(){const writes=[];return{set(r,v){writes.push([r.path,v])},async commit(){if(failCommit)throw Error('storage unavailable');for(const[p,v]of writes)data.set(p,structuredClone(v))}}},collection(col){const filters=[];return{where(k,op,v){filters.push([k,v]);return this},limit(){return this},async get(){const docs=[...data].filter(([p,v])=>p.startsWith(col+'/')&&filters.every(([k,x])=>v[k]===x)).map(([p])=>({id:p.split('/').pop(),ref:doc(p),data:()=>structuredClone(data.get(p))}));return{docs,empty:!docs.length}}}}};
 }
-const story=(id,translated=true)=>({id,titleKo:'제목 '+id,title:{th:'ข่าว '+id},summary:{th:'สรุป'},body:{th:['เนื้อหา']},categories:['oil'],level:'high',translated,publishedAt:new Date().toISOString()});
+const story=(id,translated=true)=>({id,titleKo:'국제 유가 상승 '+id,sourceUrl:'https://www.yna.co.kr/'+id,title:{th:'ข่าว '+id},summary:{th:'สรุป'},body:{th:['เนื้อหา']},categories:['oil'],level:'high',translated,publishedAt:new Date().toISOString()});
 const log={warn(){},log(){}};
 test('empty HTTP 200 completion falls back to another model without losing quota accounting',async()=>{
  const {translateTitles}=require('../lib/translate');
@@ -102,7 +102,7 @@ function translatedNewsFetch(transform = value => value) {
 }
 test('a large Korean backlog cannot consume all translation slots; other categories publish across runs',async()=>{
  const db=dbFake(),now=Date.now(),categories=['war','disease','tech','thai','crypto','oil','fx','wage','foreign','hot','president'];
- const titles={korwar:'남북 군사회담 제안',war:'우크라이나 전쟁 교전',disease:'신종 바이러스 확산',tech:'AI 반도체 신기술',thai:'태국대사관 축제',crypto:'비트코인 가상자산',oil:'국제유가 급등',fx:'원화 환율',wage:'한국 최저임금',foreign:'고용허가제 외국인 근로자',hot:'인기 배우 결혼 소식',president:'한국 대통령 발표'};
+ const titles={korwar:'남북 군사회담 제안',war:'우크라이나 전쟁 교전',disease:'신종 바이러스 확산',tech:'AI 반도체 신기술',thai:'주한 태국대사관 축제',crypto:'비트코인 가상자산',oil:'국제유가 급등',fx:'원화 환율',wage:'한국 최저임금',foreign:'고용허가제 외국인 근로자',hot:'인기 배우 결혼 소식',president:'한국 대통령 발표'};
  const item=(id,category)=>({id,titleKo:titles[category]+' '+id,title:{ko:'기사 '+id},summary:{ko:'한국어 요약'},body:{},translated:false,attempts:0,categories:[category],level:'normal',publishedAt:new Date(now-600000).toISOString(),addedAt:new Date(now-600000).toISOString(),source:'Fixture',sourceUrl:'https://www.yna.co.kr/'+id,publishers:category==='hot'?['https://www.yna.co.kr','https://news.sbs.co.kr','https://news.kbs.co.kr']:[],links:[]});
  db.data.set('meta/feed',{v:8,items:[...Array.from({length:80},(_,i)=>item('kw'+i,'korwar')),...categories.map((category,i)=>item('other'+i,category))]});
  const options={db,messaging:{},appUrl:'https://example.test',groqKey:'fixture',fetchImpl:translatedNewsFetch(),log,waitMs:0,budgetMs:60000,imgBudgetMs:2000,watchEveryMs:120000};
@@ -116,8 +116,8 @@ test('a large Korean backlog cannot consume all translation slots; other categor
 });
 test('diagnostics distinguish AI category reassignment from retry cooldown',async()=>{
  const db=dbFake(),now=Date.now();
- const tech={...story('tech',false),sourceUrl:'https://www.yna.co.kr/tech',source:'Fixture',categories:['tech']};
- const foreign={...story('foreign',false),categories:['foreign'],attempts:4,lastTry:now};
+ const tech={...story('tech',false),sourceUrl:'https://www.yna.co.kr/tech',source:'Fixture',titleKo:'인공지능 AI 암호화폐 블록체인 발표',categories:['tech']};
+ const foreign={...story('foreign',false),categories:['foreign'],titleKo:'한국 외국인 노동자 근무 개선',attempts:4,lastTry:now};
  db.data.set('meta/feed',{v:10,items:[tech,foreign]});
  const stat=await runOnce({db,messaging:{},appUrl:'https://example.test',groqKey:'fixture',fetchImpl:translatedNewsFetch(r=>({...r,categories:['crypto']})),log,now,budgetMs:60000,imgBudgetMs:2000,waitMs:0});
  assert.equal(stat.translationByCategory.tech.attempted,1);
@@ -130,7 +130,7 @@ test('diagnostics distinguish AI category reassignment from retry cooldown',asyn
 });
 test('legacy Thai headline with Korean body is requeued and repaired without a duplicate alert',async()=>{
  const db=dbFake(),now=Date.now();
- const old={...story('legacy'),title:{th:'หัวข้อแปลแล้ว'},summary:{th:'한국어 요약 뉴스'},body:{th:['한국어 기사 본문']},titleKo:'원문 뉴스',sourceUrl:'https://example.test/legacy',source:'Fixture',links:[]};
+ const old={...story('legacy'),title:{th:'หัวข้อแปลแล้ว'},summary:{th:'한국어 요약 뉴스'},body:{th:['한국어 기사 본문']},titleKo:'국제 유가 상승',sourceUrl:'https://www.yna.co.kr/legacy',source:'Fixture',links:[]};
  db.data.set('meta/feed',{v:8,items:[old]});
  await runOnce({db,messaging:{},appUrl:'https://example.test',fetchImpl:translatedNewsFetch(),log,now,budgetMs:1000,imgBudgetMs:0});
  assert.equal(db.data.get('meta/pending').items[0].translated,false);
@@ -144,7 +144,7 @@ test('nonincident Korean backlog cannot spend the fast lane before tech/foreign 
  const pending=(id,titleKo,categories)=>({...story(id,false),titleKo,categories,sourceUrl,publishedAt:new Date(now-2*86400000).toISOString(),attempts:4,lastTry:now-4*3600000});
  db.data.set('meta/feed',{v:9,items:[{...story('published-korean'),titleKo:'남북 군사회담 재개',categories:['korwar']},...Array.from({length:40},(_,i)=>pending('politics'+i,'김여정 남북 군사회담 '+i,['korwar']))]});
  db.data.set('meta/pending',{v:9,items:[pending('tech','인공지능 AI 반도체 신기술',['tech']),pending('foreign','외국인 근로자 고용허가제 고용 환경 개선',['foreign'])]});
- const requests=[],base=translatedNewsFetch(r=>({...r,categories:['crypto']}));
+ const requests=[],base=translatedNewsFetch();
  let limited=false;
  const fetchImpl=async(url,opt={})=>{
   if(String(url).includes('api.groq.com')) {
@@ -199,4 +199,34 @@ test('repeat ingestion adds verified trending coverage to an existing translated
  const saved=db.data.get('meta/feed').items;
  assert.equal(stat.added,0);assert.equal(saved.length,1);assert(saved[0].categories.includes('hot'));
  assert.equal(require('../../public/category-policy').publisherKeys(saved[0]).length,3);assert.equal(pushes,0);
+});
+test('an unsupported AI label remains private for review and a later valid classification can publish it',async()=>{
+ const db=dbFake(),now=Date.now(),pending={...story('review',false),titleKo:'한국 인공지능 반도체 신기술 발표',categories:['tech']};
+ db.data.set('meta/pending',{v:10,items:[pending]});
+ const opts={db,messaging:{},appUrl:'https://example.test',groqKey:'fixture',log,now,budgetMs:60000,imgBudgetMs:2000,waitMs:0};
+ const bad=await runOnce({...opts,fetchImpl:translatedNewsFetch(r=>({...r,categories:['crypto']}))});
+ assert.equal(bad.categoryReviewCount,1);
+ assert.equal(db.data.get('meta/feed').items.length,0);
+ const held=db.data.get('meta/pending').items[0];
+ assert.equal(held.translated,false);assert.equal(held.categoryReview.reasons.crypto,'source-scope-not-proven');
+ const good=await runOnce({...opts,now:now+300000,fetchImpl:translatedNewsFetch()});
+ assert.equal(good.categoryReviewCount,0);
+ assert.deepEqual(db.data.get('meta/feed').items[0].categories,['tech']);
+ assert(!db.data.get('meta/feed').items[0].categoryReview);
+});
+test('a retired publisher cannot survive in the feed or private translation queue',async()=>{
+ const db=dbFake();
+ db.data.set('meta/feed',{v:10,items:[{...story('outside'),sourceUrl:'https://www.mbn.co.kr/a'}]});
+ db.data.set('meta/pending',{v:10,items:[{...story('pending-outside',false),sourceUrl:'https://www.edaily.co.kr/a'}]});
+ const stat=await runOnce({db,messaging:{},appUrl:'https://example.test',fetchImpl:translatedNewsFetch(),log,budgetMs:1000,imgBudgetMs:0});
+ assert.equal(stat.excludedPublishers,2);
+ assert.equal(db.data.get('meta/feed').items.length,0);assert.equal(db.data.get('meta/pending').items.length,0);
+});
+test('an unsupported enrichment label cannot hide an already validated complete story',async()=>{
+ const db=dbFake(),old={...story('enrich'),titleKo:'국제 유가 상승',body:{th:['เนื้อหาข่าว']},rich:false};
+ db.data.set('meta/feed',{v:10,items:[old]});
+ await runOnce({db,messaging:{},appUrl:'https://example.test',groqKey:'fixture',fetchImpl:translatedNewsFetch(r=>({...r,categories:['crypto']})),log,budgetMs:60000,imgBudgetMs:2000,waitMs:0});
+ const retained=db.data.get('meta/feed').items[0];
+ assert.equal(retained.id,'enrich');assert.equal(retained.translated,true);
+ assert.deepEqual(retained.categories,['oil']);assert(!retained.categoryReview);
 });

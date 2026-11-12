@@ -52,3 +52,29 @@ test('RSS accepts only Korean publishers and preserves Google relay provenance',
  assert.equal(accepted.length,1);assert.equal(accepted[0].publisherUrl,'https://www.yna.co.kr');assert(accepted[0].emergency);
  assert.equal(parseFeed(xml('https://reuters.com'),{hint:'korwar'},Date.now()).length,0);
 });
+test('only the 24 requested newsrooms and their verified domain aliases are permitted',()=>{
+ assert.equal(policy.PUBLISHERS.length,24);
+ for(const p of policy.PUBLISHERS)for(const d of p.domains){
+  assert(policy.isKoreanPublisher('https://'+d+'/news'));
+  assert(!policy.isKoreanPublisher('https://'+d+'.evil.test/news'));
+  assert(!policy.isKoreanPublisher('https://evil.test/'+d));
+ }
+ for(const d of ['yonhapnewstv.co.kr','seoul.co.kr','mbn.co.kr','tvchosun.com','nocutnews.co.kr','ohmynews.com','pressian.com','edaily.co.kr','mt.co.kr','reuters.com','joins.com'])
+  assert(!policy.trusted({publisherUrl:'https://'+d}),d);
+ assert.equal(policy.publisherKey('https://en.yna.co.kr/a'),policy.publisherKey('https://www.yna.co.kr/b'));
+ assert.equal(policy.publisherKey('https://koreajoongangdaily.joins.com/a'),policy.publisherKey('https://www.joongang.co.kr/b'));
+ assert(!policy.trusted({publisherUrl:'https://www.yna.co.kr',sourceUrl:'https://reuters.com/a'}));
+});
+test('English desks use the same five confirmed incident classes without changing the threshold',()=>{
+ const yes=[
+  ['North Korea launches ballistic missile','north-launch'],
+  ['North Korea has tested new rockets','north-launch'],
+  ['North Korea attacks South Korea','north-attacks-south'],
+  ['South Korea is shelled','south-attacked'],
+  ['Missile falls near South Korea','missile-near-south'],
+  ['South Korean soldier stepped on an anti-personnel mine','soldier-mine']
+ ];
+ for(const [title,reason]of yes)assert.equal(policy.incident(korean(title)),reason,title);
+ for(const title of ['North Korea plans missile launch','North Korea missile launch drills','North Korea threatens South Korea','North Korea denies it launched missiles','North Korean officials say US launched a missile','South Korea has not been attacked','North Korea missile launch anniversary','South Korea attacks North Korea'])
+  assert.equal(policy.incident(korean(title)),null,title);
+});

@@ -36,7 +36,7 @@ const rss = items => `<rss><channel>${items.map(i => `<item><title>${i.t} - ${i.
 let feeds = {
   gn_war: rss([{ t: "북한, 동해상으로 탄도미사일 발사", s: "연합뉴스", d: d(1) }]),
   gn_disease: rss([{ t: "질병관리청, 독감 유행주의보 발령", s: "YTN", d: d(2) }]),
-  gn_thai: rss([{ t: "태국 여행 인기 여행지 순위", s: "MBC", d: d(3) }])
+  gn_thai: rss([{ t: "한국 태국 여행 교류 순위", s: "MBC", d: d(3) }])
 };
 let geminiMode = "ok", geminiCalls = 0, modelsTried = [], batchSizes = [];
 function geminiReply(input) {

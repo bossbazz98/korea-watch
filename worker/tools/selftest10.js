@@ -44,7 +44,7 @@ const now = Date.now();
   const data = new Map();
   const ref = p => ({ async get() { const d = data.get(p); return { exists: !!d, data: () => JSON.parse(JSON.stringify(d)) } }, async set(v) { data.set(p, JSON.parse(JSON.stringify(v))) }, async update() { }, async delete() { data.delete(p) } });
   const db = { doc: ref, collection: () => ({ where() { return this }, limit() { return this }, async get() { return { empty: true, docs: [] } } }) };
-  data.set("meta/feed", { v: 8, items: [{ id: "kw1", titleKo: "김여정 \"美, 해킹을 우리 소행으로 오도\"", title: { ko: "김여정" }, summary: { ko: "x" }, body: {}, categories: ["korwar"], level: "normal", translated: false, attempts: 4, lastTry: now - 15 * 60e3, publishedAt: new Date(now - 3 * 3600e3).toISOString(), addedAt: new Date(now - 3 * 3600e3).toISOString(), source: "동아일보", sourceUrl: "https://donga/1", links: [] }] });
+  data.set("meta/feed", { v: 8, items: [{ id: "kw1", titleKo: "김여정 \"美, 해킹을 우리 소행으로 오도\"", title: { ko: "김여정" }, summary: { ko: "x" }, body: {}, categories: ["korwar"], level: "normal", translated: false, attempts: 4, lastTry: now - 15 * 60e3, publishedAt: new Date(now - 3 * 3600e3).toISOString(), addedAt: new Date(now - 3 * 3600e3).toISOString(), source: "동아일보", sourceUrl: "https://www.donga.com/1", links: [] }] });
   const seen = [];
   const f4 = async (url, opt) => {
     if (!/groq|github|generativelanguage/.test(url)) return { ok: true, text: async () => "<rss><channel></channel></rss>", arrayBuffer: async () => Buffer.from("") };

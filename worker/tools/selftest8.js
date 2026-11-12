@@ -56,7 +56,7 @@ const item = (id, x = {}) => ({ id, titleKo: KO[id] || "기사 " + id, title: { 
   if (!chromium || !exe || !fs.existsSync(exe)) throw new Error("Chromium required: run npx playwright install chromium");
   const pub = path.join(__dirname, "..", "..", "public");
   const srv = http.createServer((q, s) => { const f = path.join(pub, decodeURIComponent(q.url.split("?")[0]) === "/" ? "index.html" : decodeURIComponent(q.url.split("?")[0])); fs.readFile(f, (e, b) => { if (e) { s.writeHead(404); s.end(); return } s.writeHead(200, { "content-type": f.endsWith(".css") ? "text/css" : f.endsWith(".js") ? "text/javascript" : f.endsWith(".html") ? "text/html" : f.endsWith(".png") ? "image/png" : "application/octet-stream" }); s.end(b) }) }).listen(8799);
-  const feedItems = [items[0], items[4], item("noimg"), item("mid", { image: "https://img.ok/3.jpg" })];
+  const feedItems = [items[0], items[4], item("noimg"), item("mid", { image: "https://img.ok/3.jpg" })].map(n=>({...n,sourceUrl:"https://news.kbs.co.kr/"+n.id,categories:["oil"],titleKo:"국제 유가 상승 "+n.id}));
   const img = fs.readFileSync(path.join(pub, "icons", "icon-512.png"));
   const STUB = {
     "firebase-app.js": "export const initializeApp=c=>({c});",

@@ -1,8 +1,10 @@
 // แหล่งข่าวและคำค้นของแต่ละหมวด แก้ไฟล์นี้ไฟล์เดียวเพื่อเพิ่ม/ลดแหล่งข่าวหรือคำค้น
-// Google News RSS ค้นข่าวจากสำนักข่าวเกาหลีทุกเจ้า (KBS, MBC, SBS, YTN, 연합뉴스, JTBC ฯลฯ)
+// Search only the 24 selected newsrooms; RSS provenance is verified again.
+const {PUBLISHERS}=require('../public/news-policy');
+const sites=PUBLISHERS.flatMap(p=>p.domains).map(d=>'site:'+d).join(' OR ');
 
 const gn = q =>
-  `https://news.google.com/rss/search?q=${encodeURIComponent(q + " when:1d")}&hl=ko&gl=KR&ceid=KR:ko`;
+  `https://news.google.com/rss/search?q=${encodeURIComponent('('+q+') ('+sites+') when:1d')}&hl=ko&gl=KR&ceid=KR:ko`;
 
 // ลำดับในรายการนี้ = ลำดับความสำคัญเวลาเลือกข่าวไปแปล
 const CATS = {
@@ -15,7 +17,7 @@ const CATS = {
   wage: { desc: "SOUTH KOREAN wages/pay, wage law, minimum wages and minimum-wage adjustments only.", kw: ["최저임금", "최저시급"] },
   fx: { desc: "KOREAN WON only: KRW exchange rates, appreciation and depreciation. Not unrelated dollar/baht news.", kw: ["원화", "원달러", "원·달러"] },
   oil: { desc: "Oil and all energy globally and in Korea: prices, renewable energy, fuels, shortages and oversupply.", kw: ["유가", "원유", "에너지", "연료", "태양광"] },
-  thai: { desc: "Thailand, Thai people and businesses, Thai people/restaurants/embassy/events in Korea, marriage visas and E-9 visas. May overlap foreign.", kw: ["태국", "결혼비자", "E-9"] },
+  thai: { desc: "A substantive THAI-SOUTH KOREAN connection: Thai people, restaurants, embassy, events and Thai nationals in Korea. Exclude Thai domestic stories and generic E-9 or marriage visas without a Thai connection.", kw: ["태국", "결혼비자", "E-9"] },
   president: { desc: "SOUTH KOREAN president and government only. Not other countries' presidents/governments.", kw: ["대통령", "대통령실", "정부"] },
   hot: { desc: "Viral/trending stories of ANY topic covered by at least THREE independent South Korean news outlets. Use verified publishers in input; do not guess popularity.", kw: [] }
 };
@@ -36,7 +38,7 @@ const FEEDS = [
   { id: "gn_tech",      hint: "tech",      take: 12, url: gn("인공지능 OR AI 신기술 OR 반도체 OR 기술 혁신") },
   { id: "gn_thai",      hint: "thai",      take: 12, url: gn("태국 OR 주한 태국대사관 OR 한국 태국 음식점 OR 결혼 비자 OR E-9") },
   { id: "gn_immig",     hint: "foreign",   take: 15, url: gn("출입국 단속 OR 불법체류 외국인 OR 외국인 검거 OR 강제퇴거 OR 인종차별 OR 외국인 차별") },
-  { id: "gn_top",       hint: "hot",     take: 8,  url: "https://news.google.com/rss?hl=ko&gl=KR&ceid=KR:ko" },
+  { id: "gn_top",       hint: "hot",     take: 8,  url: gn("주요 뉴스 OR 속보") },
   { id: "gn_oil_fx",    hint: null,        take: 10, url: gn("국제유가 OR 휘발유 가격 OR 원달러 환율") },
   { id: "gn_foreign", hint: "foreign", take: 12, url: gn("한국 외국인 근로자 OR 고용허가제 OR 고용노동부 외국인 OR 한국 인종차별") },
   { id: "gn_wage", hint: "wage", take: 12, url: gn("한국 최저임금 OR 최저임금위원회 OR 최저시급 인상 OR 한국 임금 체불") },
@@ -52,14 +54,15 @@ const FEEDS = [
   // เก็บเฉพาะข่าวที่ตรงคำค้นของหมวดใดหมวดหนึ่ง ฟีดไหนใช้ไม่ได้จะถูกข้ามอัตโนมัติ
   // หมายเหตุ: ฟีด RSS ของสำนักข่าวอนุญาตให้ใช้ส่วนบุคคล/ไม่แสวงหากำไร
   // korwar: true = ฟีดที่ตรวจซ้ำทุก ~2 นาทีระหว่างรอบ เพื่อจับข่าวสงครามเกาหลีให้เร็วที่สุด
-  { id: "yonhaptv",     source: "연합뉴스TV", keywordOnly: true, take: 40, korwar: true, url: "http://www.yonhapnewstv.co.kr/browse/feed/" },
   { id: "yna",          source: "연합뉴스",   keywordOnly: true, take: 50, korwar: true, url: "https://www.yna.co.kr/rss/news.xml" },
   { id: "sbs_flash",    source: "SBS",        keywordOnly: true, take: 40, korwar: true, url: "https://news.sbs.co.kr/news/newsflashRssFeed.do?plink=RSSREADER" },
   { id: "sbs_society",  source: "SBS",        keywordOnly: true, take: 30, url: "https://news.sbs.co.kr/news/SectionRssFeed.do?sectionId=03&plink=RSSREADER" },
   { id: "sbs_world",    source: "SBS",        keywordOnly: true, take: 30, url: "https://news.sbs.co.kr/news/SectionRssFeed.do?sectionId=07&plink=RSSREADER" },
   { id: "sbs_economy",  source: "SBS",        keywordOnly: true, take: 30, url: "https://news.sbs.co.kr/news/SectionRssFeed.do?sectionId=02&plink=RSSREADER" },
   { id: "donga",        source: "동아일보",   keywordOnly: true, take: 40, url: "https://rss.donga.com/total.xml" },
-  { id: "khan_society", source: "경향신문",   keywordOnly: true, take: 30, url: "https://www.khan.co.kr/rss/rssdata/society.xml" }
+  // Every selected newsroom is searched, including its English reports.
+  ...PUBLISHERS.map((p,i)=>({id:'publisher_'+i,source:p.name,hint:'hot',take:8,
+    url:'https://news.google.com/rss/search?q='+encodeURIComponent('('+p.domains.map(d=>'site:'+d).join(' OR ')+') when:1d')+'&hl=en&gl=KR&ceid=KR:en'}))
 ];
 
 module.exports = { CATS, FEEDS, CAT_KEYS: Object.keys(CATS), EMERGENCY_KW };

@@ -48,8 +48,8 @@ html.pull-active{overscroll-behavior-y:none;overflow-anchor:none}.pull-space{pos
 
 /* Original app typography, with local Thai/Latin subsets for offline reading. */
 :root {
-  --f-head:"IBM Plex Sans Thai",NotoThai,"Leelawadee UI",system-ui,sans-serif;
-  --f-body:"Sarabun",NotoThai,"Leelawadee UI",system-ui,sans-serif;
+  --f-head:"Kanit",NotoThai,"Leelawadee UI",system-ui,sans-serif;
+  --f-body:"Kanit",NotoThai,"Leelawadee UI",system-ui,sans-serif;
   --dock-obstruction:0px;
   --dock-bottom:calc(max(6px,env(safe-area-inset-bottom,0px)) + var(--dock-obstruction));
 }
@@ -123,3 +123,6 @@ body,input,select { font-family:var(--f-body); }
 @media(prefers-reduced-motion:reduce) {
   .tab-lens { will-change:auto;transition:opacity 120ms ease; }
 }
+
+/* Keep long-form article reading in Sarabun. */
+.article .summary-box p,.article-body { font-family:"Sarabun",NotoThai,"Leelawadee UI",system-ui,sans-serif; }

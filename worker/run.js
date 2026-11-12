@@ -17,7 +17,7 @@ const { persist, prepare } = require("./lib/storage");
 const { balancedQueue } = require("./lib/scheduler");
 const policy = require("../public/news-policy");
 const pushLanguage = require("./lib/notification-language");
-const { publicationCategories, publisherKeys, evidenceOf } = require("./lib/categories");
+const { publicationCategories, discoverCategories, assess, publisherKeys, evidenceOf } = require("./lib/categories");
 const { completeThai, missingLanguages } = require("../public/news-text");
 
 const CFG = {
@@ -59,7 +59,7 @@ const rank = n => Math.min(...(n.categories || []).map(c => { const i = CAT_KEYS
 const isKorwar = i => (i.categories || []).includes("korwar");
 const bodyLen = i => ((i.body && i.body.th) || []).join("").length;
 // ข่าวที่แสดงในแอป: แปลเสร็จแล้ว หรือเป็นข่าวสงครามเกาหลี (ขึ้นก่อนแล้วค่อยแปล)
-const shown = i => i.translated || isKorwar(i);
+const shown = i => !i.categoryReview && (i.translated || isKorwar(i));
 
 async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken, models = DEFAULT_MODELS, groqModels = GROQ_MODELS, githubModels = GITHUB_MODELS, fetchImpl = fetch, now = Date.now(), log = console, waitMs = 2000, budgetMs = CFG.TIME_BUDGET_MS, imgBudgetMs = 45000, watchEveryMs = CFG.WATCH_EVERY_MS, forceAIProbe = false }) {
   const runStart = Date.now(), runDeadline = runStart + budgetMs;
@@ -85,15 +85,35 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
   let feedChanged = (feedSnap.exists ? (feedSnap.data().items || []) : []).some(i => !shown(i)), seenChanged = false;
 
   // Reclassify existing critical records too; never replay historical alerts.
+  const reclassify = item => {
+    // A previously complete story can regain independently verified trending
+    // coverage during ingestion without being translated or notified again.
+    if(item.categoryReview?.previous&&completeThai(item)){
+      const confirmed=publicationCategories(item,item.categoryReview.previous);
+      if(confirmed.length){item.translated=true;delete item.categoryReview;delete item.retranslation;return confirmed;}
+    }
+    return item.translated?publicationCategories(item,item.categories||[]):discoverCategories(item);
+  };
+  const allowedItems=items.filter(policy.trusted);
+  stat.excludedPublishers=items.length-allowedItems.length;
+  if(stat.excludedPublishers)feedChanged=true;
+  items=allowedItems;
   for (const item of items) {
-    const checked = policy.apply({ ...item, categories: publicationCategories(item, item.categories || []) });
+    const categories=reclassify(item);
+    const checked = policy.apply({...item,categories});
+    if(item.translated&&!checked.categories.length){
+      checked.translated=false;checked.retranslation=true;
+      checked.categoryReview={version:2,reason:'source-scope-not-proven',previous:item.categories||[]};
+      checked.categories=discoverCategories(item);
+      feedChanged=true;
+    }
     if (checked.level !== item.level || checked.emergency !== item.emergency || JSON.stringify(checked.categories) !== JSON.stringify(item.categories)) feedChanged = true;
     Object.assign(item, checked);
   }
 
   // Repair previously published records whose Thai fields still contain Korean.
   for (const item of items) {
-    if (!item.translated || completeThai(item)) continue;
+    if ((!item.translated&&!item.retranslation) || completeThai(item)) continue;
     item.snippetKo ||= item.summary?.ko || item.summary?.th || '';
     item.translated = false; item.retranslation = true; item.attempts = 0;
     item.title = { ko: item.titleKo || '' }; delete item.rich; delete item.lastTry;
@@ -177,7 +197,7 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
         const old = items.find(item => item.id === n.id);
         const before = JSON.stringify([old.publishers, old.categories, old.links]);
         old.publishers = [...new Set([...(old.publishers || []), ...(n.publishers || []), n.publisherUrl].filter(Boolean))];
-        old.categories = publicationCategories(old, [...old.categories, ...n.cats]);
+        old.categories = reclassify(old);
         (n.alts || []).forEach(a => addSource(old, a.source, a.link));
         if (before !== JSON.stringify([old.publishers, old.categories, old.links])) feedChanged = true;
         continue;
@@ -190,7 +210,7 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
       if (twin) { // ข่าวเดิมเรื่องเดียวกัน: เพิ่มเป็นแหล่งข่าว
         addSource(twin.i, n.source, n.link); (n.alts || []).forEach(a => addSource(twin.i, a.source, a.link));
         twin.i.publishers = [...new Set([...(twin.i.publishers || []), ...(n.publishers || []), n.publisherUrl].filter(Boolean))];
-        twin.i.categories = publicationCategories(twin.i, [...(twin.i.categories || []), ...n.cats]);
+        twin.i.categories = reclassify(twin.i);
         twin.i.emergency ||= n.emergency;
         if (!twin.i.image && n.image) twin.i.image = n.image;
         stat.merged++; feedChanged = true; continue;
@@ -226,6 +246,10 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
         if (left < 8000) return;
         try {
           const a = await resolveArticle(it.sourceUrl, { fetchImpl, timeoutMs: Math.min(CFG.IMG_TIMEOUT_MS, left - 4000) });
+          if(a.url&&!policy.isKoreanPublisher(a.url)&&!/^https:\/\/news\.google\.com\//.test(a.url)){
+            it.sourceUrl=a.url;feedChanged=true;
+            log.warn('resolved publisher not allowed',it.id);continue;
+          }
           if (a.url && a.url !== it.sourceUrl) { it.sourceUrl = a.url; if (it.links && it.links[0]) it.links[0].url = a.url; }
           if (a.text) article.set(it.id, a.text);
           if (!it.image) {
@@ -261,9 +285,17 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
       const r = results[k], wasNew = !it.translated, hadText = (article.get(it.id) || "").length > 300;
       if (!r) { audit(it, 'incomplete'); if (wasNew) { it.attempts = (it.attempts || 0) + 1; it.lastTry = now } else it.enrichTries = (it.enrichTries || 0) + 1; return; }
       if (!r.relevant) { audit(it, 'rejected'); if (wasNew) drop.add(it.id); else it.enrichTries = 9; return; } // ข่าวเก่าไม่ลบทิ้งเพราะการเขียนใหม่
-      it.categoryEvidence = evidenceOf({...it, article:article.get(it.id)});
-      audit(it, 'completed', r.categories);
-      Object.assign(it, { title: r.title, summary: r.summary, body: r.body, tips: r.tips, categories: publicationCategories({...it, article:article.get(it.id)}, r.categories), level: r.level, translated: true });
+      const original={...it,article:article.get(it.id)}, proposed=r.proposedCategories||r.categories, decision=assess(original,proposed);
+      if(!decision.categories.length){
+        if(!wasNew){it.enrichTries=(it.enrichTries||0)+1;return;}
+        audit(it,'incomplete');it.categoryReview={version:decision.version,reasons:decision.reasons};
+        it.attempts=(it.attempts||0)+1;it.lastTry=now;return;
+      }
+      it.categoryEvidence=evidenceOf(original,decision.categories);
+      it.categoryAudit={version:decision.version,rejected:Object.fromEntries(proposed.filter(key=>!decision.categories.includes(key)).map(key=>[key,decision.reasons[key]]))};
+      audit(it,'completed',decision.categories);
+      Object.assign(it,{title:r.title,summary:r.summary,body:r.body,tips:r.tips,categories:decision.categories,level:r.level,translated:true});
+      delete it.categoryReview;
       Object.assign(it, policy.apply(it));
       if (hadText) { it.rich = true; delete it.needsEnrich } else if (!wasNew) it.enrichTries = (it.enrichTries || 0) + 1;
       delete it.snippetKo; delete it.attempts; delete it.lastTry; delete it.titleTries;
@@ -481,7 +513,7 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
     if (!twin) { keep.push({ it, g }); continue }
     (it.links || []).forEach(l => addSource(twin.it, l.label, l.url)); addSource(twin.it, it.source, it.sourceUrl);
     twin.it.publishers = [...new Set([...publisherKeys(twin.it), ...publisherKeys(it)])].map(domain => "https://" + domain);
-    twin.it.categories = publicationCategories(twin.it, [...(twin.it.categories || []), ...(it.categories || [])]);
+    twin.it.categories = reclassify(twin.it);
     gone.add(it.id);
   }
   if (gone.size) { items = items.filter(i => !gone.has(i.id)); stat.merged += gone.size; feedChanged = true; }
@@ -489,7 +521,7 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
   // ตัดข่าวเก่าและคุมขนาดเอกสาร
   const cut = now - CFG.KEEP_DAYS * DAY;
   const before = items.length;
-  const retained = prepare(items.filter(i => (Date.parse(i.publishedAt) || 0) >= cut), CFG.FEED_MAX_BYTES, CFG.FEED_MAX);
+  const retained = prepare(items.filter(i => policy.trusted(i) && (Date.parse(i.publishedAt) || 0) >= cut), CFG.FEED_MAX_BYTES, CFG.FEED_MAX);
   items = [...retained.published, ...retained.pending];
   if (items.length !== before) feedChanged = true;
   for (const [id, t] of Object.entries(seen)) if (now - t > CFG.SEEN_DAYS * DAY) { delete seen[id]; seenChanged = true; }
@@ -527,6 +559,7 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
   stat.lastSuccessfulPublishAt = publishedAt;
   stat.lastSuccessfulRunAt = iso(Date.now());
   stat.missingLanguages=Object.fromEntries(['th','en','ko'].map(lang=>[lang,items.filter(i=>i.translated&&missingLanguages(i).includes(lang)).length]));
+  stat.categoryReviewCount=items.filter(i=>i.categoryReview).length;
   stat.pending = items.filter(i => !i.translated).length;
   stat.publishedByCategory = Object.fromEntries(CAT_KEYS.map(key => [key, items.filter(i => i.translated && i.categories?.includes(key)).length]));
   stat.pendingByCategory = Object.fromEntries(CAT_KEYS.map(key => [key, items.filter(i => !i.translated && i.categories?.includes(key)).length]));
