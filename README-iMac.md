@@ -1,6 +1,6 @@
 # Korea Watch — รุ่นปรับปรุงสำหรับ iMac
 
-รุ่นแหล่งข่าว 24 สำนัก เกณฑ์หมวดข่าว Kanit และแชร์ภาพ: ดู [ขั้นตอนอัปเดตล่าสุด](docs/verified-news-kanit-sharing-update.md) ซึ่งต้องอัปเดต Hosting และใช้ worker รุ่นใหม่ รวมการแก้เมนูกองตอนเปิดแอปไว้แล้ว
+รุ่นปรับความหนา Kanit: ดู [ขั้นตอนอัปเดตล่าสุด](docs/kanit-font-weights-update.md) ซึ่ง deploy เฉพาะ Hosting รวมงานแหล่งข่าวและหมวดข่าวจาก main ล่าสุดไว้แล้ว
 
 รายละเอียดหมวดข่าว ฟอนต์ และเลนส์แถบเมนู: ดู [คู่มือหมวดข่าวและเลนส์](docs/topic-pills-and-lens-update.md)
 

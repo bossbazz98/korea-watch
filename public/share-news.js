@@ -34,7 +34,7 @@ async function loadImage(url) {
   } catch { return null; } finally { clearTimeout(timer); if (blobUrl) URL.revokeObjectURL(blobUrl); }
 }
 export async function makeSummaryImage({title,summary,category,source,image}) {
-  await Promise.all([document.fonts.load('400 23px Kanit','ข่าว KOREA'),document.fonts.load('700 32px Kanit','ข่าว KOREA')]);
+  await Promise.all([document.fonts.load('400 23px Kanit','ข่าว KOREA'),document.fonts.load('600 32px Kanit','ข่าว KOREA'),document.fonts.load('700 19px Kanit','KOREA WATCH')]);
   await document.fonts.ready;
   const canvas = document.createElement('canvas'); canvas.width=600; canvas.height=900;
   const ctx=canvas.getContext('2d'); if (!ctx) throw Error('Canvas unavailable');
@@ -44,7 +44,7 @@ export async function makeSummaryImage({title,summary,category,source,image}) {
   {const scale=Math.max(600/photo.width,310/photo.height),w=photo.width*scale,h=photo.height*scale;ctx.save();ctx.beginPath();ctx.rect(0,0,600,310);ctx.clip();ctx.drawImage(photo,(600-w)/2,(310-h)/2,w,h);ctx.restore();}
   ctx.fillStyle='#9A9FA8';ctx.font='400 18px Kanit, sans-serif';let tagX=36;const tags=visibleTags(category);
   for(let i=0;i<tags.length;i++){const reserve=(tags.length-i-1)*65,max=Math.max(50,528-(tagX-36)-reserve),label=wrap(ctx,tags[i],max-20,1)[0]||'';const w=Math.min(max,ctx.measureText(label).width+20);ctx.fillStyle='#2E3138';ctx.beginPath();ctx.roundRect(tagX,326,w,36,18);ctx.fill();ctx.fillStyle='#E8E9EC';ctx.fillText(label,tagX+10,351);tagX+=w+8;}
-  ctx.fillStyle='#E8E9EC';ctx.font='700 32px Kanit, sans-serif';const titles=wrap(ctx,title,528,4);let y=410;for(const line of titles){ctx.fillText(line,36,y);y+=51;}
+  ctx.fillStyle='#E8E9EC';ctx.font='600 32px Kanit, sans-serif';const titles=wrap(ctx,title,528,4);let y=410;for(const line of titles){ctx.fillText(line,36,y);y+=51;}
   y+=20;ctx.fillStyle='#B7BCC5';ctx.font='400 23px Kanit, sans-serif';for(const line of wrap(ctx,summary,528,3)){ctx.fillText(line,36,y);y+=39;}
   ctx.fillStyle='#2E3138';ctx.fillRect(36,797,528,1);
   const brand=await loadImage(new URL('/icons/icon-192.png',location.origin).href);if(brand)ctx.drawImage(brand,36,820,44,44);

@@ -27,7 +27,7 @@
 .panel[data-kind="info"] h2,
 .src .k {
   font-size:var(--heading-size);
-  font-weight:700;
+  font-weight:600;
   line-height:1.5;
 }
 .article .summary-box p,
@@ -52,8 +52,9 @@
   font-size:var(--reading-size);
   line-height:1.8;
 }
-.font-example b { font-size:var(--heading-size);line-height:1.5; }
+.font-example b { font-size:var(--heading-size);line-height:1.5;font-weight:600; }
 .reader-sticky {
+  font-weight:600;
   height:44px;
   padding:7px 12px;
   font-size:var(--heading-size);
