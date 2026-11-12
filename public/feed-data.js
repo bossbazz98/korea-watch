@@ -1,7 +1,7 @@
 import './categories.js';
 import './news-text.js?v=20261112-language';
-import './news-policy.js?v=20261111-interactions';
-import './category-policy.js?v=20261111-interactions';
+import './news-policy.js?v=20261112-verified-news';
+import './category-policy.js?v=20261112-verified-news';
 
 const list = value => Array.isArray(value) ? value : [];
 const objects = value => list(value).filter(item => item && typeof item === 'object');
@@ -23,12 +23,14 @@ export function normalizeFeed(value) {
     try {
       const publishedAt = timestamp(raw.publishedAt);
       const item = {...raw,
-        categories:list(raw.categories).filter(c => typeof c === 'string'),
+        categories:(typeof raw.categories==='string'?[raw.categories]:list(raw.categories)).filter(c => typeof c === 'string'),
         links:objects(raw.links), alts:objects(raw.alts),
         publishers:list(raw.publishers).filter(url => typeof url === 'string'),
         publishedAt:publishedAt ? new Date(publishedAt).toISOString() : raw.publishedAt,
         translated:raw.translated === true && globalThis.KW_NEWS_TEXT.completeThai(raw)};
+      if(!globalThis.KW_NEWS_POLICY.trusted(item))continue;
       item.categories = globalThis.KW_CATEGORY_POLICY.classify(item,item.categories);
+      if(!item.categories.length || item.categoryReview)continue;
       items.push(globalThis.KW_NEWS_POLICY.apply(item));
     } catch (error) { errors.push({id:String(raw.id),reason:String(error.message).slice(0,160)}); }
   }

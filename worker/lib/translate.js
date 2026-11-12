@@ -12,7 +12,7 @@ Rules:
 - "relevant": false if the item does not really fit any listed category or is an ad. Entertainment, sports and celebrity stories are allowed in "hot" ONLY when verifiedPublishers contains at least three independent Korean outlets covering that same story.
 - "categories": keep only keys from this list that truly apply: ${CAT_KEYS.map(k => `${k} = ${CATS[k].desc || CATS[k].th}`).join("; ")}.
 - Categories must follow their country and topic scope. Never assign korwar to foreign countries just because a search/feed guessed korwar. Never assign hot from your opinion; require at least three verifiedPublishers.
-- Multiple categories may apply. Preserve specific topics supported by original source facts; never replace a specific topic with a generic label. Only use the current listed category keys.
+- Choose categories from the MAIN news event, not passing mentions, background, related-story links or guessedCategories. Require an explicit South Korean connection for foreign/wage/president; foreign must actually involve foreigners. Thai requires a substantive Thailand–South Korea connection; generic E-9/marriage visa stories are not automatically Thai. Multiple categories apply only when each is a substantial part of the main event.
 - "korwar" and "war" are different: use "korwar" only for the Korean Peninsula; use "war" for conflicts elsewhere.
 - "level": "critical" only for a confirmed North Korean attack on South Korea, a North Korean missile/rocket launch or test, an attack on South Korea, a missile falling near South Korea, or a South Korean soldier stepping on an antipersonnel mine. Threats, plans, drills, old anniversaries and speculation are not critical. "high" for important developments in those categories or major policy changes affecting foreign workers. Otherwise "normal".
 - "title" and "summary" in natural Thai ("th", written in Thai script), English ("en") and Korean ("ko"). summary: 2-3 sentences with the key facts.
@@ -247,7 +247,7 @@ async function translate(items, opts) {
       if (relevant && (!cats.length || !completeThai({title, summary, body:{th:paras(o.body_th ?? o.body?.th)}}))) { bad++; continue; }
       results[i] = {
         relevant: relevant && cats.length > 0 && !!title.th,
-        categories: relevant ? publicationCategories(items[i], cats) : cats, level: ["critical", "high"].includes(o.level) ? o.level : "normal",
+        categories: relevant ? publicationCategories(items[i], cats) : cats, proposedCategories:cats, level: ["critical", "high"].includes(o.level) ? o.level : "normal",
         title: Object.fromEntries(languages.map(l=>[l,pick(title,l).slice(0,300)])),
         summary: Object.fromEntries(languages.map(l=>[l,pick(summary,l).slice(0,1800)])),
         body: Object.fromEntries(languages.map(l=>[l,complete({title,summary,body:rawBody},l)?rawBody[l].slice(0,8).map(p=>p.slice(0,2200)):[]])),

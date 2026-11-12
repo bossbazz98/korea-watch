@@ -1,7 +1,7 @@
 const crypto = require("crypto");
 const { XMLParser } = require("fast-xml-parser");
 const { CATS, FEEDS, CAT_KEYS } = require("../feeds");
-const { publicationCategories, publisherKeys } = require("./categories");
+const { discoverCategories, publisherKeys } = require("./categories");
 const { grams, similarity, SAME_KO } = require("./similar");
 
 const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@", textNodeName: "#text", processEntities: true, htmlEntities: true });
@@ -30,7 +30,7 @@ function rssImage(it, rawDesc) {
 }
 
 function matchCats(s) {
-  return publicationCategories({titleKo: String(s)}, []);
+  return discoverCategories({titleKo:String(s),publisherUrl:'https://www.yna.co.kr'});
 }
 
 async function getText(url, fetchImpl) {
@@ -58,14 +58,14 @@ function parseFeed(xml, feed, now) {
     link = String(link).trim();
     if (!/^https?:\/\//.test(link)) continue;
     const publisherUrl = text(it.source?.["@url"]) || link;
-    if (!policy.isKoreanPublisher(publisherUrl)) continue;
+    if (!policy.trusted({publisherUrl,link})) continue;
     const rawDesc = text(it.description || it.summary);
     let snippet = stripTags(rawDesc);
     if (norm(snippet).startsWith(norm(title).slice(0, 20))) snippet = ""; // Google News ซ้ำหัวข้อ
     const t = Date.parse(text(it.pubDate || it.published || it.updated));
     const publishedAt = Number.isFinite(t) ? Math.min(t, now) : now;
     if (now - publishedAt > MAX_AGE_MS) continue;
-    const cats = publicationCategories({titleKo:title,snippet,publisherUrl}, []);
+    const cats = discoverCategories({titleKo:title,snippet,publisherUrl});
     // A query hint never proves country/topic or popularity. Keep top-feed
     // candidates until independent publisher reports can be grouped.
     if (!cats.length && feed.hint !== "hot" && !feed.keywordOnly) continue;
@@ -93,14 +93,17 @@ function mergeSimilar(list) {
     const twin = kept.find(k => Math.abs(Date.parse(k.publishedAt) - Date.parse(n.publishedAt)) <= mergeWindow(k, n) && similarity(k._g, n._g) >= SAME_KO);
     if (!twin) { kept.push(n); continue; }
     twin.publishers = [...new Set([...(twin.publishers || []), ...publisherKeys(n).map(domain => "https://" + domain)])];
-    twin.cats = publicationCategories(twin, [...new Set([...twin.cats, ...n.cats])]);
+    twin.cats = discoverCategories(twin);
     twin.emergency = twin.emergency || n.emergency;
     // ใช้ลิงก์ตรงของสำนักข่าวเป็นหลัก (เร็วกว่าและได้ภาพง่ายกว่าลิงก์ Google)
-    if (isGoogle(twin.link) && !isGoogle(n.link)) { [twin.link, n.link] = [n.link, twin.link]; [twin.source, n.source] = [n.source, twin.source]; }
+    if (isGoogle(twin.link) && !isGoogle(n.link)) {
+      [twin.link,n.link]=[n.link,twin.link];[twin.source,n.source]=[n.source,twin.source];
+      [twin.publisherUrl,n.publisherUrl]=[n.publisherUrl,twin.publisherUrl];
+    }
     if (!twin.image && n.image) twin.image = n.image;
     if (!twin.snippet && n.snippet) twin.snippet = n.snippet;
     twin.alts = twin.alts || [];
-    if (n.source && n.source !== twin.source && !twin.alts.some(a => a.source === n.source)) twin.alts.push({ source: n.source, link: n.link });
+    if (n.source && n.source !== twin.source && !twin.alts.some(a => a.source === n.source)) twin.alts.push({source:n.source,link:n.link,publisherUrl:n.publisherUrl});
   }
   return kept;
 }
@@ -120,7 +123,7 @@ async function collect({ fetchImpl = fetch, now = Date.now(), log = console, onl
   if (errors.length) log.warn("feed errors", errors);
   const rank = n => Math.min(...n.cats.map(c => CAT_KEYS.indexOf(c)));
   const list = mergeSimilar([...byId.values()].sort((a, b) => rank(a) - rank(b) || b.publishedAt.localeCompare(a.publishedAt)));
-  list.forEach(n => { delete n._g; n.cats = publicationCategories(n, n.cats); });
+  list.forEach(n => { delete n._g; n.cats = discoverCategories(n); });
   return { list: list.filter(n => n.cats.length), errors };
 }
 

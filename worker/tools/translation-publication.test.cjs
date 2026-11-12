@@ -2,8 +2,8 @@ const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const {translate} = require('../lib/translate');
 const {publicationCategories} = require('../lib/categories');
-const input=[{titleKo:'인공지능 반도체 신기술 발표',cats:['tech']},{titleKo:'외국인 근로자 고용허가제 임금 개선',cats:['foreign']}];
-const result=i=>({i,relevant:true,categories:['tech'],level:'normal',title:{th:'ข่าวแปลภาษาไทย '+i,en:'Translated news'},summary:{th:'สรุปข่าวภาษาไทย',en:'Summary'},body_th:['เนื้อหาภาษาไทยที่แปลครบแล้ว']});
+const input=[{titleKo:'인공지능 반도체 신기술 발표',cats:['tech'],publisherUrl:'https://news.kbs.co.kr'},{titleKo:'외국인 근로자 고용허가제 임금 개선',cats:['foreign'],publisherUrl:'https://www.yna.co.kr'}];
+const result=i=>({i,relevant:true,categories:[i===1?'foreign':'tech'],level:'normal',title:{th:'ข่าวแปลภาษาไทย '+i,en:'Translated news'},summary:{th:'สรุปข่าวภาษาไทย',en:'Summary'},body_th:['เนื้อหาภาษาไทยที่แปลครบแล้ว']});
 const quiet={log(){},warn(){}};
 function options(replies) {
  const calls=[];
@@ -37,8 +37,8 @@ test('provider failure after partial completion preserves the completed article'
 test('explicit irrelevant remains rejected; RSS category hints alone cannot force a topic',async()=>{
  const opts=options([[{i:0,relevant:false}]]);
  const r=await translate([input[0]],opts);assert.equal(r.results[0].relevant,false);assert.equal(opts.calls.length,1);
- assert.deepEqual(publicationCategories({titleKo:'인기 가수 라면 먹방',cats:['tech']},['korea']),[]);
- assert.deepEqual(publicationCategories({titleKo:'관광 비자 연장',cats:['foreign']},['law']),[]);
+ assert.deepEqual(publicationCategories({titleKo:'인기 가수 라면 먹방',cats:['tech'],publisherUrl:'https://news.kbs.co.kr'},['korea']),[]);
+ assert.deepEqual(publicationCategories({titleKo:'관광 비자 연장',cats:['foreign'],publisherUrl:'https://www.yna.co.kr'},['law']),[]);
 });
 test('unavailable models are skipped in later batches and full error reasons are retained',async()=>{
  const calls=[],modelErrors=new Map(),unavailable=new Map();

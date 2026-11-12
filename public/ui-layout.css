@@ -123,7 +123,7 @@
   bottom:calc(var(--dock-bottom) + var(--dock-height) + 12px);
 }
 
-/* Settings uses IBM throughout, including inputs, captions and status text. */
+/* Settings uses Kanit throughout, including inputs, captions and status text. */
 .panel[data-kind="settings"] { font-family:var(--f-head); }
 .panel[data-kind="settings"] * { font-family:inherit; }
 .panel[data-kind="settings"] .sheet-content {
@@ -134,9 +134,9 @@
 .group-title { flex-wrap:wrap;gap:4px 10px; }
 .group-tools { font-size:var(--control-size); }
 .group-tools button { font-size:var(--control-size); }
-.settings-card select,#p-tone,#p-area { font-size:var(--reading-size); }
+.settings-card select,#p-tone,
 .time-box select { font-size:26px; }
-#p-area { max-width:130px; }
+
 .topic-pick,.segments button,.segments label { font-size:var(--control-size); }
 .font-buttons button:nth-child(1) { font-size:14px; }
 .font-buttons button:nth-child(2) { font-size:18px; }

@@ -64,7 +64,7 @@ const okItem = (x, by) => ({ i: x.i, relevant: true, categories: x.guessedCatego
   // ── 4) รอบจริง: ข่าวซ้ำ, ข่าวซ่อน, ทางด่วนสงครามเกาหลี, ตัวเฝ้าฟีด ──
   const db = fakeDb();
   db.data.set("meta/feed", { v: 8, items: [
-    { id: "exist1", titleKo: "최저임금 내년 1만1천원으로 결정", title: { th: "ค่าแรงขั้นต่ำปีหน้า 11,000 วอน", en: "x" }, summary: { th: "ส", en: "s" }, body: { th: ["ก".repeat(500)] }, rich: true, image: "https://i/1.jpg",
+    { id: "exist1", titleKo: "한국 최저임금 내년 1만1천원으로 결정", title: { th: "ค่าแรงขั้นต่ำปีหน้า 11,000 วอน", en: "x" }, summary: { th: "ส", en: "s" }, body: { th: ["ก".repeat(500)] }, rich: true, image: "https://i/1.jpg",
       categories: ["wage"], level: "normal", translated: true, publishedAt: new Date(now - 2 * 3600e3).toISOString(), source: "연합뉴스", sourceUrl: "https://www.yna.co.kr/1", links: [{ label: "연합뉴스", url: "https://www.yna.co.kr/1" }] },
     { id: "kw-old", titleKo: "북한, 동해상으로 탄도미사일 발사", title: { th: "เกาหลีเหนือยิงขีปนาวุธ (เมื่อวาน)", en: "x" }, summary: { th: "ส", en: "s" }, body: { th: ["ก".repeat(500)] }, rich: true, image: "https://i/2.jpg",
       categories: ["korwar"], level: "critical", translated: true, publishedAt: new Date(now - 20 * 3600e3).toISOString(), source: "KBS", sourceUrl: "https://news.kbs.co.kr/1", links: [{ label: "KBS", url: "https://news.kbs.co.kr/1" }] }

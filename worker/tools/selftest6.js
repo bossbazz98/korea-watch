@@ -71,7 +71,7 @@ const one = [{ titleKo: "북한 미사일", snippet: "", source: "KBS", cats: ["
   const ref = p => ({ path: p, id: p.split("/").pop(), async get() { const d = data.get(p); return { exists: !!d, data: () => JSON.parse(JSON.stringify(d)) } }, async set(v) { data.set(p, JSON.parse(JSON.stringify(v))) }, async update(v) { data.set(p, { ...data.get(p), ...v }) }, async delete() { data.delete(p) } });
   const db = { doc: ref, collection: col => ({ where() { return this }, limit() { return this }, async get() { const docs = [...data.keys()].filter(k => k.startsWith(col + "/")).map(k => ({ id: k.split("/").pop(), ref: ref(k), data: () => data.get(k) })); return { empty: !docs.length, docs } } }) };
   const now = Date.now();
-  const item = (id, cat, h) => ({ id, titleKo: "기사 " + id, snippetKo: "", title: { ko: "기사 " + id }, summary: {}, body: {}, categories: [cat], level: "normal", translated: false, attempts: 0, publishedAt: new Date(now - h * 3600e3).toISOString(), source: "KBS", sourceUrl: "https://x", links: [] });
+  const item = (id, cat, h) => ({ id, titleKo: "우크라이나 전쟁 기사 " + id, snippetKo: "", title: { ko: "우크라이나 전쟁 기사 " + id }, summary: {}, body: {}, categories: [cat], level: "normal", translated: false, attempts: 0, publishedAt: new Date(now - h * 3600e3).toISOString(), source: "KBS", sourceUrl: "https://news.kbs.co.kr/test", links: [] });
   const its = [item("lawOld", "law", 20), ...Array.from({ length: 49 }, (_, k) => item("w" + k, "war", k * 0.1))];
   data.set("meta/feed", { v: 8, items: its });
   data.set("priority/lawOld", { at: null });

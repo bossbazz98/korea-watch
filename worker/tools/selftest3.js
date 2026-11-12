@@ -17,7 +17,7 @@ function fakeDb() {
 const log = { log() {}, warn() {} };
 const msg = { async sendEachForMulticast(m) { return { successCount: m.tokens.length, responses: m.tokens.map(() => ({ success: true })) } } };
 const now = Date.parse("2026-10-31T10:00:00Z");
-const item = (id, extra = {}) => ({ id, titleKo: "북한 " + id, snippetKo: "", title: { ko: "북한 " + id }, summary: {}, body: {}, categories: ["war"], level: "normal", translated: false, attempts: 0, publishedAt: new Date(now - 3600e3).toISOString(), addedAt: new Date(now).toISOString(), source: "KBS", sourceUrl: "https://x", links: [] , ...extra });
+const item = (id, extra = {}) => ({ id, titleKo: "우크라이나 전쟁 " + id, snippetKo: "", title: { ko: "우크라이나 전쟁 " + id }, summary: {}, body: {}, categories: ["war"], level: "normal", translated: false, attempts: 0, publishedAt: new Date(now - 3600e3).toISOString(), addedAt: new Date(now).toISOString(), source: "KBS", sourceUrl: "https://news.kbs.co.kr/test", links: [] , ...extra });
 const okReply = async (url, opt) => {
   if (!url.startsWith("https://generativelanguage")) return { ok: true, text: async () => "<rss><channel></channel></rss>" };
   const input = JSON.parse(JSON.parse(opt.body).contents[0].parts[0].text);

@@ -2,11 +2,17 @@
 export function attachLiquidTabs({bar,onSelect}) {
   const lens=bar.querySelector('.tab-lens'),buttons=[...bar.querySelectorAll('.tab')];
   lens.classList.remove('glass');
-  const row=document.createElement('div');row.className='tab-real-row';
-  const content=buttons.map(button=>{const span=document.createElement('span');span.className='tab-content';span.append(...button.childNodes);button.append(span);row.append(button);return span});bar.append(row);
+  // Reuse the complete first-paint markup; retain support for older cached HTML.
+  const row=bar.querySelector('.tab-real-row')||document.createElement('div');row.className='tab-real-row';
+  const content=buttons.map(button=>{
+    let span=button.querySelector('.tab-content');
+    if(!span){span=document.createElement('span');span.className='tab-content';span.append(...button.childNodes);button.append(span)}
+    if(button.parentElement!==row)row.append(button);return span;
+  });
+  if(row.parentElement!==bar)bar.append(row);
   // Avoid the nested masks and colored filters that were active during the
   // recorded iPhone artifact. Keep a single neutral surface and real glyphs.
-  lens.innerHTML='<span class="lens-surface"></span><span class="lens-border"></span>';
+  if(!lens.querySelector('.lens-surface')||!lens.querySelector('.lens-border'))lens.innerHTML='<span class="lens-surface"></span><span class="lens-border"></span>';
   const surface=lens.querySelector('.lens-surface');
   const reduced=matchMedia('(prefers-reduced-motion: reduce)'),clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
   const values={x:0,w:125,h:52,surface:1,icon:1,hold:0,stretch:0};

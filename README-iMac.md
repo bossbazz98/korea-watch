@@ -1,6 +1,8 @@
 # Korea Watch — รุ่นปรับปรุงสำหรับ iMac
 
-รุ่นหมวดข่าว ฟอนต์ และเลนส์แถบเมนู: ดู [ขั้นตอนอัปเดตหน้าจอล่าสุด](docs/topic-pills-and-lens-update.md) ซึ่ง deploy เฉพาะ Hosting
+รุ่นแหล่งข่าว 24 สำนัก เกณฑ์หมวดข่าว Kanit และแชร์ภาพ: ดู [ขั้นตอนอัปเดตล่าสุด](docs/verified-news-kanit-sharing-update.md) ซึ่งต้องอัปเดต Hosting และใช้ worker รุ่นใหม่ รวมการแก้เมนูกองตอนเปิดแอปไว้แล้ว
+
+รายละเอียดหมวดข่าว ฟอนต์ และเลนส์แถบเมนู: ดู [คู่มือหมวดข่าวและเลนส์](docs/topic-pills-and-lens-update.md)
 
 คู่มือระบบภาษาและปุ่มหน้าอ่านข่าว: ดู [ขั้นตอนอัปเดตระบบภาษา](docs/system-language-update.md) สำหรับการอัปเดต rules และ worker
 

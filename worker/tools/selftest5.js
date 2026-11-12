@@ -27,18 +27,18 @@ const log = { log() {}, warn() {} };
   const data = new Map();
   const ref = p => ({ async get() { const d = data.get(p); return { exists: !!d, data: () => JSON.parse(JSON.stringify(d)) } }, async set(v) { data.set(p, JSON.parse(JSON.stringify(v))) }, async update() { }, async delete() { } });
   const db = { doc: ref, collection: () => ({ where() { return this }, limit() { return this }, async get() { return { empty: true, docs: [] } } }) };
-  const now = Date.now(), base = { categories: ["president"], level: "normal", translated: true, publishedAt: new Date(now - 6e5).toISOString(), source: "연합뉴스TV", sourceUrl: "https://x", links: [], image: "https://img/1.jpg", body: { th: ["เนื้อข่าว"] }, summary: { th: "สรุปข่าว", en: "summary" } };
+  const now = Date.now(), base = { categories: ["president"], level: "normal", translated: true, publishedAt: new Date(now - 6e5).toISOString(), source: "연합뉴스", sourceUrl: "https://www.yna.co.kr/test", links: [], image: "https://img/1.jpg", body: { th: ["เนื้อข่าว"] }, summary: { th: "สรุปข่าว", en: "summary" } };
   data.set("meta/feed", { v: 5, items: [
-    { ...base, id: "en", titleKo: "여야 대통령 SNS 공방", title: { th: "Ruling and opposition clash", en: "Ruling and opposition clash" } },
-    { ...base, id: "th", titleKo: "외교장관 회담", title: { th: "รมว.ต่างประเทศประชุม", en: "FM meeting" } }
+    { ...base, id: "en", titleKo: "한국 여야 대통령 SNS 공방", title: { th: "Ruling and opposition clash", en: "Ruling and opposition clash" } },
+    { ...base, id: "th", titleKo: "한국 정부 외교장관 회담", title: { th: "รมว.ต่างประเทศประชุม", en: "FM meeting" } }
   ] });
   const rss = async url => ({ ok: true, text: async () => "<rss><channel></channel></rss>", arrayBuffer: async () => Buffer.from("") });
   await runOnce({ db, messaging: {}, appUrl: "https://x", geminiKey: "", fetchImpl: rss, now, log, waitMs: 0 });
   const fd = {...data.get("meta/feed"),items:allItems(data)}, by = id => fd.items.find(i => i.id === id);
   assert.strictEqual(fd.v, 10);
   assert.strictEqual(by("en").translated, false, "English-titled item sent back for translation");
-  assert.strictEqual(by("en").title.ko, "여야 대통령 SNS 공방", "shows Korean headline until re-translated");
-  assert.deepStrictEqual(by("en").title, { ko: "여야 대통령 SNS 공방" }, "no English left to show in Thai mode");
+  assert.strictEqual(by("en").title.ko, "한국 여야 대통령 SNS 공방", "shows Korean headline until re-translated");
+  assert.deepStrictEqual(by("en").title, { ko: "한국 여야 대통령 SNS 공방" }, "no English left to show in Thai mode");
   assert.strictEqual(by("en").image, "https://img/1.jpg", "image kept");
   assert.strictEqual(by("th").translated, true, "correct Thai item untouched");
   console.log("ผ่านทุกข้อ (ชุดที่ 5: ตรวจภาษาไทย)");
