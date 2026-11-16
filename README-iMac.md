@@ -175,7 +175,7 @@ GitHub Actions ที่มีอยู่ยังใช้ Secrets เดิ�
 
 - `feedDays/{YYYY-MM-DD[_part]}`: published history, partitioned by KST date below 800 KB per document
 - `meta/feed`: latest public compatibility index, at most 60 items and 700 KB
-- `pending/{id}`: private translation backlog, Admin SDK only; legacy `meta/pending` is emptied after migration
+- `pending/c0..cN`: private translation backlog packed into chunk documents (untranslated items kept 7 days), Admin SDK only; legacy `meta/pending` is emptied after migration
 - `meta/seen`, `meta/quota`: สถานะภายใน
 - `fixJobs/{id}`: งานแก้ข้อมูลจาก agent ลบหลังบันทึกข่าวสำเร็จเท่านั้น
 - `notificationEvents/{newsId}`: งานแจ้งเตือนที่บันทึกใน batch เดียวกับข่าว

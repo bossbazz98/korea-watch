@@ -64,16 +64,30 @@ const SEARCH_FEEDS = [
 
 ];
 
-// Four topic groups + four publisher groups + six direct feeds leave room for
-// emergency rechecks inside the twenty-request run budget.
-const topicFeeds=SEARCH_FEEDS.filter(f=>f.id.startsWith('gn_'));
-const groupIds=['gn_korwar','gn_war','gn_disease','gn_thai'];
-const FEEDS=[...groupIds.map((id,i)=>{
-  const group=topicFeeds.filter((_,index)=>index%4===i);
-  const terms=group.map(f=>new URL(f.url).searchParams.get('q').replace(' ('+sites+') when:1d',''));
-  return {id,hint:'hot',take:60,korwar:i===0,url:gn(terms.join(' OR '))};
-}),...SEARCH_FEEDS.filter(f=>!f.id.startsWith('gn_')),
-...Array.from({length:4},(_,i)=>({id:'publisher_group_'+i,hint:'hot',take:50,
-url:'https://news.google.com/rss/search?q='+encodeURIComponent('('+PUBLISHERS.slice(i*6,i*6+6).flatMap(p=>p.domains).map(d=>'site:'+d).join(' OR ')+') when:1d')+'&hl=en&gl=KR&ceid=KR:en'}))];
+// Related searches are merged pairwise (each keeps its own topic hint) so Google News sees
+// 13 requests per run instead of 41, while each query stays close to the length that already
+// worked in production. Direct newsroom RSS feeds are unchanged.
+const topic=Object.fromEntries(SEARCH_FEEDS.filter(f=>f.id.startsWith('gn_')).map(f=>[f.id,f]));
+const terms=id=>new URL(topic[id].url).searchParams.get('q').replace(' ('+sites+') when:1d','').replace(/^\(|\)$/g,'');
+const merge=(id,ids,hint,take,extra={})=>({id,hint,take,...extra,url:gn([...new Set(ids.flatMap(id=>terms(id).split(' OR ')))].join(' OR '))});
+const GROUPS=[
+  merge('gn_korwar',['gn_korwar'],'korwar',20,{korwar:true}),
+  merge('gn_war',['gn_war','gn_war_global'],'war',20),
+  merge('gn_disease',['gn_disease','gn_health_global'],'disease',20),
+  merge('gn_tech',['gn_tech'],'tech',12),
+  merge('gn_crypto',['gn_crypto'],'crypto',10),
+  merge('gn_thai',['gn_thai'],'thai',12),
+  merge('gn_foreign',['gn_immig','gn_foreign'],'foreign',20),
+  merge('gn_wage_labor',['gn_wage','gn_labor'],null,18),
+  merge('gn_energy_fx',['gn_oil_fx','gn_oil_global','gn_fx_global'],null,20),
+  merge('gn_president',['gn_president'],'president',8),
+  merge('gn_top',['gn_top'],'hot',10)
+];
+// Two publisher searches (12 newsrooms each) keep every selected newsroom covered.
+const PUBLISHER_GROUPS=Array.from({length:2},(_,i)=>({id:'publisher_group_'+i,hint:'hot',take:40,
+  url:'https://news.google.com/rss/search?q='+encodeURIComponent('('+PUBLISHERS.slice(i*12,i*12+12).flatMap(p=>p.domains).map(d=>'site:'+d).join(' OR ')+') when:1d')+'&hl=en&gl=KR&ceid=KR:en'}));
+const FEEDS=[...GROUPS,...SEARCH_FEEDS.filter(f=>!f.id.startsWith('gn_')),...PUBLISHER_GROUPS];
+// Main collection uses one request per feed; Korean-war rechecks during the run use the rest.
+const FEED_REQUEST_BUDGET=FEEDS.length+9;
 
-module.exports = { CATS, FEEDS, CAT_KEYS: Object.keys(CATS), EMERGENCY_KW };
+module.exports = { CATS, FEEDS, FEED_REQUEST_BUDGET, CAT_KEYS: Object.keys(CATS), EMERGENCY_KW };

@@ -235,7 +235,9 @@ async function syncIssue({ token, repo, reportable, body, fetchImpl = fetch, log
 
 async function runAgent({ db, chromium, launchOpts, prepare, appUrl, geminiKey, token, repo, runUrl, fetchImpl = fetch, now = Date.now(), log = console }) {
   const [feedSnap, statusSnap, healthSnap, fixSnap] = await Promise.all(["meta/feed", "meta/status", "meta/health", "meta/pending"].map(p => db.doc(p).get()));
-  const items = [...(feedSnap.exists ? (feedSnap.data().items || []) : []), ...(fixSnap.exists ? (fixSnap.data().items || []) : [])];
+  // Full 30-day history and private backlog (feedDays + pending chunks); legacy documents as fallback.
+  const items = typeof db.collection === "function" ? await require("./lib/storage").load(db)
+    : [...(feedSnap.exists ? (feedSnap.data().items || []) : []), ...(fixSnap.exists ? (fixSnap.data().items || []) : [])];
   const data = await auditData({ items, status: statusSnap.exists ? statusSnap.data() : null, now, fetchImpl });
   let ui = null, uiIssues = [], aiIssues = [];
   const checks = { data: "passed", ui: chromium ? "pending" : "unavailable", vision: "skipped" };

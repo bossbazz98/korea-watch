@@ -70,9 +70,16 @@ Not a promise of complete semantic deduplication, exactly-once FCM delivery, pro
 
 ## 2026-11-17 — 30-day feed and Thai-first publication
 
-- Replace size-limited retention with KST `feedDays` documents, split below 800 KB, and private `pending/{id}` records. Retain news for 30 days; maintain a bounded 60-item/700-KB legacy latest index. Write only changed day/backlog records.
+- Replace size-limited retention with KST `feedDays` documents, split below 800 KB, and a private backlog packed into a few `pending/cN` chunk documents (untranslated items kept 7 days). Retain news for 30 days; maintain a bounded 60-item/700-KB legacy latest index. Write only changed day/backlog records.
 - Add retry-safe legacy migration and `npm run migrate:feed-days`; worker performs migration before reading its new storage. Clients load three days initially, then three-day ranges on scroll, using the persistent Firestore cache.
 - Main editorial request produces Thai only, with batches of four. English/Korean localization uses only remaining publication time/quota, capped at four stories; language gaps display Thai. Localization does not republish notifications.
-- Reduce discovery to 14 initial feeds: four combined topic queries, four publisher groups, six unchanged direct RSS feeds; cap the whole run including rechecks at 20 requests. Persist host backoff after 429/503 and serialize requests per host.
+- Reduce discovery to 19 feeds (13 Google News requests instead of 41): related topic searches merged pairwise with their topic hints kept, two publisher groups covering all 24 newsrooms, six unchanged direct RSS feeds; Korean-war rechecks share a 28-request run budget. Persist host backoff after 429/503 and serialize requests per host.
 - Seek segmented-control animations through the Web Animations API in tests; reject pull refresh when scrolled at touch start or move. Await pending fixture reads before gesture assertions.
-- Pin fast-xml-parser 5.12.0, firebase-tools 15.35.0 and Playwright 1.65.0; keep firebase-admin 14.5.0 and Firebase 13.2.0. See TEST-REPORT.md for release-age conflict, audit findings and actual verification.
+- Pin fast-xml-parser 5.12.0 (released 2026-11-03); keep firebase-tools 15.34.2, Playwright 1.64.1, firebase-admin 14.5.0 and Firebase 13.2.0 (newer releases are under 14 days old). See TEST-REPORT.md for release-age conflict, audit findings and actual verification.
+
+### Review fixes (Claude, 2026-11-17)
+
+- Firestore Spark quota: the worker reads `feedDays`/`pending` once per run and diffs later saves against an in-memory copy instead of re-reading both collections on every save (previously hundreds of reads per save, far above 50k/day). Backlog records are packed into chunk documents instead of one document per story, so a run writes only the chunks that changed. Legacy `pending/{id}` documents are still read and replaced.
+- `load()` returns copies so in-run edits cannot silently mark the cached state as already saved.
+- Google News: replaced the four very long mixed-topic queries (up to ~120 words, all hinted "hot") with eleven pairwise merges that keep each topic's category hint and stay near the query length already used in production.
+- AI Agent audits the full stored history/backlog instead of the 60-item index.

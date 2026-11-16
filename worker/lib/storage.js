@@ -1,6 +1,10 @@
-const DAY = 86400000, KEEP_DAYS = 30;
+// Published history: one Firestore document per KST day (feedDays/YYYY-MM-DD[_n]).
+// Private translation backlog: a few chunk documents (pending/cN), never one doc per item,
+// so a worker run costs tens of reads/writes instead of hundreds (Spark: 50k reads, 20k writes/day).
+const DAY = 86400000, KEEP_DAYS = 30, PENDING_DAYS = 7, DOC_BYTES = 800000;
 const visible = i => !i.categoryReview && (i.translated === true || (i.categories || []).includes('korwar'));
 const kstDate = value => new Date(new Date(value).getTime()+9*3600000).toISOString().slice(0,10);
+const bytes = value => Buffer.byteLength(JSON.stringify(value));
 function prepare(items) {
   const ordered = [...new Map(items.map(i=>[i.id,i])).values()].sort((a,b)=>String(b.publishedAt).localeCompare(String(a.publishedAt)));
   return {published:ordered.filter(visible),pending:ordered.filter(i=>!visible(i))};
@@ -9,15 +13,36 @@ function dayDocuments(items, metadata = {}) {
   const docs = new Map();
   for (const item of prepare(items).published) {
     const date=kstDate(item.publishedAt); let part=1, key=date;
-    while (docs.has(key) && Buffer.byteLength(JSON.stringify({...docs.get(key),items:[...docs.get(key).items,item]}))>800000) key=date+'_'+(++part);
+    while (docs.has(key) && bytes({...docs.get(key),items:[...docs.get(key).items,item]})>DOC_BYTES) key=date+'_'+(++part);
     const doc=docs.get(key)||{date,part,items:[],updatedAt:metadata.updatedAt||new Date().toISOString()};
     doc.items.push(item);
-    if(Buffer.byteLength(JSON.stringify(doc))>800000)throw Error('Item exceeds feed day document capacity: '+item.id);
+    if(bytes(doc)>DOC_BYTES)throw Error('Item exceeds feed day document capacity: '+item.id);
     docs.set(key,doc);
   }
   return docs;
 }
+// Newest first, packed into as few documents as possible. Stable order keeps older chunks unchanged.
+function pendingChunks(items) {
+  const chunks=[];let current=[];
+  for(const item of items){
+    if(bytes({items:[item]})>DOC_BYTES)continue; // a single oversized record cannot be stored
+    if(current.length&&bytes({items:[...current,item]})>DOC_BYTES){chunks.push(current);current=[]}
+    current.push(item);
+  }
+  if(current.length)chunks.push(current);
+  return new Map(chunks.map((list,n)=>['c'+n,{items:list}]));
+}
+// Last state read from / written to Firestore during this process, per database.
+const cache = new WeakMap();
 async function snapshot(db, collection) { return (await db.collection(collection).get()).docs.map(d=>({id:d.id||d.ref?.path?.split('/').at(-1),data:()=>d.data()})); }
+async function state(db) {
+  if(cache.has(db))return cache.get(db);
+  const [days,pending]=await Promise.all([snapshot(db,'feedDays'),snapshot(db,'pending')]);
+  const value={days:new Map(days.map(d=>[d.id,d.data()])),pending:new Map(pending.map(d=>[d.id,d.data()]))};
+  cache.set(db,value);return value;
+}
+// Older per-item pending/{id} documents are still read, then replaced by chunks.
+const pendingItems = docs => [...docs.values()].flatMap(v=>Array.isArray(v?.items)?v.items:v?.id?[v]:[]);
 async function write(db, writes) {
   for(let start=0;start<writes.length;start+=400) {
     const batch=typeof db.batch==='function'?db.batch():null;
@@ -29,9 +54,12 @@ async function write(db, writes) {
     if(batch)await batch.commit();
   }
 }
+// Called once at the start of each worker run: always re-reads, later saves reuse the result.
 async function load(db) {
-  const [days,pending]=await Promise.all([snapshot(db,'feedDays'),snapshot(db,'pending')]);
-  return [...new Map([...days.flatMap(d=>d.data().items||[]),...pending.map(d=>d.data())].map(i=>[i.id,i])).values()];
+  cache.delete(db);
+  const {days,pending}=await state(db);
+  // Callers mutate the returned records; the cache must keep what is actually stored.
+  return structuredClone([...new Map([...[...days.values()].flatMap(d=>d.items||[]),...pendingItems(pending)].map(i=>[i.id,i])).values()]);
 }
 async function migrate(db) {
   const marker=await db.doc('meta/feedDaysMigration').get();
@@ -47,25 +75,29 @@ async function migrate(db) {
   await db.doc('meta/pending').set({items:[],migrated:true});
 }
 async function persist(db, items, metadata, seen, quota, events = [], {expire=true,now=Date.now()}={}) {
-  const retained=items.filter(i=>!expire||!Number.isFinite(Date.parse(i.publishedAt))||Date.parse(i.publishedAt)>=now-KEEP_DAYS*DAY);
-  const {published,pending}=prepare(retained);
+  const fresh=i=>{const t=Date.parse(i.publishedAt);return !expire||!Number.isFinite(t)||t>=now-(visible(i)?KEEP_DAYS:PENDING_DAYS)*DAY};
+  const {published,pending}=prepare(items.filter(fresh));
   const writes=[];
   const desired=dayDocuments(published,metadata);
   // Minimal offline adapters predate collections; keep their legacy views usable.
   if(typeof db.collection==='function') {
-    const [oldDays,oldPending]=await Promise.all([snapshot(db,'feedDays'),snapshot(db,'pending')]);
-    const old=new Map(oldDays.map(d=>[d.id,d.data()]));
-    for(const [id,value] of desired) if(JSON.stringify(old.get(id)?.items)!==JSON.stringify(value.items))writes.push(['feedDays/'+id,value]);
-    for(const d of oldDays)if(!desired.has(d.id))writes.push(['feedDays/'+d.id,null]);
-    const prior=new Map(oldPending.map(d=>[d.id,d.data()]));
-    for(const item of pending)if(JSON.stringify(prior.get(item.id))!==JSON.stringify(item))writes.push(['pending/'+item.id,item]);
-    const ids=new Set(pending.map(i=>i.id));for(const d of oldPending)if(!ids.has(d.id))writes.push(['pending/'+d.id,null]);
+    const current=await state(db);
+    // Cache a deep copy: live items keep changing after a save within the same run.
+    const same=(a,b)=>JSON.stringify(a?.items)===JSON.stringify(b?.items), copy=v=>structuredClone(v);
+    for(const [id,value] of desired) if(!same(current.days.get(id),value)){writes.push(['feedDays/'+id,value]);current.days.set(id,copy(value))}
+    for(const id of [...current.days.keys()])if(!desired.has(id)){writes.push(['feedDays/'+id,null]);current.days.delete(id)}
+    const chunks=pendingChunks(pending);
+    for(const [id,value] of chunks) if(!same(current.pending.get(id),value)){writes.push(['pending/'+id,value]);current.pending.set(id,copy(value))}
+    for(const id of [...current.pending.keys()])if(!chunks.has(id)){writes.push(['pending/'+id,null]);current.pending.delete(id)}
   } else writes.push(['meta/pending',{items:pending,...metadata}]);
-  const latest=[];for(const item of published.slice(0,60)){if(Buffer.byteLength(JSON.stringify({items:[...latest,item],...metadata}))>700000)break;latest.push(item)}
+  const latest=[];for(const item of published.slice(0,60)){if(bytes({items:[...latest,item],...metadata})>700000)break;latest.push(item)}
   writes.push(['meta/feed',{items:latest,...metadata}]);
   if(seen)writes.push(['meta/seen',{ids:seen}]);
   for(const event of events)writes.push(['notificationEvents/'+event.news.id,event]);
   if(quota)writes.push(['meta/quota',quota]);
-  await write(db,writes);return [...published,...pending];
+  try{await write(db,writes)}catch(error){cache.delete(db);throw error}
+  return [...published,...pending];
 }
-module.exports={prepare,persist,visible,dayDocuments,kstDate,load,migrate};
+// Test helper: find one private record wherever it is stored.
+const pendingItem = (data, id) => pendingItems(new Map([...data].filter(([p])=>p.startsWith('pending/')))).find(i=>i.id===id);
+module.exports={prepare,persist,visible,dayDocuments,kstDate,load,migrate,pendingChunks,pendingItem,KEEP_DAYS,PENDING_DAYS};

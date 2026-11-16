@@ -27,12 +27,23 @@ npm audit --json
 
 Dependency verification:
 
-- `npm audit --json > audit-before.json`: 20 findings (1 low, 14 moderate, 5 high), exit 1.
-- `npm audit --json > audit-after.json`: 19 findings (14 moderate, 5 high), exit 1. No critical findings. Remaining findings are not claimed fixed.
-- Exact task pins installed: fast-xml-parser 5.12.0, firebase-tools 15.35.0, Playwright 1.65.0. Firebase Admin remains 14.5.0 and Firebase remains 13.2.0; no prohibited versions were introduced.
-- Primary npm registry metadata reports releases on November 3, 4 and 5 respectively. These conflict with the blanket minimum-age rule on November 17. The exact named pins were used as the most specific instruction; none of these direct versions is deprecated. The inherited tree still emits ten transitive deprecation warnings. Evidence is in `dependency-release-check.json` and both audit JSON files.
+- npm audit before: 20 findings (1 low, 14 moderate, 5 high). After: 19 (14 moderate, 5 high); production dependencies only: 6 moderate, all transitive inside Google libraries. No critical findings.
+- Pins after review: fast-xml-parser 5.12.0 (released 2026-11-03, 14 days), firebase-tools 15.34.2 and Playwright 1.64.1 kept because 15.35.0 (Nov 4) and 1.65.0 (Nov 5) were under 14 days old. Firebase Admin 14.5.0, Firebase 13.2.0. No direct dependency is deprecated.
 
 Earlier failed test attempts led to fixture updates for new storage/grouped feeds, larger batches, and Thai fallback. A missing browser override was corrected using the installed Chrome. Fixed-time lens assertions and the unfinished scroll-to-top animation exposed further test races; the final pass results above were recorded after the fixes.
+
+---
+
+## Review fixes — 2026-11-17 (Claude)
+
+Runtime: Linux, Node.js 24.22.3, Chromium (Playwright build 1243 executable via AGENT_CHROMIUM).
+
+- `npm ci && npm run build:web && npm test`: PASSED (exit 0) after the review fixes below.
+- `settings-ui.cjs` and `navigation-ui.cjs` each run 6 more consecutive times: 0 failures.
+- New test: one run with 900 published + 1,500 backlog records reads each collection once, stores the backlog in ≤ 8 chunk documents, four further saves cause no extra reads, one changed backlog record rewrites one chunk, no unchanged day is rewritten, untranslated items older than 7 days are dropped while 30 days of published history remain.
+- New feed test: ≤ 20 feeds, ≤ 13 Google News requests, two publisher groups covering all 24 newsrooms, topic hints kept, each Google query ≤ 85 words.
+- Live Google News responses to the merged queries could not be fetched from the test environments (network policy); verify `meta/status.feedErrors` after the first production runs.
+- Production Firebase, migration against real data, push delivery and Hosting deploy: NOT run here.
 
 ---
 

@@ -1,5 +1,5 @@
 const {test}=require('node:test'),assert=require('node:assert/strict');
-const {prepare,persist}=require('../lib/storage');
+const {prepare,persist,pendingItem}=require('../lib/storage');
 const {sendMulticast,retryNotifications,sendNews,runOnce}=require('../run');
 const {newsId}=require('../lib/collect');
 const {similarity}=require('../lib/similar');
@@ -33,7 +33,7 @@ test('public feed excludes pending; every save bounds document bytes',async()=>{
  const db=dbFake(),items=[story('published'),story('private',false),...Array.from({length:30},(_,i)=>({...story('large'+i),body:{th:['ก'.repeat(20000)]}}))];
  await persist(db,items,{v:8},{a:1},{used:{}});
  assert(!db.data.get('meta/feed').items.some(i=>i.id==='private'));
- assert(db.data.has('pending/private'));
+ assert(pendingItem(db.data,'private'));
  assert.equal([...db.data].filter(([p])=>p.startsWith('feedDays/')).flatMap(([,d])=>d.items).length,31);
  assert(Buffer.byteLength(JSON.stringify(db.data.get('meta/feed')))<850000);
  assert(prepare(items,10000).published.length<items.length);
@@ -134,8 +134,8 @@ test('legacy Thai headline with Korean body is requeued and repaired without a d
  const old={...story('legacy'),title:{th:'หัวข้อแปลแล้ว'},summary:{th:'한국어 요약 뉴스'},body:{th:['한국어 기사 본문']},titleKo:'국제 유가 상승',sourceUrl:'https://www.yna.co.kr/legacy',source:'Fixture',links:[]};
  db.data.set('meta/feed',{v:8,items:[old]});
  await runOnce({db,messaging:{},appUrl:'https://example.test',fetchImpl:translatedNewsFetch(),log,now,budgetMs:1000,imgBudgetMs:0});
- assert.equal(db.data.get('pending/'+old.id).translated,false);
- assert.equal(db.data.get('pending/'+old.id).retranslation,true);
+ assert.equal(pendingItem(db.data,old.id).translated,false);
+ assert.equal(pendingItem(db.data,old.id).retranslation,true);
  let sent=0;
  await runOnce({db,messaging:{async sendEachForMulticast(){sent++;return {successCount:0,responses:[]}}},appUrl:'https://example.test',groqKey:'fixture',fetchImpl:translatedNewsFetch(),log,now,budgetMs:60000,imgBudgetMs:2000,waitMs:0});
  assert(require('../../public/news-text').completeThai(db.data.get('meta/feed').items[0]));assert.equal(sent,0);
@@ -208,7 +208,7 @@ test('an unsupported AI label remains private for review and a later valid class
  const bad=await runOnce({...opts,fetchImpl:translatedNewsFetch(r=>({...r,categories:['crypto']}))});
  assert.equal(bad.categoryReviewCount,1);
  assert.equal(db.data.get('meta/feed').items.length,0);
- const held=db.data.get('pending/review');
+ const held=pendingItem(db.data,'review');
  assert.equal(held.translated,false);assert.equal(held.categoryReview.reasons.crypto,'source-scope-not-proven');
  const good=await runOnce({...opts,now:now+300000,fetchImpl:translatedNewsFetch()});
  assert.equal(good.categoryReviewCount,0);

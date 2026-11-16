@@ -9,7 +9,7 @@
 // โควตา AI นับรายวัน และกันโควตาฉุกเฉินไว้ 3 ข่าวต่อวัน สำหรับข่าวสงครามเกาหลีและข่าวที่มีคำบ่งชี้เหตุด่วน
 const { collect } = require("./lib/collect");
 const { localize, translate, translateTitles, raceTranslate, raceTitles, DEFAULT_MODELS, GROQ_MODELS, GITHUB_MODELS, hasThai } = require("./lib/translate");
-const { CAT_KEYS, FEEDS } = require("./feeds");
+const { CAT_KEYS, FEEDS, FEED_REQUEST_BUDGET } = require("./feeds");
 const { resolveArticle } = require("./lib/images");
 const { grams, similarity, SAME_KO, SAME_TH } = require("./lib/similar");
 const { Quota } = require("./lib/quota");
@@ -60,7 +60,7 @@ const bodyLen = i => ((i.body && i.body.th) || []).join("").length;
 const shown = i => !i.categoryReview && (i.translated || isKorwar(i));
 
 async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken, models = DEFAULT_MODELS, groqModels = GROQ_MODELS, githubModels = GITHUB_MODELS, fetchImpl = fetch, now = Date.now(), log = console, waitMs = 2000, budgetMs = CFG.TIME_BUDGET_MS, imgBudgetMs = 45000, watchEveryMs = CFG.WATCH_EVERY_MS, forceAIProbe = false }) {
-  const feedRequestBudget={remaining:20};
+  const feedRequestBudget={remaining:FEED_REQUEST_BUDGET};
   const hostBackoffRef=db.doc("meta/feedHostBackoff"), hostBackoffSnap=await hostBackoffRef.get();
   const hostBackoff=hostBackoffSnap.exists?hostBackoffSnap.data():{};
   const runStart = Date.now(), runDeadline = runStart + budgetMs;
@@ -522,7 +522,7 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
 
   // ตัดข่าวเก่าและคุมขนาดเอกสาร
   stat.hostBackoff=hostBackoff;
-  stat.feedRequests=20-feedRequestBudget.remaining;
+  stat.feedRequests=FEED_REQUEST_BUDGET-feedRequestBudget.remaining;
   await hostBackoffRef.set(hostBackoff);
   const cut = now - CFG.KEEP_DAYS * DAY;
   const before = items.length;
