@@ -33,11 +33,14 @@ function matchCats(s) {
   return discoverCategories({titleKo:String(s),publisherUrl:'https://www.yna.co.kr'});
 }
 
-async function getText(url, fetchImpl) {
+async function getText(url, fetchImpl, backoff, now) {
+  const host=new URL(url).hostname;
+  if((backoff[host]||0)>now)throw Error("host backoff "+host);
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), 12000);
   try {
     const r = await fetchImpl(url, { signal: ctl.signal, headers: { "User-Agent": "Mozilla/5.0 (KoreaWatch news reader)", Accept: "application/rss+xml,application/xml,text/xml,*/*" } });
+    if(r.status===429||r.status===503)backoff[host]=now+Math.max(15*60e3,(Number(r.headers?.get?.("retry-after"))||0)*1000);
     if (!r.ok) throw new Error("HTTP " + r.status);
     return await require("./http").readText(r);
   } finally { clearTimeout(timer); }
@@ -108,9 +111,19 @@ function mergeSimilar(list) {
   return kept;
 }
 
-async function collect({ fetchImpl = fetch, now = Date.now(), log = console, only = null } = {}) {
+async function collect({ fetchImpl = fetch, now = Date.now(), log = console, only = null, backoff = {}, requestBudget = {remaining:20} } = {}) {
   const feeds = only ? FEEDS.filter(only) : FEEDS;
-  const results = await Promise.allSettled(feeds.map(async f => parseFeed(await getText(f.url, fetchImpl), f, now)));
+  // Serialize each host so a rejection prevents the next request immediately.
+  const lanes=new Map();
+  const results=await Promise.allSettled(feeds.map(f=>{
+    const host=new URL(f.url).hostname;
+    const task=(lanes.get(host)||Promise.resolve()).catch(()=>{}).then(async()=>{
+      if((backoff[host]||0)>now)throw Error('host backoff '+host);
+      if(requestBudget.remaining<=0)throw Error('feed request budget reached');
+      requestBudget.remaining--;return parseFeed(await getText(f.url,fetchImpl,backoff,now),f,now);
+    });
+    lanes.set(host,task);return task;
+  }));
   const byId = new Map(), errors = [];
   results.forEach((r, i) => {
     if (r.status === "rejected") { errors.push(feeds[i].id + ": " + (r.reason?.message || r.reason)); return; }

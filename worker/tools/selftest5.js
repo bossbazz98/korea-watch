@@ -26,7 +26,7 @@ const log = { log() {}, warn() {} };
   // ข่าวเดิม (เวอร์ชัน 5) ที่หัวข้อไทยเป็นภาษาอังกฤษ → ส่งกลับไปแปลใหม่ ส่วนข่าวที่ถูกต้องคงไว้
   const data = new Map();
   const ref = p => ({ async get() { const d = data.get(p); return { exists: !!d, data: () => JSON.parse(JSON.stringify(d)) } }, async set(v) { data.set(p, JSON.parse(JSON.stringify(v))) }, async update() { }, async delete() { } });
-  const db = { doc: ref, collection: () => ({ where() { return this }, limit() { return this }, async get() { return { empty: true, docs: [] } } }) };
+  const db = { doc: ref, collection: col => ({ where() { return this }, limit() { return this }, async get() { const docs=[...data].filter(([p])=>p.startsWith(col+"/")).map(([p,v])=>({id:p.split("/").at(-1),ref:ref(p),data:()=>v}));return {empty:!docs.length,docs} } }) };
   const now = Date.now(), base = { categories: ["president"], level: "normal", translated: true, publishedAt: new Date(now - 6e5).toISOString(), source: "연합뉴스", sourceUrl: "https://www.yna.co.kr/test", links: [], image: "https://img/1.jpg", body: { th: ["เนื้อข่าว"] }, summary: { th: "สรุปข่าว", en: "summary" } };
   data.set("meta/feed", { v: 5, items: [
     { ...base, id: "en", titleKo: "한국 여야 대통령 SNS 공방", title: { th: "Ruling and opposition clash", en: "Ruling and opposition clash" } },

@@ -94,7 +94,7 @@ const log = { log() {}, warn() {} };
   assert.strictEqual(s.added, 0); assert.strictEqual(geminiCalls, calls, "no extra AI call"); assert.strictEqual(msg.sent.length, sentN, "no duplicate push");
 
   // รอบ 3: ติดโควตา ข่าวยังขึ้น (ยังไม่แปล) แล้วแปลได้ในรอบถัดไป
-  feeds.gn_tech = rss([{ t: "인공지능 반도체 신기술 발표", s: "KBS", d: d(0.5) }]);
+  feeds.gn_korwar = rss([{ t: "인공지능 반도체 신기술 발표", s: "KBS", d: d(0.5) }]);
   geminiMode = "quota";
   s = await runOnce({ ...base, now: now + 600e3 });
   feed = allItems(db.data);
@@ -127,7 +127,7 @@ const log = { log() {}, warn() {} };
   assert.strictEqual(db.data.get("meta/status").lastError, null);
 
   // ล้างตัวนับเก่าครั้งเดียว (feed เวอร์ชันก่อน)
-  const f = db.data.get("meta/feed"); f.items.push({ ...f.items[0], id: "old1", translated: false, attempts: 3 }); delete f.v;
+  const f = db.data.get("meta/feed"); db.data.set("pending/old1",{ ...f.items[0], id: "old1", translated: false, attempts: 3 }); delete f.v;
   geminiMode = "busy"; await runOnce({ ...base, now: now + 950e3 });
   assert.strictEqual(allItems(db.data).find(i => i.id === "old1").attempts, 0, "old counters reset once");
   assert.strictEqual(db.data.get("meta/feed").v, 10);
@@ -136,15 +136,15 @@ const log = { log() {}, warn() {} };
   // A malformed pair cannot prevent other batches from completing.
   const distinct = ["키이우 정전 협상 재개", "가자지구 구호품 반입 확대", "이란 핵시설 사찰 논의", "대만해협 해상 순찰 강화", "흑해 곡물 수송로 위협", "시리아 국경 난민 증가", "홍해 상선 우회 항로", "레바논 남부 주민 대피", "나토 정상회의 공동성명", "러시아 국경 병력 이동", "예멘 항구 봉쇄 장기화", "수단 내전 사상자 집계"];
   feeds = { gn_war: rss(distinct.map((t, k) => ({ t: (k === 6 ? "BAD " : "") + t + " 우크라이나 전쟁", s: "KBS", d: d(0.01 * (k + 1)) }))) };
-  { const f2 = db.data.get("meta/feed"); f2.items = f2.items.filter(i => i.translated); db.data.set("meta/pending", {items:[]}); }
+  { const f2 = db.data.get("meta/feed"); f2.items = f2.items.filter(i => i.translated); db.data.set("meta/pending", {items:[]}); for(const [key,value] of db.data) {if(key.startsWith("pending/"))db.data.delete(key);if(key.startsWith("feedDays/"))value.items=value.items.filter(i=>i.translated);} }
   geminiMode = "batchBad"; batchSizes = [];
   s = await runOnce({ ...base, now: now + 960e3 });
-  assert.deepStrictEqual(batchSizes, [2, 2, 2, 2, 2, 2, 2, 2], "batches of 2; malformed JSON retries two alternate models");
+  assert.deepStrictEqual(batchSizes, [4, 4, 4, 4, 4], "batches of 4; malformed JSON retries two alternate models");
   assert.strictEqual(s.titled, 0, "titles-first is only for stories shown before translation (Korean war)");
-  assert.strictEqual(s.translated, 10, "five good batches translated, the bad batch of 2 skipped");
-  assert.strictEqual(s.batches, "5/6");
+  assert.strictEqual(s.translated, 8, "two good batches translated, the bad batch of 4 skipped");
+  assert.strictEqual(s.batches, "2/3");
   const bad = allItems(db.data).filter(i => i.titleKo.includes("우크라이나") && !i.translated);
-  assert.strictEqual(bad.length, 2); assert.ok(bad.every(i => i.attempts === 1), "only the bad batch counted");
+  assert.strictEqual(bad.length, 4); assert.ok(bad.every(i => i.attempts === 1), "only the bad batch counted");
   geminiMode = "ok";
 
   // รอบ 4: 31 วันต่อมา ข่าวเก่าถูกลบ
@@ -154,4 +154,4 @@ const log = { log() {}, warn() {} };
   assert.strictEqual(Object.keys(db.data.get("meta/seen").ids).length, 0, "seen list pruned");
 
   console.log("ผ่านทุกข้อ");
-})().catch(e => { console.error("ไม่ผ่าน:", e.message); process.exit(1); });
+})().catch(e => { console.error("ไม่ผ่าน:", e.stack); process.exit(1); });

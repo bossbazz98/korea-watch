@@ -39,3 +39,12 @@ test('all versioned runtime dependencies are precached and have no-cache Hosting
  const header=config.hosting.headers.find(h=>h.source.startsWith('/@('));
  for(const file of ['news-policy.js','category-policy.js','feed-data.js','pull-refresh.js'])assert(header.source.includes(file));
 });
+test('KST day ranges page backwards in groups of three and retain split-day items',async()=>{
+ const {feedDayRange,mergeFeedItems}=await import('../../public/feed-data.js');
+ const now=Date.parse('2026-11-16T16:00:00Z');
+ assert.deepEqual(feedDayRange(0,3,now),{from:'2026-11-15',to:'2026-11-17'});
+ assert.deepEqual(feedDayRange(3,3,now),{from:'2026-11-12',to:'2026-11-14'});
+ const one=story(1),two=story(2);assert.equal(mergeFeedItems([one],[two],[{...one,title:{th:'ข่าวฉบับใหม่'}}]).length,2);
+ assert.equal(mergeFeedItems([one],[{...one,title:{th:'ข่าวฉบับใหม่'}}])[0].title.th,'ข่าวฉบับใหม่');
+ assert.equal(mergeFeedItems([{...one,publishedAt:new Date(Date.now()-31*86400000).toISOString()}]).length,0);
+});

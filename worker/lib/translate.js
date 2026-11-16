@@ -15,13 +15,12 @@ Rules:
 - Choose categories from the MAIN news event, not passing mentions, background, related-story links or guessedCategories. Require an explicit South Korean connection for foreign/wage/president; foreign must actually involve foreigners. Thai requires a substantive Thailand–South Korea connection; generic E-9/marriage visa stories are not automatically Thai. Multiple categories apply only when each is a substantial part of the main event.
 - "korwar" and "war" are different: use "korwar" only for the Korean Peninsula; use "war" for conflicts elsewhere.
 - "level": "critical" only for a confirmed North Korean attack on South Korea, a North Korean missile/rocket launch or test, an attack on South Korea, a missile falling near South Korea, or a South Korean soldier stepping on an antipersonnel mine. Threats, plans, drills, old anniversaries and speculation are not critical. "high" for important developments in those categories or major policy changes affecting foreign workers. Otherwise "normal".
-- "title" and "summary" in natural Thai ("th", written in Thai script), English ("en") and Korean ("ko"). summary: 2-3 sentences with the key facts.
-- "body_th": a detailed Thai summary as an array of paragraphs. When "article" has enough text, write 4-6 paragraphs covering: what happened, where and when, who is involved, key numbers, causes and reactions, impact, and what happens next (only parts the article actually covers). When only a headline/snippet is available, write 1-2 short paragraphs.
-- "body_en" and "body_ko": arrays containing the same factual summary as body_th, written entirely in English and Korean respectively. Keep paragraphs concise so all three languages fit in the response. Do not omit these fields.
-- "tips_en" and "tips_ko": the same points as tips_th, in English and Korean.
+- "title" and "summary" must contain Thai only ("th", written in Thai script). summary: 2-3 factual sentences.
+- "body_th": a detailed Thai summary as an array of 4-6 concise paragraphs when article text is available, otherwise 1-2 short paragraphs. Use only facts from the input.
+- Produce Thai only. English and Korean are handled separately after publication.
 - "tips_th": 0-3 short practical points in Thai for Thai people living in Korea (e.g. what to watch out for, what to do), ONLY when the news clearly affects them (work, visas, health, prices, safety). Otherwise an empty array. Never invent advice that the facts do not support.
 Reply with ONLY this JSON object, one entry per input item, same "i":
-{"items":[{"i":0,"relevant":true,"categories":["war"],"level":"high","title":{"th":"","en":"","ko":""},"summary":{"th":"","en":"","ko":""},"body_th":[""],"body_en":[""],"body_ko":[""],"tips_th":[],"tips_en":[],"tips_ko":[]}]}`;
+{"items":[{"i":0,"relevant":true,"categories":["war"],"level":"high","title":{"th":""},"summary":{"th":""},"body_th":[""],"tips_th":[]}]}`;
 
 const SYSTEM_TITLES = `Translate Korean news headlines for a news app read by Thai people in South Korea.
 For each input item give a natural, concise Thai headline ("th", in Thai script) and English headline ("en").

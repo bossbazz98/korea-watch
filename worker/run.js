@@ -1,5 +1,5 @@
 // Korea Watch: ตัวค้นข่าว รันบน GitHub Actions ทุก 5 นาที
-// ข่าวทั้งหมดเก็บในเอกสารเดียว (meta/feed) เพื่อให้เปิดแอปแต่ละครั้งใช้การอ่านฐานข้อมูลแค่ 1 ครั้ง (ประหยัดโควตาฟรี)
+// Published history lives in KST feedDays; meta/feed is a bounded latest index.
 // ลำดับงานในแต่ละรอบ:
 //   0) รับงานแก้จาก AI Agent
 //   1) ดึงข่าวใหม่ รวมข่าวซ้ำ (ข่าวเรื่องเดียวกันจากหลายสำนัก = ข่าวเดียว หลายแหล่งข่าว)
@@ -13,7 +13,7 @@ const { CAT_KEYS, FEEDS } = require("./feeds");
 const { resolveArticle } = require("./lib/images");
 const { grams, similarity, SAME_KO, SAME_TH } = require("./lib/similar");
 const { Quota } = require("./lib/quota");
-const { persist, prepare } = require("./lib/storage");
+const { persist, prepare, load, migrate } = require("./lib/storage");
 const { balancedQueue } = require("./lib/scheduler");
 const policy = require("../public/news-policy");
 const pushLanguage = require("./lib/notification-language");
@@ -26,7 +26,7 @@ const CFG = {
   TITLE_BATCH: 40,     // หัวข้อต่อ 1 คำขอ (โหมดแปลเฉพาะหัวข้อ)
   TITLES_MAX: 80,      // หัวข้อสูงสุดต่อรอบ
   PRIORITY_MAX: 20,    // อ่านคิวแปลด่วนสูงสุดต่อรอบ
-  BATCH: 2,            // ข่าวต่อ 1 คำขอ (ส่งเนื้อข่าวยาวไปด้วย ชุดเล็กไม่ชนเพดานต่อนาที)
+  BATCH: 4,            // ข่าวต่อ 1 คำขอ (ส่งเนื้อข่าวยาวไปด้วย ชุดเล็กไม่ชนเพดานต่อนาที)
   LOCALIZE_PER_RUN: 4, // Repair missing English/Korean editions without re-sending alerts.
   ENRICH_PER_RUN: 4,   // ข่าวเก่าที่เนื้อหาสั้น เขียนใหม่ให้ละเอียดสูงสุดกี่ข่าวต่อรอบ
   SHORT_BODY: 400,     // เนื้อหาไทยสั้นกว่านี้ (ตัวอักษร) ถือว่าสั้นเกินไป
@@ -39,8 +39,6 @@ const CFG = {
   KORWAR_ITEM_MS: 40000,    // เวลารอสูงสุดต่อคำขอแปลเนื้อหา
   KORWAR_TEXT: 1500,        // ทางด่วนส่งเนื้อข่าวสั้นลง (เร็วขึ้น ไม่ชนเพดานต่อนาที) แล้วเขียนละเอียดภายหลัง
   KEEP_DAYS: 30,       // เก็บข่าวกี่วัน
-  FEED_MAX: 250,       // จำนวนข่าวสูงสุดในแอป
-  FEED_MAX_BYTES: 750000, // เอกสาร Firestore ต้องไม่เกิน 1 MB
   SEEN_DAYS: 4,        // จำข่าวที่เคยเห็นกี่วัน (กันซ้ำ)
   DEDUPE_H: 48,        // เทียบข่าวซ้ำย้อนหลังกี่ชั่วโมง
   MAX_ATTEMPTS: 4,     // แปลไม่สำเร็จกี่ครั้งแล้วพักไว้
@@ -62,10 +60,15 @@ const bodyLen = i => ((i.body && i.body.th) || []).join("").length;
 const shown = i => !i.categoryReview && (i.translated || isKorwar(i));
 
 async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken, models = DEFAULT_MODELS, groqModels = GROQ_MODELS, githubModels = GITHUB_MODELS, fetchImpl = fetch, now = Date.now(), log = console, waitMs = 2000, budgetMs = CFG.TIME_BUDGET_MS, imgBudgetMs = 45000, watchEveryMs = CFG.WATCH_EVERY_MS, forceAIProbe = false }) {
+  const feedRequestBudget={remaining:20};
+  const hostBackoffRef=db.doc("meta/feedHostBackoff"), hostBackoffSnap=await hostBackoffRef.get();
+  const hostBackoff=hostBackoffSnap.exists?hostBackoffSnap.data():{};
   const runStart = Date.now(), runDeadline = runStart + budgetMs;
   const feedRef = db.doc("meta/feed"), seenRef = db.doc("meta/seen"), statusRef = db.doc("meta/status"), quotaRef = db.doc("meta/quota");
+  if(typeof db.collection==='function')await migrate(db);
   const [feedSnap, seenSnap, quotaSnap, pendingSnap] = await Promise.all([feedRef.get(), seenRef.get(), quotaRef.get(), db.doc("meta/pending").get()]);
   let items = [...new Map([...(feedSnap.exists ? (feedSnap.data().items || []) : []), ...(pendingSnap.exists ? (pendingSnap.data().items || []) : [])].map(i => [i.id, i])).values()];
+  if(typeof db.collection==='function')items=await load(db);
   const publishedBeforeRun=new Set(items.filter(i=>i.translated).map(i=>i.id));
   const seen = seenSnap.exists ? { ...(seenSnap.data().ids || {}) } : {};
   const quota = new Quota(quotaSnap.exists ? quotaSnap.data() : {}, now);
@@ -141,7 +144,7 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
   let saving = Promise.resolve();
   const saveFeed = () => (saving = saving.then(async () => {
     const stamp=iso(Date.now());
-    await persist(db, structuredClone(items), { updatedAt: stamp, v: FEED_V }, seen, quota.toJSON(), toPush.map(n => ({ news: {id:n.id,title:n.title,summary:n.summary,categories:n.categories,level:n.level,titleKo:n.titleKo,publisherUrl:n.publisherUrl || n.sourceUrl}, appUrl, status:"pending", expiresAt:Date.now()+6*3600e3 })));
+    await persist(db, structuredClone(items), { updatedAt: stamp, v: FEED_V }, seen, quota.toJSON(), toPush.map(n => ({ news: {id:n.id,title:n.title,summary:n.summary,categories:n.categories,level:n.level,titleKo:n.titleKo,publisherUrl:n.publisherUrl || n.sourceUrl}, appUrl, status:"pending", expiresAt:Date.now()+6*3600e3 })), {now});
     publishedAt=stamp;
   }));
   let fixDocs = [];
@@ -228,7 +231,7 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
     }
     return fresh;
   };
-  const { list, errors } = await collect({ fetchImpl, now, log });
+  const { list, errors } = await collect({ requestBudget:feedRequestBudget, backoff:hostBackoff, fetchImpl, now, log });
   stat.feedErrors = errors;
   ingest(list);
 
@@ -271,8 +274,7 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
   const hasAI = !!(geminiKey || groqKey || githubToken);
   const aiOpts = { apiKey: geminiKey, groqKey, githubToken, models, groqModels, githubModels, fetchImpl, log, waitMs, cool: new Map(), quota, tpm: new Map(), modelErrors: new Map(), unavailable: new Map() };
   const deadline = runDeadline - imgBudgetMs, used = new Set(), errs = [], drop = new Set(), tried = new Set();
-  const localizationReserve=items.some(i=>i.translated&&completeThai(i)&&missingLanguages(i).length)?Math.min(30000,Math.max(0,deadline-Date.now()-60000)):0;
-  const publicationDeadline=deadline-localizationReserve;
+  const publicationDeadline=deadline;
   let ok = 0, total = 0, stopAI = false;
   stat.titled = 0; stat.priority = 0; stat.enriched = 0;
   const timeLeft = (publication = false) => { if ((publication ? publicationDeadline : deadline) - Date.now() < 20000) { errs.push("time budget reached"); return false } return true };
@@ -402,7 +404,7 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
       await nap(watchEveryMs);
       if (!watching) break;
       try {
-        const r = await collect({ fetchImpl, now: Date.now(), log, only: f => f.korwar });
+        const r = await collect({ requestBudget:feedRequestBudget, backoff:hostBackoff, fetchImpl, now: Date.now(), log, only: f => f.korwar });
         const fresh = ingest(r.list.filter(n => n.cats.includes("korwar")));
         if (fresh.length) { log.log(`watch: ${fresh.length} new Korean-war item(s)`); await fastKorwar(); await saveFeed(); }
       } catch (e) { log.warn("watch failed", e.message) }
@@ -460,8 +462,8 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
     for (let b = 0; b < work.length; b += CFG.BATCH) batches.push(work.slice(b, b + CFG.BATCH));
     await parallel(batches, (batch, k) => fullBatch(batch, k));
     // Published stories remain available while missing languages are filled in. A small
-    // bounded time budget is reserved for repairs, after new publication has used its quota first.
-    const localizationQueue=items.filter(i=>publishedBeforeRun.has(i.id)&&i.translated&&completeThai(i)&&missingLanguages(i).length&&now-(i.localeLastTry||0)>=15*60e3)
+    // bounded pass uses only time and quota left after the Thai queue is processed.
+    const localizationQueue=(stopAI||queue.some(i=>!tried.has(i.id)))?[]:items.filter(i=>publishedBeforeRun.has(i.id)&&i.translated&&completeThai(i)&&missingLanguages(i).length&&now-(i.localeLastTry||0)>=15*60e3)
       .sort((a,b)=>(a.localeLastTry||0)-(b.localeLastTry||0)||b.publishedAt.localeCompare(a.publishedAt)).slice(0,CFG.LOCALIZE_PER_RUN);
     stat.localized=0;
     const localizationDeadline=Math.min(deadline,Date.now()+30000);
@@ -519,9 +521,12 @@ async function runOnce({ db, messaging, appUrl, geminiKey, groqKey, githubToken,
   if (gone.size) { items = items.filter(i => !gone.has(i.id)); stat.merged += gone.size; feedChanged = true; }
 
   // ตัดข่าวเก่าและคุมขนาดเอกสาร
+  stat.hostBackoff=hostBackoff;
+  stat.feedRequests=20-feedRequestBudget.remaining;
+  await hostBackoffRef.set(hostBackoff);
   const cut = now - CFG.KEEP_DAYS * DAY;
   const before = items.length;
-  const retained = prepare(items.filter(i => policy.trusted(i) && (Date.parse(i.publishedAt) || 0) >= cut), CFG.FEED_MAX_BYTES, CFG.FEED_MAX);
+  const retained = prepare(items.filter(i => policy.trusted(i) && (Date.parse(i.publishedAt) || 0) >= cut));
   items = [...retained.published, ...retained.pending];
   if (items.length !== before) feedChanged = true;
   for (const [id, t] of Object.entries(seen)) if (now - t > CFG.SEEN_DAYS * DAY) { delete seen[id]; seenChanged = true; }

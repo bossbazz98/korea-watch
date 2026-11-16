@@ -49,7 +49,7 @@ const web = async (url, opt = {}) => {
   // ในรอบจริง: ข่าวที่แปลแล้วได้ภาพและลิงก์จริง / เว็บเสียนับครั้ง / ครบ 3 ครั้งเลิก
   const data = new Map();
   const ref = p => ({ async get() { const d = data.get(p); return { exists: !!d, data: () => JSON.parse(JSON.stringify(d)) } }, async set(v) { data.set(p, JSON.parse(JSON.stringify(v))) }, async update() { }, async delete() { } });
-  const db = { doc: ref, collection: () => ({ where() { return this }, limit() { return this }, async get() { return { empty: true, docs: [] } } }) };
+  const db = { doc: ref, collection: col => ({ where() { return this }, limit() { return this }, async get() { const docs=[...data].filter(([p])=>p.startsWith(col+"/")).map(([p,v])=>({id:p.split("/").at(-1),ref:ref(p),data:()=>v}));return {empty:!docs.length,docs} } }) };
   const now = Date.now();
   const base = { titleKo: "우크라이나 전쟁 휴전 협상", publisherUrl:"https://www.yna.co.kr", title: { th: "ก", en: "a" }, summary: {th:"สรุปข่าว"}, body: {}, categories: ["war"], level: "normal", translated: true, publishedAt: new Date(now - 6e5).toISOString(), source: "연합뉴스" };
   data.set("meta/feed", { v: 8, items: [

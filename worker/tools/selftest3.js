@@ -53,7 +53,7 @@ const okReply = async (url, opt) => {
   db = fakeDb();
   await db.doc("meta/feed").set({ v: 8, items: Array.from({ length: 35 }, (_, k) => item("n" + k)) });
   const s3 = await runOnce({ db, messaging: msg, appUrl: "https://x", geminiKey: "k", fetchImpl: okReply, now, log, waitMs: 0 });
-  assert.strictEqual(s3.translated, 16); assert.strictEqual(s3.batches, "8/8"); assert.strictEqual(s3.pending, 19);
+  assert.strictEqual(s3.translated, 16); assert.strictEqual(s3.batches, "4/4"); assert.strictEqual(s3.pending, 19);
 
   // 4) รุ่นปฏิเสธการตั้งค่า thinking ด้วยข้อความอะไรก็ได้ → ลองใหม่แบบไม่ตั้งค่า
   const seen = [];

@@ -1,0 +1,25 @@
+{
+  "checkedForDate": "2026-11-17 Asia/Seoul",
+  "source": "npm view <package>@<version> time deprecated --json",
+  "versions": [
+    {
+      "package": "fast-xml-parser",
+      "version": "5.12.0",
+      "releasedAt": "2026-11-03T12:15:08.693Z",
+      "deprecated": false
+    },
+    {
+      "package": "firebase-tools",
+      "version": "15.35.0",
+      "releasedAt": "2026-11-04T19:16:34.781Z",
+      "deprecated": false
+    },
+    {
+      "package": "playwright",
+      "version": "1.65.0",
+      "releasedAt": "2026-11-05T18:28:14.786Z",
+      "deprecated": false
+    }
+  ],
+  "note": "Exact task pins retained; release dates conflict with the blanket 14-day minimum. Inherited transitive deprecations remain."
+}

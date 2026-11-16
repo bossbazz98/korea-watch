@@ -21,13 +21,13 @@ export function attachPullRefresh({element,space,canStart,isBusy,refresh,thresho
     if(remaining)timer=setTimeout(complete,remaining);else complete();
   };
   const begin=event=>{
-    if(phase!=='idle'||isBusy()||event.touches.length!==1||!canStart())return;
+    if(scrollY>0||phase!=='idle'||isBusy()||event.touches.length!==1||!canStart())return;
     if(!event.target.closest?.('#home-page')||event.target.closest('input,select,textarea,[contenteditable="true"]'))return;
     const touch=event.touches[0];start={x:touch.clientX,y:touch.clientY,vertical:false};
   };
   const cancel=()=>{if(start||phase==='pulling'||phase==='ready'){start=null;collapse()}};
   const move=event=>{
-    if(!start)return;if(event.touches.length!==1||!canStart()||isBusy()){cancel();return}
+    if(!start)return;if(scrollY>0||event.touches.length!==1||!canStart()||isBusy()){cancel();return}
     const touch=event.touches[0],dy=touch.clientY-start.y,dx=Math.abs(touch.clientX-start.x);
     if(!start.vertical){if(dx>8&&dx>Math.abs(dy)){cancel();return}if(dy<-8){cancel();return}if(dy<8||dy<dx*1.3)return;start.vertical=true}
     if(event.cancelable)event.preventDefault();document.documentElement.classList.add('pull-active');

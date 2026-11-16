@@ -1,3 +1,41 @@
+# Validation — 2026-11-17 (Asia/Seoul)
+
+This section supersedes the historical reports below. No push, merge, deployment, production migration, real AI request or real notification delivery was performed.
+
+Runtime: macOS, Node v24.22.3, npm 11.12.1, Google Chrome 157.0.8103.51, OpenJDK 21.0.13.
+
+Commands were run from `~/codex-test/korea-watch-fix/worker` with:
+
+```sh
+export PATH=/Users/boss/.npm/_npx/387698761821791d/node_modules/node/bin:$PATH
+export AGENT_CHROMIUM='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+npm ci && npm run build:web && npm test
+npm run test:rules
+npm run test:ui-repeat
+npm run test:ui-repeat -- --navigation-only
+npm run test:ui-repeat -- --first-paint-only
+node --test tools/feed-days.test.cjs tools/feed-data.test.cjs tools/translation-publication.test.cjs tools/categories.test.cjs tools/regression.test.js tools/languages.test.cjs
+npm audit --json
+```
+
+- `npm ci && npm run build:web && npm test`: PASSED, exit 0, on the final implementation. All twelve original self-test groups, new retention tests, integration/regression/unit tests, settings, navigation/pagination and first-paint checks passed.
+- `npm run test:ui-repeat`: settings and navigation each passed ten consecutive runs, exit 0. Navigation passed another ten consecutive runs after the notification-history regression was added. First-paint also passed ten consecutive runs (`--first-paint-only`), exit 0.
+- Focused final tests: 55 passed, zero failures. Includes 900 multilingual records at realistic sizes across 30 days, 31-day expiry, split document sizes, unchanged-day write suppression, migration idempotency and public/private duplicate-ID handling, Thai-only publication, localization without duplicate notification, category scope, 429/503 host backoff and the shared 20-request budget.
+- Firestore emulator rules: passed with Java 21. Anonymous reads of `feedDays` succeed; client writes and private backlog reads fail as expected, along with the pre-existing authorization/cooldown tests.
+- Browser pagination: newest three days first, day split parts, all 900 stories via scroll, the partial oldest KST date inside the 30-day age window, and a cold notification target outside the latest index; offline behavior uses a mocked cached-query adapter. This does not claim a production Firestore offline-cache integration test.
+- Production migration command is documented and unit tested, but was not run against Firebase.
+
+Dependency verification:
+
+- `npm audit --json > audit-before.json`: 20 findings (1 low, 14 moderate, 5 high), exit 1.
+- `npm audit --json > audit-after.json`: 19 findings (14 moderate, 5 high), exit 1. No critical findings. Remaining findings are not claimed fixed.
+- Exact task pins installed: fast-xml-parser 5.12.0, firebase-tools 15.35.0, Playwright 1.65.0. Firebase Admin remains 14.5.0 and Firebase remains 13.2.0; no prohibited versions were introduced.
+- Primary npm registry metadata reports releases on November 3, 4 and 5 respectively. These conflict with the blanket minimum-age rule on November 17. The exact named pins were used as the most specific instruction; none of these direct versions is deprecated. The inherited tree still emits ten transitive deprecation warnings. Evidence is in `dependency-release-check.json` and both audit JSON files.
+
+Earlier failed test attempts led to fixture updates for new storage/grouped feeds, larger batches, and Thai fallback. A missing browser override was corrected using the installed Chrome. Fixed-time lens assertions and the unfinished scroll-to-top animation exposed further test races; the final pass results above were recorded after the fixes.
+
+---
+
 # Validation
 
 This report is populated after final validation. Production Firebase/FCM/AI operations are not exercised by the offline tests.

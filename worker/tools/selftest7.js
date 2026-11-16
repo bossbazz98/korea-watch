@@ -80,6 +80,7 @@ const KO = "북한이 31일 오전 동해상으로 단거리 탄도미사일 여
   assert.strictEqual(st.pushed, 0, "rewritten old story does not trigger a second alert (new1 has no subscribers)");
 
   // 4) รุ่นที่โดน 429 ถูกพักไว้ 60 วินาที: ชุดถัดไปในรอบเดียวกันไม่ลองรุ่นนั้นซ้ำ
+  data.clear(); // Independent run fixture starts before the one-time migration.
   const sixTitles = ["유가 급등 정유사 대책", "원달러 환율 1400원 돌파 우려", "한국 최저임금 심의 시작", "한국 외국인 근로자 쿼터 확대", "한국 외국인 근로기준법 개정안 통과", "대통령실 정책 브리핑"];
   data.set("meta/feed", { v: 8, items: [1, 2, 3, 4, 5, 6].map(k => ({ ...base, categories: ["oil"], id: "r" + k, titleKo: sixTitles[k - 1], title: { ko: sixTitles[k - 1] }, translated: false, publishedAt: iso(k * 0.1), sourceUrl: "https://www.yna.co.kr/r" + k })) });
   groqCalls.length = 0; mode = "rate";

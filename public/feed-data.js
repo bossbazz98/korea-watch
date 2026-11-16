@@ -36,3 +36,13 @@ export function normalizeFeed(value) {
   }
   return {items,errors};
 }
+
+// KST calendar ranges include every split part of each day, also from offline cache.
+export function feedDayRange(offset, count, now=Date.now()) {
+  const day=86400000, date=ms=>new Date(ms+9*3600000).toISOString().slice(0,10);
+  return {from:date(now-(offset+count-1)*day),to:date(now-offset*day)};
+}
+export function mergeFeedItems(...groups) {
+  const cutoff=Date.now()-30*86400000;
+  return [...new Map(groups.flat().filter(i=>timestamp(i.publishedAt)>=cutoff).map(i=>[i.id,i])).values()].sort((a,b)=>timestamp(b.publishedAt)-timestamp(a.publishedAt));
+}

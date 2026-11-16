@@ -67,3 +67,12 @@ Not a promise of complete semantic deduplication, exactly-once FCM delivery, pro
 - Release starts the existing news reader immediately, once per gesture. Keep current stories and show กำลังอัปเดตข่าว… while awaiting the feed. Status metadata is read independently and cannot delay applying the feed or finishing the spinner.
 - Compare reader-visible content to show อัปเดตข่าวแล้ว or ยังไม่มีข่าวใหม่ accurately; metadata/object-key-order changes alone do not count as new content. Show the check/result or temporary failure message for one second, then collapse over 220ms. Reduced motion removes collapse/spinner animation. Horizontal rails, busy guards and retry after error remain covered.
 - No category/filter/worker/Firestore-rule changes. The versioned refresh import and offline shell are rebuilt for Hosting deployment.
+
+## 2026-11-17 — 30-day feed and Thai-first publication
+
+- Replace size-limited retention with KST `feedDays` documents, split below 800 KB, and private `pending/{id}` records. Retain news for 30 days; maintain a bounded 60-item/700-KB legacy latest index. Write only changed day/backlog records.
+- Add retry-safe legacy migration and `npm run migrate:feed-days`; worker performs migration before reading its new storage. Clients load three days initially, then three-day ranges on scroll, using the persistent Firestore cache.
+- Main editorial request produces Thai only, with batches of four. English/Korean localization uses only remaining publication time/quota, capped at four stories; language gaps display Thai. Localization does not republish notifications.
+- Reduce discovery to 14 initial feeds: four combined topic queries, four publisher groups, six unchanged direct RSS feeds; cap the whole run including rechecks at 20 requests. Persist host backoff after 429/503 and serialize requests per host.
+- Seek segmented-control animations through the Web Animations API in tests; reject pull refresh when scrolled at touch start or move. Await pending fixture reads before gesture assertions.
+- Pin fast-xml-parser 5.12.0, firebase-tools 15.35.0 and Playwright 1.65.0; keep firebase-admin 14.5.0 and Firebase 13.2.0. See TEST-REPORT.md for release-age conflict, audit findings and actual verification.

@@ -9,7 +9,7 @@ test('catalogue has exactly the requested twelve topics in order; All is a separ
  assert.deepEqual(Object.keys(labels),['korwar','war','disease','tech','crypto','foreign','wage','fx','oil','thai','president','hot']);
  assert.deepEqual(Object.keys(CATS),Object.keys(labels));
  assert(!FEEDS.some(feed=>['food','korea','law'].includes(feed.hint)));
- for(const key of ['tech','crypto','foreign','wage','fx','hot'])assert(FEEDS.some(feed=>feed.hint===key),key);
+ for(const [key,term] of Object.entries({tech:'인공지능',crypto:'암호화폐',foreign:'외국인',wage:'최저임금',fx:'원달러',hot:'주요 뉴스'}))assert(FEEDS.some(feed=>decodeURIComponent(feed.url).includes(term)),key+' remains in grouped searches');
 });
 test('country/topic guards reject unrelated wars, foreign wages, other presidents and non-won currencies',()=>{
  for(const title of ['캄보디아 전투 준비 태세 강화','캄보디아 태국 국경 교전','러시아군 전쟁 준비','北京 국제 회의']) assert(!classify(title,['korwar']).includes('korwar'),title);

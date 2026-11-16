@@ -43,7 +43,7 @@ const now = Date.now();
   // 4) ทางด่วน: ข่าวที่พลาดครบ 4 ครั้งเมื่อ 15 นาทีก่อน ได้ลองใหม่ / แข่งแปลพลาดทุกช่องทาง → ใช้วิธีปกติในรอบเดียวกัน
   const data = new Map();
   const ref = p => ({ async get() { const d = data.get(p); return { exists: !!d, data: () => JSON.parse(JSON.stringify(d)) } }, async set(v) { data.set(p, JSON.parse(JSON.stringify(v))) }, async update() { }, async delete() { data.delete(p) } });
-  const db = { doc: ref, collection: () => ({ where() { return this }, limit() { return this }, async get() { return { empty: true, docs: [] } } }) };
+  const db = { doc: ref, collection: col => ({ where() { return this }, limit() { return this }, async get() { const docs=[...data].filter(([p])=>p.startsWith(col+"/")).map(([p,v])=>({id:p.split("/").at(-1),ref:ref(p),data:()=>v}));return {empty:!docs.length,docs} } }) };
   data.set("meta/feed", { v: 8, items: [{ id: "kw1", titleKo: "김여정 \"美, 해킹을 우리 소행으로 오도\"", title: { ko: "김여정" }, summary: { ko: "x" }, body: {}, categories: ["korwar"], level: "normal", translated: false, attempts: 4, lastTry: now - 15 * 60e3, publishedAt: new Date(now - 3 * 3600e3).toISOString(), addedAt: new Date(now - 3 * 3600e3).toISOString(), source: "동아일보", sourceUrl: "https://www.donga.com/1", links: [] }] });
   const seen = [];
   const f4 = async (url, opt) => {

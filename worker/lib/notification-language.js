@@ -12,7 +12,7 @@ function notification(news,lang,{test=false}={}) {
   const copy=COPY[lang];
   if(test)return {title:'KOREA WATCH',body:copy.test+'\n'+copy.testBody};
   const tag=copy[news.level]||copy.normal;
-  const headline=pick(news.title,lang)||(lang==='ko'?pick(news.titleKo,'ko'):'')||copy.pending;
+  const headline=pick(news.title,lang)||pick(news.title,'th')||(lang==='ko'?pick(news.titleKo,'ko'):'')||copy.pending;
   return {title:'KOREA WATCH',body:tag+'\n'+headline};
 }
 module.exports={languageOf,groups,notification};

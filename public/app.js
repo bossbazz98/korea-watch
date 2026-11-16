@@ -1,5 +1,5 @@
-import { normalizeFeed, timestamp } from "./feed-data.js?v=20261112-verified-news";
-import { attachPullRefresh } from "./pull-refresh.js?v=20261111-interactions";
+import { normalizeFeed, timestamp, feedDayRange, mergeFeedItems } from "./feed-data.js?v=20261117-retention";
+import { attachPullRefresh } from "./pull-refresh.js?v=20261117-retention";
 import { AlertAudio, SOUND_PRESETS } from "./audio.js";
 import { writeSubscription } from "./subscriptions.js";
 import { createReadingList } from "./reading-list.js";
@@ -135,7 +135,7 @@ document.documentElement.style.setProperty('--font-scale', fontScale);
 const readingList = createReadingList({ getItem:key => localStorage.getItem(key), setItem:(key,value) => localStorage.setItem(key,value) });
 function haptic() { if (vibration) { try { navigator.vibrate?.(15); } catch {} } }
 function categoryLabel(key) { return lang === 'ko' ? CATEGORY_KO[key] || '' : CATS[key]?.[lang] || ''; }
-function headlineOf(n) { return globalThis.KW_NEWS_TEXT.pick(n.title,lang) || (lang==='ko' ? globalThis.KW_NEWS_TEXT.pick(n.titleKo,'ko') : '') || t('translationPending'); }
+function headlineOf(n) { return globalThis.KW_NEWS_TEXT.pick(n.title,lang) || globalThis.KW_NEWS_TEXT.pick(n.title,'th') || (lang==='ko' ? globalThis.KW_NEWS_TEXT.pick(n.titleKo,'ko') : '') || t('translationPending'); }
 function categoryBadges(n,limit=Infinity) {
   const keys=[...new Set(cats(n).filter(c=>CATS[c]))],extra=keys.length-limit;
   return keys.slice(0,limit).map(c=>`<span class="chip">${esc(categoryLabel(c))}</span>`).join('')+(extra>0?`<span class="chip chip-overflow" aria-label="${esc(t('moreTopics')(extra))}" title="${esc(keys.slice(limit).map(categoryLabel).join(', '))}">+${extra}</span>`:'');
@@ -150,7 +150,7 @@ const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 const isStandalone = () => matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
 
-const L = value => globalThis.KW_NEWS_TEXT.pick(value, lang) || t("translationPending");
+const L = value => globalThis.KW_NEWS_TEXT.pick(value, lang) || globalThis.KW_NEWS_TEXT.pick(value, "th") || t("translationPending");
 const t = k => T[lang][k];
 function ago(ms) { const s = (Date.now() - ms) / 1000; if (s < 90) return t("now"); if (s < 3600) return Math.round(s / 60) + " " + t("m"); if (s < 86400) return Math.round(s / 3600) + " " + t("h"); return Math.round(s / 86400) + " " + t("d") }
 function kst(ms) { try { return new Intl.DateTimeFormat(lang === 'th' ? 'th-TH' : lang === 'ko' ? 'ko-KR' : 'en-GB', { timeZone: "Asia/Seoul", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(ms)) + " " + t("kst") } catch (e) { return new Date(ms).toLocaleString() } }
@@ -294,7 +294,8 @@ function bookmarkButton() {
 }
 function openItem(id) {
   const n=readingList.get(id)||items.find(x=>String(x.id)===String(id));if(!n)return false;
-  const paras=globalThis.KW_NEWS_TEXT.body(n.body,lang);
+  const edition=globalThis.KW_NEWS_TEXT.complete(n,lang)?lang:'th';
+  const paras=globalThis.KW_NEWS_TEXT.body(n.body,edition);
   const links=(Array.isArray(n.links)&&n.links.length?n.links:(n.sourceUrl?[{label:n.source,url:n.sourceUrl}]:[])).filter(Boolean).map(l=>({label:l.label,url:safeUrl(l.url)})).filter(l=>l.url);
   const headline=headlineOf(n);
   showSheet(`<div class="reader-top"><div class="reader-sticky glass" aria-hidden="true"><span>${esc(headline)}</span><div class="read-progress"><i></i></div></div><button class="icon-button glass" id="close" aria-label="${t('close')}">${uiIcon('close')}</button></div>
@@ -600,14 +601,30 @@ function renderRefreshState() {
   indicator.hidden = capsuleRefresh || (!refreshingNews && refreshMessage !== 'refreshFailed');
   indicator.textContent = t(refreshingNews ? 'refreshing' : refreshMessage);
 }
+let olderFeedItems=[], dayFeedActive=false, dayOffset=0, dayLoading=false, dayReload=false;
+async function loadFeedDays() {
+  if(dayLoading||dayOffset>=31||!fb?.fs.getDocs)return;
+  dayLoading=true;const offsetBefore=dayOffset;
+  try {
+    const {fs,db}=fb,count=Math.min(3,31-dayOffset),range=feedDayRange(dayOffset,count);
+    const query=fs.query(fs.collection(db,'feedDays'),fs.where('date','>=',range.from),fs.where('date','<=',range.to));
+    const snap=await fs.getDocs(query);
+    const normalized=normalizeFeed(snap.docs.flatMap(d=>d.data().items||[]));
+    olderFeedItems=mergeFeedItems(olderFeedItems,normalized.items);dayFeedActive=true;dayOffset+=count;
+    items=mergeFeedItems(olderFeedItems,items);loaded=true;render();openDeepLink({final:dayOffset>=31});
+  } catch(error){console.warn('feed days',error.code||error.message)}
+  finally{dayLoading=false;if(dayReload){dayReload=false;dayOffset=0;queueMicrotask(loadFeedDays)}else if(dayOffset>offsetBefore&&dayOffset<31&&(deepId||(currentView==='home'&&$('sheet').hidden&&scrollY+innerHeight>=document.documentElement.scrollHeight-600)))queueMicrotask(loadFeedDays)}
+}
+function reloadFeedDays(){if(!fb?.fs.getDocs)return;if(dayLoading){dayReload=true;return}dayOffset=0;loadFeedDays()}
+addEventListener('scroll',()=>{if(currentView==='home'&&$('sheet').hidden&&scrollY>0&&scrollY+innerHeight>=document.documentElement.scrollHeight-600)loadFeedDays()},{passive:true});
 function applyFeedSnapshot(snapshot) {
   const list = snapshot.exists() ? snapshot.data().items : [];
   const normalized = normalizeFeed(list);
   if (normalized.errors.length) console.warn('Feed records could not be displayed', normalized.errors);
-  items = normalized.items;
+  items = dayFeedActive ? mergeFeedItems(olderFeedItems,normalized.items) : normalized.items;
   try { readingList.refresh(items); } catch { /* Storage limits must not interrupt the live feed. */ }
   if (items.length) refreshMessage = 'refreshed';
-  loaded = true; render(); openDeepLink({final:!snapshot.metadata?.fromCache});
+  loaded = true; render(); openDeepLink({final:!snapshot.metadata?.fromCache&&(!fb?.fs.getDocs||dayOffset>=31)});
   if (!snapshot.metadata?.fromCache) checkAlerts();
 }
 let recoveredStatus = null;
@@ -655,9 +672,11 @@ async function refreshNews({capsule = false} = {}) {
     if(sequence===refreshSequence){refreshingNews=false;if(!capsule)renderRefreshState()}
   }
 }
+let homeScrollFrame=0;
 function scrollHomeTop() {
+  cancelAnimationFrame(homeScrollFrame);document.documentElement.dataset.homeScrolling='true';
   const from=scrollY,start=performance.now();const reduced=matchMedia('(prefers-reduced-motion:reduce)').matches;
-  const tick=now=>{const p=Math.min(1,(now-start)/(reduced?100:350));scrollTo(0,from*Math.pow(1-p,3));if(p<1)requestAnimationFrame(tick)};requestAnimationFrame(tick);
+  const tick=now=>{const p=Math.min(1,(now-start)/(reduced?100:350));scrollTo(0,from*Math.pow(1-p,3));if(p<1)homeScrollFrame=requestAnimationFrame(tick);else{homeScrollFrame=0;delete document.documentElement.dataset.homeScrolling}};homeScrollFrame=requestAnimationFrame(tick);
 }
 $('home-top').onclick = scrollHomeTop;
 const pullController=attachPullRefresh({
@@ -692,6 +711,7 @@ async function boot() {
     const app = initializeApp(c);
     let db; try { db = fs.initializeFirestore(app, { localCache: fs.persistentLocalCache() }) } catch (e) { db = fs.getFirestore(app) }
     fb = { app, fs, db };
+    loadFeedDays();
     // Live listeners incur reads when feed/status documents change.
     fs.onSnapshot(fs.doc(db, "meta/feed"), snap => {
       if (!snap.metadata.fromCache) clearTimeout(timer);
@@ -711,11 +731,11 @@ function applyAppUpdate() {
   reloading=true;location.reload();
 }
 navigator.serviceWorker?.addEventListener('message',event=>{
-  if(event.data?.type==='open'&&event.data.id){notificationOpen={id:String(event.data.id),at:Date.now()};deepId=notificationOpen.id;const opened=openDeepLink();event.ports?.[0]?.postMessage({opened:true});if(!opened&&fb)refreshNews()}
+  if(event.data?.type==='open'&&event.data.id){notificationOpen={id:String(event.data.id),at:Date.now()};deepId=notificationOpen.id;const opened=openDeepLink();event.ports?.[0]?.postMessage({opened:true});if(!opened&&fb)refreshNews().then(()=>{if(deepId)reloadFeedDays()})}
   if(event.data?.type==='app-release'&&event.data.release&&event.data.release!==document.documentElement.dataset.release){updatePending=event.data.release;applyAppUpdate()}
 });
 watchAppResume({
-  onReturn:()=>{const target=notificationOpen&&Date.now()-notificationOpen.at<10000?notificationOpen.id:null;pullController.reset();refreshSequence++;refreshingNews=false;capsuleRefresh=false;deferredFeed=null;cat='all';pageScroll.home=0;navigate('home');window.scrollTo(0,0);if(target){deepId=target;openDeepLink()}if(fb)refreshNews();else refreshOnBoot=true;refreshToken();syncSubscription()},
+  onReturn:()=>{const target=notificationOpen&&Date.now()-notificationOpen.at<10000?notificationOpen.id:null;pullController.reset();refreshSequence++;refreshingNews=false;capsuleRefresh=false;deferredFeed=null;cat='all';pageScroll.home=0;navigate('home');window.scrollTo(0,0);if(target){deepId=target;openDeepLink()}if(fb)refreshNews().then(()=>{if(deepId)reloadFeedDays()});else refreshOnBoot=true;refreshToken();syncSubscription()},
   onOpen:()=>{openingUntil=Date.now()+15000;applyAppUpdate();getSw().then(reg=>{reg?.active?.postMessage({type:'get-release'});return reg?.update()}).catch(()=>{});syncSubscription()}
 });
 setInterval(render,60000);

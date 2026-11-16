@@ -31,7 +31,7 @@ const EMERGENCY_KW = ["미사일 발사", "탄도미사일", "공습경보", "�
 
 // hint = หมวดที่คาดไว้ของ feed นั้น (AI จะตรวจซ้ำและตัดข่าวที่ไม่เกี่ยวออก)
 // take = จำนวนข่าวบนสุดที่หยิบจาก feed นั้นต่อรอบ
-const FEEDS = [
+const SEARCH_FEEDS = [
   { id: "gn_korwar",    hint: "korwar",    take: 15, korwar: true, url: gn("북한 미사일 OR 북한 도발 OR 합참 OR 군사분계선 OR 남북 군사 OR 공습경보") },
   { id: "gn_war",       hint: "war",       take: 12, url: gn("전쟁 OR 공습 OR 교전 OR 휴전 OR 무력 충돌") },
   { id: "gn_disease",   hint: "disease",   take: 15, url: gn("감염병 OR 전염병 OR 바이러스 확산 OR 질병관리청 OR 유행 주의보") },
@@ -61,8 +61,19 @@ const FEEDS = [
   { id: "sbs_economy",  source: "SBS",        keywordOnly: true, take: 30, url: "https://news.sbs.co.kr/news/SectionRssFeed.do?sectionId=02&plink=RSSREADER" },
   { id: "donga",        source: "동아일보",   keywordOnly: true, take: 40, url: "https://rss.donga.com/total.xml" },
   // Every selected newsroom is searched, including its English reports.
-  ...PUBLISHERS.map((p,i)=>({id:'publisher_'+i,source:p.name,hint:'hot',take:8,
-    url:'https://news.google.com/rss/search?q='+encodeURIComponent('('+p.domains.map(d=>'site:'+d).join(' OR ')+') when:1d')+'&hl=en&gl=KR&ceid=KR:en'}))
+
 ];
+
+// Four topic groups + four publisher groups + six direct feeds leave room for
+// emergency rechecks inside the twenty-request run budget.
+const topicFeeds=SEARCH_FEEDS.filter(f=>f.id.startsWith('gn_'));
+const groupIds=['gn_korwar','gn_war','gn_disease','gn_thai'];
+const FEEDS=[...groupIds.map((id,i)=>{
+  const group=topicFeeds.filter((_,index)=>index%4===i);
+  const terms=group.map(f=>new URL(f.url).searchParams.get('q').replace(' ('+sites+') when:1d',''));
+  return {id,hint:'hot',take:60,korwar:i===0,url:gn(terms.join(' OR '))};
+}),...SEARCH_FEEDS.filter(f=>!f.id.startsWith('gn_')),
+...Array.from({length:4},(_,i)=>({id:'publisher_group_'+i,hint:'hot',take:50,
+url:'https://news.google.com/rss/search?q='+encodeURIComponent('('+PUBLISHERS.slice(i*6,i*6+6).flatMap(p=>p.domains).map(d=>'site:'+d).join(' OR ')+') when:1d')+'&hl=en&gl=KR&ceid=KR:en'}))];
 
 module.exports = { CATS, FEEDS, CAT_KEYS: Object.keys(CATS), EMERGENCY_KW };

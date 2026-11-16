@@ -13,7 +13,7 @@ const sdk={
  export const persistentLocalCache=()=>({}),initializeFirestore=()=>({}),getFirestore=()=>({}),doc=(d,...p)=>p.join('/');
  const snapshot=ref=>({exists:()=>true,data:()=>ref==='meta/feed'?{items:items.map((item,i)=>({...item,title:window.__reverseKeys?{en:item.title.en,th:item.title.th+(window.__changed&&i===0?' ใหม่':'')}:{...item.title,th:item.title.th+(window.__changed&&i===0?' ใหม่':'')},summary:window.__reverseKeys?{en:item.summary.en,th:item.summary.th}:item.summary}))}:{lastRun:new Date().toISOString()},metadata:{fromCache:false}});
  export function onSnapshot(ref,ok){setTimeout(()=>ok(snapshot(ref)),0);return()=>{}}
- export async function getDocFromServer(ref){window.__reads=(window.__reads||0)+1;if(ref==='meta/feed'&&window.__hold)await new Promise(resolve=>window.__release=resolve);if(ref==='meta/status'&&window.__holdStatus)await new Promise(resolve=>window.__releaseStatus=resolve);if(ref==='meta/feed'&&window.__fail)throw Error('fixture offline');return snapshot(ref);}`
+ export async function getDocFromServer(ref){window.__pendingReads=(window.__pendingReads||0)+1;try{window.__reads=(window.__reads||0)+1;if(ref==='meta/feed'&&window.__hold)await new Promise(resolve=>window.__release=resolve);if(ref==='meta/status'&&window.__holdStatus)await new Promise(resolve=>window.__releaseStatus=resolve);if(ref==='meta/feed'&&window.__fail)throw Error('fixture offline');return snapshot(ref);}finally{window.__pendingReads--}}`
 };
 const server=http.createServer((req,res)=>{const p=new URL(req.url,'http://localhost').pathname;const file=path.resolve(root,'.'+(p==='/'?'/index.html':p));if(!file.startsWith(root+path.sep)){res.writeHead(400);return res.end();}fs.readFile(file,(e,data)=>{res.writeHead(e?404:200,{'content-type':({'.js':'text/javascript','.html':'text/html','.css':'text/css','.png':'image/png'})[path.extname(file)]||'text/plain'});res.end(e?'missing':data);});});
 async function touch(page,type,x,y,count=1){await page.evaluate(({type,x,y,count})=>{const target=document.querySelector('main');const touches=Array.from({length:count},(_,i)=>new Touch({identifier:i+1,target,clientX:x+i*20,clientY:y}));target.dispatchEvent(new TouchEvent(type,{bubbles:true,cancelable:true,touches:type==='touchend'||type==='touchcancel'?[]:touches,changedTouches:touches}));},{type,x,y,count});}
@@ -31,8 +31,9 @@ async function touch(page,type,x,y,count=1){await page.evaluate(({type,x,y,count
    assert.equal(await page.locator('#grid .card').count(),stories.length-1,'All includes only stories with a validated current category');
    assert.equal(await page.locator('#grid [data-id=legacy]').count(),0,'retired unscoped categories cannot bypass publication checks');
    for(const key of Object.keys(labels)){await page.locator('#tiles [data-cat="'+key+'"]').evaluate(el=>el.click());assert(await page.locator('#grid .card').count()>0,key+' is selectable')}
-   await page.locator('[data-cat=all]').evaluate(el=>el.click());await page.evaluate(()=>scrollTo(0,700));await page.waitForFunction(()=>scrollY>500);await page.locator('#home-top').click();await page.waitForFunction(()=>scrollY<1);assert.equal(await page.evaluate(()=>scrollY),0);
-   await page.evaluate(()=>scrollTo(0,500));await page.locator('#home-top').focus();await page.keyboard.press('Enter');await page.waitForFunction(()=>scrollY<1);
+   await page.locator('[data-cat=all]').evaluate(el=>el.click());await page.evaluate(()=>scrollTo(0,700));await page.waitForFunction(()=>scrollY>500);await page.locator('#home-top').click();await page.waitForFunction(()=>scrollY===0&&!document.documentElement.dataset.homeScrolling);assert.equal(await page.evaluate(()=>scrollY),0);
+   await page.evaluate(()=>scrollTo(0,500));await page.locator('#home-top').focus();await page.keyboard.press('Enter');await page.waitForFunction(()=>scrollY===0&&!document.documentElement.dataset.homeScrolling);
+   await page.waitForFunction(()=>!(window.__pendingReads||0));await page.evaluate(()=>window.__reads=0);
    const baseline=await page.evaluate(()=>({header:document.querySelector('#home-header').getBoundingClientRect().y,title:document.querySelector('#t-bk').getBoundingClientRect().y}));
    const closed=()=>page.waitForFunction(()=>document.getElementById('pull-space').hidden&&document.getElementById('pull-refresh').dataset.phase==='idle');
    const pull=async dy=>{await touch(page,'touchstart',170,180);await touch(page,'touchmove',170,180+dy)};
@@ -42,7 +43,7 @@ async function touch(page,type,x,y,count=1){await page.evaluate(({type,x,y,count
    assert.equal(during.header,baseline.header);assert.equal(during.height,22);assert(Math.abs(during.title-baseline.title-during.height)<1);
    await touch(page,'touchend',170,220);await closed();assert.equal(await reads(),0);
    await touch(page,'touchstart',170,180);await touch(page,'touchmove',250,190);await touch(page,'touchmove',250,400);await touch(page,'touchend',250,400);await closed();assert.equal(await reads(),0,'horizontal swipe cannot refresh');
-   await page.evaluate(()=>scrollTo(0,400));await page.waitForFunction(()=>scrollY>=399);await pull(160);await touch(page,'touchend',170,340);assert.equal(await reads(),0,'only start at the top');await page.locator('#home-top').click();await page.waitForFunction(()=>scrollY<1);
+   await page.evaluate(()=>scrollTo(0,400));await page.waitForFunction(()=>scrollY>=399);await page.waitForFunction(()=>!(window.__pendingReads||0));const beforeScrollPull=await reads();await pull(160);await touch(page,'touchend',170,340);assert.equal(await reads(),beforeScrollPull,'only start at the top');await page.locator('#home-top').click();await page.waitForFunction(()=>scrollY===0&&!document.documentElement.dataset.homeScrolling);
    await page.locator('#settings').click();assert.equal(await page.locator('input[name="pc"]').count(),12);assert(await page.locator('input[name="pc"][value="foreign"]').isChecked());assert(await page.locator('input[name="pc"][value="hot"]').isChecked());await pull(160);await touch(page,'touchend',170,340);assert.equal(await reads(),0);await page.locator('#nav-home').click();
    await pull(160);assert.equal(await page.locator('#pull-refresh').getAttribute('data-phase'),'ready');await page.waitForTimeout(500);assert.equal(await page.locator('#pull-refresh').getAttribute('data-phase'),'ready','ready stays while holding');await touch(page,'touchmove',170,220);assert.equal(await page.locator('#pull-refresh').getAttribute('data-phase'),'pulling');await touch(page,'touchend',170,220);await closed();assert.equal(await reads(),0);
    await page.evaluate(()=>{window.__hold=true;window.__reverseKeys=true});await pull(160);assert.equal(await page.locator('.pull-ring').getAttribute('aria-valuenow'),'100');assert.equal(await reads(),0);
@@ -59,6 +60,37 @@ async function touch(page,type,x,y,count=1){await page.evaluate(({type,x,y,count
    await page.waitForFunction(()=>window.__reads===12);await closed();assert.equal(await page.locator('body').getAttribute('data-view'),'home');
    await page.evaluate(()=>window.__oldRelease());await pull(160);await touch(page,'touchend',170,340);await page.waitForFunction(()=>window.__reads===14);await closed();assert.deepEqual(errors,[]);
    console.log(`Ring refresh ${viewport.width}: fixed header, resistance, hold/release, one request, one turn before applying feed, failure, native touch and Reduce Motion passed`);
+  }finally{await context.close()}
+ }
+ // Day pagination uses all split parts and continues from the cached query adapter offline.
+ {
+  const now=Date.now(),records=Array.from({length:900},(_,i)=>({...stories[3],id:'day'+i,title:{th:'ข่าวทดสอบเทคโนโลยี '+i,en:'Technology '+i},publishedAt:new Date(now-(i%30)*86400000).toISOString(),body:{th:['ข่าวภาษาไทย '.repeat(650)],en:['News body '.repeat(200)],ko:['한국어 기사 '.repeat(200)]}}));
+  records.push({...records[0],id:'cutoff-day',publishedAt:new Date(now-30*86400000+600000).toISOString()});
+  const days=[...require('../lib/storage').dayDocuments(records)].map(([id,data])=>({id,...data}));
+  assert(days.length>30,'fixture includes day document split parts');
+  const pagedSdk=`const days=${JSON.stringify(days)},latest=${JSON.stringify([...records].sort((a,b)=>b.publishedAt.localeCompare(a.publishedAt)).slice(0,60))};
+   export const persistentLocalCache=()=>({}),initializeFirestore=()=>({}),getFirestore=()=>({}),doc=(db,...p)=>p.join('/'),collection=(db,name)=>name,where=(key,op,value)=>({key,op,value}),query=(ref,...filters)=>({ref,filters});
+   export async function getDocs(q){window.__dayQueries=(window.__dayQueries||0)+1;return {docs:days.filter(d=>q.filters.every(f=>f.op==='>='?d[f.key]>=f.value:d[f.key]<=f.value)).map(d=>({data:()=>d}))}};
+   export function onSnapshot(ref,ok){setTimeout(()=>ok({exists:()=>true,data:()=>ref==='meta/feed'?{items:latest}:{},metadata:{fromCache:false}}),0);return()=>{}}`;
+  const context=await browser.newContext({viewport:{width:390,height:844},serviceWorkers:'block'});
+  await context.route('**/vendor/firebase/**',route=>route.fulfill({contentType:'text/javascript',body:route.request().url().endsWith('firebase-firestore.js')?pagedSdk:sdk[route.request().url().split('/').pop()]||''}));
+  const page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
+  try {
+   await page.goto('http://127.0.0.1:8808');await page.waitForFunction(()=>window.__dayQueries===1&&document.querySelectorAll('#grid .card').length===90);
+   await context.setOffline(true);
+   for(let group=2;group<=10;group++){
+    await page.evaluate(()=>scrollTo(0,document.documentElement.scrollHeight));
+    await page.waitForFunction(count=>window.__dayQueries===count,group);
+    await page.waitForFunction(count=>document.querySelectorAll('#grid .card').length>=count,group*90);
+   }
+   assert.equal(await page.locator('#grid .card').count(),900);
+   await page.evaluate(()=>scrollTo(0,document.documentElement.scrollHeight));
+   await page.waitForFunction(()=>window.__dayQueries===11&&document.querySelectorAll('#grid .card').length===901);
+   assert.equal(await page.locator('#grid [data-id=cutoff-day]').count(),1,'partial cutoff day remains within the 30-day age window');assert.deepEqual(errors,[]);
+   await context.setOffline(false);await page.goto('http://127.0.0.1:8808/?id=day3');await page.waitForSelector('#article-title');
+   assert.equal(await page.locator('#article-title').textContent(),records[3].title.th,'a notification outside the latest index waits for its history page');
+   assert((await page.evaluate(()=>window.__dayQueries))>=2);
+   console.log('Feed day UI: newest three days first, all split parts, 900 stories over 30 days via scroll, cached adapter works offline');
   }finally{await context.close()}
  }
  // Regression: the real backend has 184 translated items while the client showed zero.

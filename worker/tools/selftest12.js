@@ -8,7 +8,7 @@ const now = Date.now();
 function fakeDb() {
   const data = new Map();
   const ref = p => ({ path: p, id: p.split("/").pop(), async get() { const d = data.get(p); return { exists: !!d, data: () => JSON.parse(JSON.stringify(d)) } }, async set(v) { data.set(p, JSON.parse(JSON.stringify(v))) }, async update(v) { data.set(p, { ...data.get(p), ...v }) }, async delete() { data.delete(p) } });
-  return { data, doc: ref, collection: () => ({ where() { return this }, limit() { return this }, async get() { return { empty: true, docs: [] } } }) };
+  return { data, doc: ref, collection: col => ({ where() { return this }, limit() { return this }, async get() { const docs=[...data].filter(([p])=>p.startsWith(col+"/")).map(([p,v])=>({id:p.split("/").at(-1),ref:ref(p),data:()=>v}));return {empty:!docs.length,docs} } }) };
 }
 const KO = ["김여정, 바이낸스 사태에 미국의 상투적 도발", "합참 북한 서해 포병 사격 포착", "북한 순항미사일 서해상 발사", "남북 군사회담 제안 거부", "북한군 군사분계선 침범 경고사격", "통일부 대북 전단 살포 군사 긴장 자제 요청", "북한 정찰위성 발사 준비 동향", "연평도 주민 대피 훈련 실시"];
 const kw = (k, x = {}) => ({ id: "kw" + k, titleKo: KO[k], title: { ko: KO[k] }, summary: { ko: "x" }, body: {}, categories: ["korwar"], level: "normal", translated: false, attempts: 0, publishedAt: new Date(now - (k === 0 ? 7 : 1) * 3600e3 - k * 60e3).toISOString(), addedAt: new Date(now - 7 * 3600e3).toISOString(), source: "한겨레", sourceUrl: "https://www.hani.co.kr/" + k, links: [], ...x });

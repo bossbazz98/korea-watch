@@ -71,9 +71,9 @@ const okItem = (x, by) => ({ i: x.i, relevant: true, categories: x.guessedCatego
   ] });
   db.data.set("subscribers/a", { token: "tokA", subscriptionVersion: 2, enabled: true, level: "critical", cats: ["korwar"], testRequested: false });
   let pollCount = 0;
-  const feedFor = { gn_labor: () => rss([{ t: "최저임금 1만1천원 확정", s: "SBS", l: "https://news.sbs.co.kr/2", h: 1 }]),                // ข่าวซ้ำกับ exist1
+  const feedFor = { gn_thai: () => rss([{ t: "최저임금 1만1천원 확정", s: "SBS", l: "https://news.sbs.co.kr/2", h: 1 }]),                // ข่าวซ้ำกับ exist1
                     gn_korwar: () => rss([{ t: "북한, 동해상으로 탄도미사일 발사", l: "https://news.sbs.co.kr/kw-today", h: 0.2 }]), // ซ้ำหัวข้อกับเมื่อวาน แต่ห่าง 20 ชม. → ข่าวใหม่
-                    gn_oil_fx: () => rss([{ t: "국제유가 급등 휘발유 2천원 돌파", l: "https://www.khan.co.kr/oil", h: 0.5 }]),
+                    gn_disease: () => rss([{ t: "국제유가 급등 휘발유 2천원 돌파", l: "https://www.khan.co.kr/oil", h: 0.5 }]),
                     yna: () => pollCount++ >= 1 ? rss([{ t: "합참 \"북한, 서해 군사분계선 인근 한국 연평도 포격\"", l: "https://www.yna.co.kr/kw-late", h: 0 }]) : rss([]) };
   const pushes = [], feedWritesBeforeEnd = [];
   const fetchImpl = async (url, opt) => {
@@ -124,7 +124,7 @@ const okItem = (x, by) => ({ i: x.i, relevant: true, categories: x.guessedCatego
   const full = { tokens: 175000, requests: 10 };
   db2.data.set("meta/quota", { day: kstDay(now), used: { "groq:openai/gpt-oss-120b": full, "groq:openai/gpt-oss-20b": full, "groq:qwen/qwen3-32b": { tokens: 445000, requests: 10 } }, exhausted: {}, emergencyUsed: 0 });
   db2.data.set("meta/feed", { v: 8, items: [] });
-  const feed2 = { gn_korwar: () => rss([{ t: "북한 장사정포 한국 연평도 포격", l: "https://www.yna.co.kr/kw", h: 0.1 }]), gn_oil_fx: () => rss([{ t: "휘발유 가격 하락세 지속", l: "https://www.yna.co.kr/oil", h: 0.1 }]) };
+  const feed2 = { gn_korwar: () => rss([{ t: "북한 장사정포 한국 연평도 포격", l: "https://www.yna.co.kr/kw", h: 0.1 }]), gn_disease: () => rss([{ t: "휘발유 가격 하락세 지속", l: "https://www.yna.co.kr/oil", h: 0.1 }]) };
   const f2 = async (url, opt) => { const f = FEEDS.find(x => x.url === url); if (f) return { ok: true, text: async () => (feed2[f.id] ? feed2[f.id]() : "<rss><channel></channel></rss>") }; return fetchImpl(url, opt) };
   const st2 = await runOnce({ db: db2, messaging, appUrl: "https://x", groqKey: "g", fetchImpl: f2, now, log, waitMs: 0, budgetMs: 31000, imgBudgetMs: 2000, watchEveryMs: 60000 });
   const fd2 = allItems(db2.data);

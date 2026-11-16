@@ -1,6 +1,8 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    match /feedDays/{id} { allow read: if true; allow write: if false; }
+    match /pending/{id} { allow read, write: if false; }
     match /meta/feed { allow read: if true; allow write: if false; }
     match /meta/status { allow read: if true; allow write: if false; }
     function owner(id) { return request.auth != null && request.auth.uid == id; }

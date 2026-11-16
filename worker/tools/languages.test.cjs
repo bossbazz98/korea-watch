@@ -33,7 +33,8 @@ test('repair fills missing editions without changing existing translations, rank
 });
 test('worker repairs an already published story without treating it as a new publication or notifying again',async()=>{
  const db=database(),old=story();old.title={th:editions.title.th};old.summary={th:editions.summary.th};old.body={th:editions.body.th};
- db.data.set('meta/feed',{items:[old]});let calls=0,sent=0;
+ db.data.set('meta/feed',{v:10,items:[old]});
+ db.data.set('meta/pending',{items:[{...story(),id:'cooling',titleKo:'한국 AI 로봇 신제품',translated:false,attempts:4,lastTry:Date.now()}]});let calls=0,sent=0;
  const opts=aiOptions(()=>{calls++;return{i:0,...editions}});
  const fetchImpl=async(url,opt)=>url.includes('models.github.ai')?opts.fetchImpl(url,opt):{ok:true,status:200,text:async()=>'<rss><channel></channel></rss>',arrayBuffer:async()=>Buffer.from('')};
  const stat=await runOnce({db,messaging:{sendEachForMulticast:async()=>{sent++;throw Error('must not notify')}},appUrl:'https://example.com',githubToken:'fixture',githubModels:['fixture'],log:quiet,waitMs:0,fetchImpl,budgetMs:60000,watchEveryMs:600000});

@@ -1,5 +1,18 @@
 # Korea Watch — รุ่นปรับปรุงสำหรับ iMac
 
+## 30-day storage rollout (2026-11-17)
+
+These are operator instructions only; this change has not been deployed.
+
+1. Use Node 24. Stop scheduled workers during the one-time rollout so two worker versions cannot overwrite each other's storage.
+2. From `worker`, run `npm ci`, `npm run build:web`, `npm test`, and `npm run test:rules` (JDK 21).
+3. Deploy Firestore rules **before** publishing the new client: from the repository root, `worker/node_modules/.bin/firebase deploy --project korea-watch01 --only firestore:rules`. The new rules allow public read-only `feedDays` and deny all client access to `pending`.
+4. With the existing external Admin credential configuration, run `cd worker && npm run migrate:feed-days`. It copies all legacy feed/backlog records, including old records, without applying expiry during migration. It is safe to retry; existing new records win. The completion marker is `meta/feedDaysMigration`. Verify copied IDs/counts before resuming the worker. Migration never restores news already discarded by the old size cap.
+5. Publish the built client using the existing Hosting procedure, then resume the updated worker. The worker also migrates automatically if migration is unfinished. Its normal retention pass removes records older than 30 days. Keep the legacy `meta/feed` latest index for cached clients.
+
+The migration uses existing Firebase configuration and credentials; do not put credentials in this repository. English/Korean editions arrive after Thai publication and fall back to Thai while incomplete. `meta/status` reports translated/localized counts, feed errors and host backoff deadlines.
+
+
 รุ่นปรับความหนา Kanit: ดู [ขั้นตอนอัปเดตล่าสุด](docs/kanit-font-weights-update.md) ซึ่ง deploy เฉพาะ Hosting รวมงานแหล่งข่าวและหมวดข่าวจาก main ล่าสุดไว้แล้ว
 
 รายละเอียดหมวดข่าว ฟอนต์ และเลนส์แถบเมนู: ดู [คู่มือหมวดข่าวและเลนส์](docs/topic-pills-and-lens-update.md)
@@ -160,15 +173,16 @@ GitHub Actions ที่มีอยู่ยังใช้ Secrets เดิ�
 
 ## โครงสร้างข้อมูลรุ่นนี้
 
-- `meta/feed`: ข่าวที่เผยแพร่แล้ว และข่าวสงครามเกาหลีที่ให้ขึ้นก่อนแปลเต็ม
-- `meta/pending`: ข่าวทั่วไปที่รอแปล อ่านได้เฉพาะ Admin SDK
+- `feedDays/{YYYY-MM-DD[_part]}`: published history, partitioned by KST date below 800 KB per document
+- `meta/feed`: latest public compatibility index, at most 60 items and 700 KB
+- `pending/{id}`: private translation backlog, Admin SDK only; legacy `meta/pending` is emptied after migration
 - `meta/seen`, `meta/quota`: สถานะภายใน
 - `fixJobs/{id}`: งานแก้ข้อมูลจาก agent ลบหลังบันทึกข่าวสำเร็จเท่านั้น
 - `notificationEvents/{newsId}`: งานแจ้งเตือนที่บันทึกใน batch เดียวกับข่าว
 - `notificationJobs/{id}`: ผู้รับที่รอส่งซ้ำและใบรับผลสำเร็จ อายุประมาณ 6 ชั่วโมง
 - `subscribers/{uid}` และ `pushlog/{uid}`: ข้อมูลของเจ้าของ Anonymous Auth UID
 
-Feed กับ pending มีขีดจำกัดขนาดทุกครั้งที่บันทึก ไม่ได้สัญญาว่าจะเก็บข่าวครบ 30 วันเสมอ จำนวนรวมสูงสุด 250 ข่าวและขนาดเอกสารอาจทำให้ข่าวเก่าหลุดก่อน
+Published history is retained by age for 30 days. Document size limits create additional day parts and never evict older news. Only the compatibility index is truncated.
 
 ## ข้อจำกัดที่ควรรู้
 
@@ -177,7 +191,7 @@ Feed กับ pending มีขีดจำกัดขนาดทุกคร
 - โควตา AI เป็นเพดานประมาณการภายใน ไม่ใช่ยอดคงเหลือทางการ ควรปรับตามบัญชีจริง `AI_QUOTA_TIMEZONE` ต้องตรงนโยบาย reset ที่เลือกใช้
 - AI ยังอาจแปลผิด/จัดระดับความด่วนผิด การรวมข่าวคล้ายยังเป็น heuristic แม้เพิ่มการกันตัวเลขที่ต่างกันแล้ว ควรตรวจแหล่งข่าวต้นฉบับ โดยเฉพาะข่าวฉุกเฉิน
 - เว็บรวม Firebase SDK ไว้ใน offline shell แล้ว แต่ push และการโหลดข่าวใหม่ต้องมีเครือข่าย การเปิดแบบออฟไลน์ต้องเคยโหลดและติดตั้ง service worker สำเร็จก่อน
-- รายละเอียดข่าวยังอยู่ใน feed เดียว เหมาะกับระบบขนาดเล็ก หากผู้ใช้/ข่าวเพิ่มมาก ให้แยก feed ย่อกับรายละเอียดรายบทความ และวัด read/write/bandwidth ก่อนปรับสถาปัตยกรรม
+- History is loaded in three-day ranges. Offline access covers previously cached documents; monitor Firestore read/write/bandwidth usage as traffic grows.
 - ยังไม่ได้ทดสอบ credentials จริง, production push หรือการใช้งานบน iMac เครื่องของคุณในคลาวด์นี้
 
 ดู `TEST-REPORT.md` สำหรับผลทดสอบและรายการที่ยังต้องยืนยัน

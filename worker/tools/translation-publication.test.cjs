@@ -65,3 +65,10 @@ test('minute-quota cooldown allows another model now and the original model afte
  now+=3001;await translate([input[0]],opts);
  assert.equal(calls.at(-1),'limited');
 });
+test('main publication request asks for Thai only and succeeds without English or Korean',async()=>{
+ let system='';const opts=options([[{...result(0),title:{th:'ข่าวภาษาไทย'},summary:{th:'สรุปภาษาไทย'}}]]);
+ const fetchImpl=opts.fetchImpl;opts.fetchImpl=async(url,request)=>{system=JSON.parse(request.body).messages[0].content;return fetchImpl(url,request)};
+ const item=(await translate([input[0]],opts)).results[0];
+ assert.match(system,/Produce Thai only/);assert(!system.includes('"body_en"'));assert(require('../../public/news-text').completeThai(item));
+ assert.deepEqual(require('../../public/news-text').missingLanguages(item),['en','ko']);
+});

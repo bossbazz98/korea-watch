@@ -8,7 +8,7 @@ const {syncIssue}=require('../agent');
 function dbFake() {
  const data=new Map(); let failCommit=false;
  const doc=p=>({path:p,id:p.split('/').pop(),async get(){return{exists:data.has(p),data:()=>structuredClone(data.get(p))}},async set(v){data.set(p,structuredClone(v))},async delete(){data.delete(p)},async update(v){data.set(p,{...data.get(p),...v})}});
- return {data,doc,set failCommit(v){failCommit=v},batch(){const writes=[];return{set(r,v){writes.push([r.path,v])},async commit(){if(failCommit)throw Error('storage unavailable');for(const[p,v]of writes)data.set(p,structuredClone(v))}}},collection(col){const filters=[];return{where(k,op,v){filters.push([k,v]);return this},limit(){return this},async get(){const docs=[...data].filter(([p,v])=>p.startsWith(col+'/')&&filters.every(([k,x])=>v[k]===x)).map(([p])=>({id:p.split('/').pop(),ref:doc(p),data:()=>structuredClone(data.get(p))}));return{docs,empty:!docs.length}}}}};
+ return {data,doc,set failCommit(v){failCommit=v},batch(){const writes=[];return{set(r,v){writes.push([r.path,v])},delete(r){writes.push([r.path,null])},async commit(){if(failCommit)throw Error('storage unavailable');for(const[p,v]of writes)if(v===null)data.delete(p);else data.set(p,structuredClone(v))}}},collection(col){const filters=[];return{where(k,op,v){filters.push([k,v]);return this},limit(){return this},async get(){const docs=[...data].filter(([p,v])=>p.startsWith(col+'/')&&filters.every(([k,x])=>v[k]===x)).map(([p])=>({id:p.split('/').pop(),ref:doc(p),data:()=>structuredClone(data.get(p))}));return{docs,empty:!docs.length}}}}};
 }
 const story=(id,translated=true)=>({id,titleKo:'국제 유가 상승 '+id,sourceUrl:'https://www.yna.co.kr/'+id,title:{th:'ข่าว '+id},summary:{th:'สรุป'},body:{th:['เนื้อหา']},categories:['oil'],level:'high',translated,publishedAt:new Date().toISOString()});
 const log={warn(){},log(){}};
@@ -33,7 +33,8 @@ test('public feed excludes pending; every save bounds document bytes',async()=>{
  const db=dbFake(),items=[story('published'),story('private',false),...Array.from({length:30},(_,i)=>({...story('large'+i),body:{th:['ก'.repeat(20000)]}}))];
  await persist(db,items,{v:8},{a:1},{used:{}});
  assert(!db.data.get('meta/feed').items.some(i=>i.id==='private'));
- assert(db.data.get('meta/pending').items.some(i=>i.id==='private'));
+ assert(db.data.has('pending/private'));
+ assert.equal([...db.data].filter(([p])=>p.startsWith('feedDays/')).flatMap(([,d])=>d.items).length,31);
  assert(Buffer.byteLength(JSON.stringify(db.data.get('meta/feed')))<850000);
  assert(prepare(items,10000).published.length<items.length);
 });
@@ -133,8 +134,8 @@ test('legacy Thai headline with Korean body is requeued and repaired without a d
  const old={...story('legacy'),title:{th:'หัวข้อแปลแล้ว'},summary:{th:'한국어 요약 뉴스'},body:{th:['한국어 기사 본문']},titleKo:'국제 유가 상승',sourceUrl:'https://www.yna.co.kr/legacy',source:'Fixture',links:[]};
  db.data.set('meta/feed',{v:8,items:[old]});
  await runOnce({db,messaging:{},appUrl:'https://example.test',fetchImpl:translatedNewsFetch(),log,now,budgetMs:1000,imgBudgetMs:0});
- assert.equal(db.data.get('meta/pending').items[0].translated,false);
- assert.equal(db.data.get('meta/pending').items[0].retranslation,true);
+ assert.equal(db.data.get('pending/'+old.id).translated,false);
+ assert.equal(db.data.get('pending/'+old.id).retranslation,true);
  let sent=0;
  await runOnce({db,messaging:{async sendEachForMulticast(){sent++;return {successCount:0,responses:[]}}},appUrl:'https://example.test',groqKey:'fixture',fetchImpl:translatedNewsFetch(),log,now,budgetMs:60000,imgBudgetMs:2000,waitMs:0});
  assert(require('../../public/news-text').completeThai(db.data.get('meta/feed').items[0]));assert.equal(sent,0);
@@ -157,7 +158,7 @@ test('nonincident Korean backlog cannot spend the fast lane before tech/foreign 
  const stat=await runOnce({db,messaging:{},appUrl:'https://example.test',groqKey:'fixture',fetchImpl,log,now,budgetMs:60000,imgBudgetMs:2000,waitMs:0});
  assert.equal(stat.korwar,0);
  assert(!requests.some(r=>r.titles),'general Korean news does not consume separate title requests');
- assert.deepEqual(new Set(requests[0].input.flatMap(i=>i.guessedCategories)),new Set(['tech','foreign']));
+ assert.deepEqual(new Set(requests[0].input.slice(0,2).flatMap(i=>i.guessedCategories)),new Set(['tech','foreign']));
  for(const category of ['tech','foreign']) {
   assert(stat.publishedByCategory[category]>0,category);
   assert(db.data.get('meta/feed').items.some(i=>i.id===category&&i.translated&&i.categories.includes(category)),category+' really persisted publicly');
@@ -193,7 +194,7 @@ test('repeat ingestion adds verified trending coverage to an existing translated
  db.data.set('meta/seen',{ids:{[id]:now-1000}});
  const {FEEDS}=require('../feeds');
  const xml='<rss><channel>'+sources.map(([name,url])=>`<item><title>${title}</title><link>${url}/a</link><source url="${url}">${name}</source><pubDate>${date}</pubDate></item>`).join('')+'</channel></rss>';
- const fetchImpl=async url=>({ok:true,text:async()=>url===FEEDS.find(f=>f.id==='gn_top').url?xml:'<rss><channel/></rss>'});
+ const fetchImpl=async url=>({ok:true,text:async()=>url===FEEDS.find(f=>f.id==='publisher_group_0').url?xml:'<rss><channel/></rss>'});
  let pushes=0;
  const stat=await runOnce({db,messaging:{async sendEachForMulticast(){pushes++;throw Error('must not notify')}},appUrl:'https://example.test',fetchImpl,log,now,budgetMs:1000,imgBudgetMs:0});
  const saved=db.data.get('meta/feed').items;
@@ -207,7 +208,7 @@ test('an unsupported AI label remains private for review and a later valid class
  const bad=await runOnce({...opts,fetchImpl:translatedNewsFetch(r=>({...r,categories:['crypto']}))});
  assert.equal(bad.categoryReviewCount,1);
  assert.equal(db.data.get('meta/feed').items.length,0);
- const held=db.data.get('meta/pending').items[0];
+ const held=db.data.get('pending/review');
  assert.equal(held.translated,false);assert.equal(held.categoryReview.reasons.crypto,'source-scope-not-proven');
  const good=await runOnce({...opts,now:now+300000,fetchImpl:translatedNewsFetch()});
  assert.equal(good.categoryReviewCount,0);
