@@ -802,13 +802,35 @@ async function main() {
   initializeApp({ credential: cert(sa) });
   const appUrl = (process.env.APP_URL || `https://${sa.project_id}.web.app`).replace(/\/$/, "");
   const pref = (v, list) => v ? [v, ...list.filter(m => m !== v)] : list;
-  await runOnce({
+  const options = {
     db: getFirestore(), messaging: getMessaging(), appUrl,
-    forceAIProbe: process.env.GITHUB_EVENT_NAME === 'workflow_dispatch' || process.env.AI_FORCE_PROBE === '1',
     geminiKey: process.env.GEMINI_API_KEY, groqKey: process.env.GROQ_API_KEY, githubToken: process.env.GITHUB_TOKEN,
     models: pref(process.env.GEMINI_MODEL, DEFAULT_MODELS), groqModels: pref(process.env.GROQ_MODEL, GROQ_MODELS), githubModels: pref(process.env.GITHUB_MODEL, GITHUB_MODELS)
-  });
+  };
+  await loop(o => runOnce({ ...options, ...o }), { minutes: Number(process.env.LOOP_MINUTES) || 0,
+    forceFirstProbe: process.env.GITHUB_EVENT_NAME === 'workflow_dispatch' || process.env.AI_FORCE_PROBE === '1' });
+}
+
+// GitHub delays scheduled workflows by hours, so one job keeps running a round every
+// ROUND_MS (5 minutes) for LOOP_MINUTES. Without LOOP_MINUTES it runs exactly one round.
+const ROUND_MS = 5 * 60e3;
+async function loop(round, { minutes = 0, forceFirstProbe = false, wait = sleep, clock = Date.now, log = console } = {}) {
+  const start = clock(), end = start + minutes * 60e3;
+  let rounds = 0, failures = 0, lastError = null;
+  for (;;) {
+    const began = clock();
+    try { await round({ now: began, forceAIProbe: forceFirstProbe && rounds === 0 }); }
+    catch (e) { failures++; lastError = e; log.error(`round ${rounds + 1} failed:`, e.message || e); }
+    rounds++;
+    const next = began + ROUND_MS;
+    // Stop when another full round (worker budget + slack) would not finish before the job limit.
+    if (!minutes || next + CFG.TIME_BUDGET_MS + 60e3 > end) break;
+    await wait(Math.max(0, next - clock()));
+  }
+  if (rounds > 1) log.log(`loop finished: ${rounds} rounds, ${failures} failed`);
+  if (failures === rounds) throw lastError; // every round failed: surface it as a failed job
+  return { rounds, failures };
 }
 
 if (require.main === module) main().catch(e => { console.error(e); process.exit(1) });
-module.exports = { runOnce, CFG, shown, inQuiet, sendMulticast, sendNews, retryNotifications };
+module.exports = { runOnce, loop, CFG, shown, inQuiet, sendMulticast, sendNews, retryNotifications };

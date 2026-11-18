@@ -83,3 +83,10 @@ Not a promise of complete semantic deduplication, exactly-once FCM delivery, pro
 - `load()` returns copies so in-run edits cannot silently mark the cached state as already saved.
 - Google News: replaced the four very long mixed-topic queries (up to ~120 words, all hinted "hot") with eleven pairwise merges that keep each topic's category hint and stay near the query length already used in production.
 - AI Agent audits the full stored history/backlog instead of the 60-item index.
+
+## 2026-11-18 — Continuous worker, automatic deploy, visible version
+
+- GitHub delayed the 5-minute schedule to roughly 4 runs a day. The Fetch news job now loops: one worker round every 5 minutes for 340 minutes (`LOOP_MINUTES`), started hourly; the next queued run continues when one ends. A failed round no longer ends the job. Without `LOOP_MINUTES` the worker still runs exactly one round.
+- New `Deploy app` workflow: on changes to `public/`, rules or hosting config on main it deploys Firestore rules first, then Hosting, using the existing `FIREBASE_SERVICE_ACCOUNT` secret (written to a temporary file, never logged).
+- Settings shows the deployed build: `Korea Watch · <commit> · <time KST>` from `build-info.js`, stamped at deploy.
+- Fixed a time-of-day test (quiet hours fixture failed between 23:00 and 23:59 KST).

@@ -4,6 +4,7 @@ const assert = require("assert");
 const { runOnce } = require("../run");
 const log = { log() {}, warn() {} };
 const now = Date.now();
+const kstHour = new Date(now + 9 * 3600e3).getUTCHours(); // quiet window always covers the test time (was 00-23, failing 23:00-23:59 KST)
 function fakeDb() {
   const data = new Map();
   const ref = p => ({ path: p, id: p.split("/").pop(), async get() { const d = data.get(p); return { exists: !!d, data: () => JSON.parse(JSON.stringify(d)) } }, async set(v) { data.set(p, JSON.parse(JSON.stringify(v))) }, async update(v) { data.set(p, { ...data.get(p), ...v }) }, async delete() { data.delete(p) } });
@@ -25,7 +26,7 @@ const H = "a".repeat(64), H2 = "b".repeat(64), H3 = "c".repeat(64), H4 = "d".rep
   db.data.set(`subscribers/${H}`, { token: "ALL", subscriptionVersion: 2, enabled: true, level: "all", cats: ["korwar"], testRequested: true });
   db.data.set(`subscribers/${H2}`, { token: "CRIT", subscriptionVersion: 2, enabled: true, level: "critical", cats: ["korwar"], testRequested: false });
   db.data.set(`subscribers/${H3}`, { token: "BADMSG", subscriptionVersion: 2, enabled: true, level: "all", cats: ["korwar"], testRequested: false });
-  db.data.set(`subscribers/${H4}`, { token: "QUIET", subscriptionVersion: 2, enabled: true, level: "all", cats: ["korwar"], testRequested: false, quietOn: true, quietFrom: 0, quietTo: 23, quietBypass: false });
+  db.data.set(`subscribers/${H4}`, { token: "QUIET", subscriptionVersion: 2, enabled: true, level: "all", cats: ["korwar"], testRequested: false, quietOn: true, quietFrom: kstHour, quietTo: (kstHour + 2) % 24, quietBypass: false });
   const sent = [];
   const messaging = { async sendEachForMulticast(m) { sent.push(m); return { successCount: m.tokens.filter(t => t !== "BADMSG").length, responses: m.tokens.map(t => t === "BADMSG" ? { success: false, error: { code: "messaging/invalid-argument" } } : { success: true }) } } };
   const st = await runOnce({ db, messaging, appUrl: "https://app", groqKey: "g", fetchImpl: AI, now, log, waitMs: 0, budgetMs: 31000, imgBudgetMs: 2000, watchEveryMs: 60000 });
